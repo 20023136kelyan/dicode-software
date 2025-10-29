@@ -1,6 +1,7 @@
 import os
 import json
 import sys
+import re
 from datetime import datetime
 from openai import OpenAI
 
@@ -8,6 +9,41 @@ from openai import OpenAI
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.downloader import download_sora_video
 from utils.resizer import resize_image
+
+
+def parse_openai_error(error_str):
+    """
+    Parse OpenAI error message to extract user-friendly error text.
+    
+    Args:
+        error_str: Error string from OpenAI API
+    
+    Returns:
+        str: User-friendly error message
+    """
+    # Check for billing errors
+    if 'billing' in error_str.lower() or 'Billing hard limit' in error_str:
+        return 'OpenAI Billing Error: Your OpenAI account has reached its billing limit. Please add payment method or increase limits at https://platform.openai.com/account/billing'
+    
+    # Check for API key errors
+    if 'invalid_api_key' in error_str.lower() or 'incorrect api key' in error_str.lower():
+        return 'Invalid API Key: Please check your API key in backend/config.json'
+    
+    # Try to extract error message from JSON if present
+    try:
+        # Look for JSON-like structure in the error
+        json_match = re.search(r'\{.*\}', error_str)
+        if json_match:
+            error_dict = json.loads(json_match.group())
+            if isinstance(error_dict, dict):
+                error_info = error_dict.get('error', {})
+                if isinstance(error_info, dict):
+                    return error_info.get('message', error_str)
+    except:
+        pass
+    
+    # Return original error if we can't parse it
+    return error_str
 
 
 def load_api_key():
@@ -27,7 +63,7 @@ def load_api_key():
         return api_key
 
 
-def build_prompt(shot_data):
+def build_prompt(shot_data, shot_number=1, shots_data=None):
     """
     Build a comprehensive Sora prompt from user inputs.
     
@@ -38,10 +74,59 @@ def build_prompt(shot_data):
             - lighting: str
             - camera_angles: str
             - dialog: str
+        shot_number: The shot number (1, 2, or 3)
+        shots_data: List of all shot data (used to get shot 1's data as fallback for shots 2 and 3)
     
     Returns:
         str: Complete Sora prompt
     """
+    # For Remix shots (2 and 3), use explicit consistency instructions
+    if shot_number > 1:
+        # Remix prompt: maintain everything, only change dialog
+        prompt_parts = []
+        
+        # Get character - use shot_data if provided, otherwise fall back to shot 1's character
+        characters = shot_data.get("characters", "").strip()
+        if not characters and shots_data and len(shots_data) > 0:
+            characters = shots_data[0].get("characters", "").strip()
+        
+        if characters:
+            prompt_parts.append(f"The same {characters}")
+        
+        # Get environment - use shot_data if provided, otherwise fall back to shot 1's environment
+        environment = shot_data.get("environment", "").strip()
+        if not environment and shots_data and len(shots_data) > 0:
+            environment = shots_data[0].get("environment", "").strip()
+        
+        if environment:
+            prompt_parts.append(f"in the same {environment}")
+        
+        # Get lighting - use shot_data if provided, otherwise fall back to shot 1's lighting
+        lighting = shot_data.get("lighting", "").strip()
+        if not lighting and shots_data and len(shots_data) > 0:
+            lighting = shots_data[0].get("lighting", "").strip()
+        
+        if lighting:
+            prompt_parts.append(f"{lighting}")
+        
+        # Get camera angles - use shot_data if provided, otherwise fall back to shot 1's camera_angles
+        camera_angles = shot_data.get("camera_angles", "").strip()
+        if not camera_angles and shots_data and len(shots_data) > 0:
+            camera_angles = shots_data[0].get("camera_angles", "").strip()
+        
+        if camera_angles:
+            prompt_parts.append(f"{camera_angles}")
+        
+        # Add explicit maintenance instructions
+        prompt_parts.append("maintaining exact same appearance, clothing, voice, tone, and speaking style from previous shot")
+        
+        # Change only dialog and maintain background audio
+        if shot_data.get("dialog"):
+            prompt_parts.append(f"Maintain background audio and ambient sounds. Change only the dialog to: '{shot_data['dialog']}'")
+        
+        return ". ".join(prompt_parts)
+    
+    # For Shot 1, build normal prompt
     prompt_parts = []
     
     # Add character description
@@ -67,13 +152,16 @@ def build_prompt(shot_data):
     return ". ".join(prompt_parts)
 
 
-def generate_video_sequence(shots_data, reference_images=None):
+def generate_video_sequence(shots_data, reference_images=None, progress_queue=None, task_id=None, quality='1024x1792'):
     """
     Generate a video sequence with 1-3 shots using Sora API.
     
     Args:
         shots_data: List of shot configurations
         reference_images: List of uploaded image file paths
+        progress_queue: Queue to send progress updates
+        task_id: Task ID for tracking
+        quality: Video quality/resolution (default: '1024x1792')
     
     Returns:
         dict: Generation results with status and video paths
@@ -107,38 +195,48 @@ def generate_video_sequence(shots_data, reference_images=None):
         previous_video = None
         
         for i, shot_data in enumerate(shots_data, 1):
-            prompt = build_prompt(shot_data)
+            prompt = build_prompt(shot_data, shot_number=i, shots_data=shots_data)
             
             print(f"Generating Shot {i} with prompt: {prompt[:100]}...")
             
-            # Check if we have a reference image for this shot
-            reference_image = None
-            if reference_images and i <= len(reference_images):
-                reference_image = reference_images[i - 1]  # i-1 because shots are 1-indexed
+            # Send progress update for starting shot generation
+            if progress_queue:
+                progress_queue.put({
+                    'type': 'shot_start',
+                    'shot_number': i,
+                    'total_shots': len(shots_data),
+                    'message': f'Starting generation of Shot {i}...'
+                })
             
             # Build video creation parameters
             # Note: Using sora-2-pro for higher quality/resolution options
             video_params = {
                 "model": "sora-2-pro",
                 "prompt": prompt,
-                "size": "1024x1792",  # Vertical high-res (sora-2-pro only)
+                "size": quality,  # Dynamic quality based on user selection
                 "seconds": "12",  # Maximum available: 4, 8, or 12 seconds
             }
             
-            # Add reference image if available
-            if reference_image and os.path.exists(reference_image):
-                # Resize the image to match video dimensions (1024x1792)
-                # Note: resize_image returns the path, which may change (e.g., .png -> .jpg)
-                print(f"Resizing reference image to 1024x1792: {reference_image}")
-                resized_image_path = resize_image(reference_image, target_size=(1024, 1792))
-                
-                # Read the image file and pass it to the API
-                from pathlib import Path
-                video_params["input_reference"] = Path(resized_image_path)
-                print(f"Using reference image: {resized_image_path}")
-            
-            # For the first shot, create a new video
+            # For the first shot, create a new video with optional reference image
             if i == 1:
+                # Only shot 1 can use reference images (remix shots 2 and 3 don't support input_reference)
+                reference_image = None
+                if reference_images and len(reference_images) > 0:
+                    reference_image = reference_images[0]  # Shot 1 is at index 0
+                
+                # Add reference image if available for shot 1
+                if reference_image and os.path.exists(reference_image):
+                    # Parse quality string to get width and height
+                    width, height = map(int, quality.split('x'))
+                    # Resize the image to match video dimensions
+                    # Note: resize_image returns the path, which may change (e.g., .png -> .jpg)
+                    print(f"Resizing reference image to {quality}: {reference_image}")
+                    resized_image_path = resize_image(reference_image, target_size=(width, height))
+                    
+                    # Read the image file and pass it to the API
+                    from pathlib import Path
+                    video_params["input_reference"] = Path(resized_image_path)
+                    print(f"Using reference image: {resized_image_path}")
                 video = openai_client.videos.create(**video_params)
                 previous_video = video
             else:
@@ -152,8 +250,34 @@ def generate_video_sequence(shots_data, reference_images=None):
                 video = openai_client.videos.remix(**remix_params)
                 previous_video = video
             
+            # Create progress callback for this shot
+            def progress_callback(progress, status):
+                if progress_queue:
+                    progress_queue.put({
+                        'type': 'progress',
+                        'shot_number': i,
+                        'total_shots': len(shots_data),
+                        'progress': progress,
+                        'status': status,
+                        'message': f'Shot {i}: {status}... {progress:.1f}%'
+                    })
+            
             # Download and save the video
-            downloaded_video = download_sora_video(video, output_dir, f"shot_{i}")
+            downloaded_video = download_sora_video(
+                video, 
+                output_dir, 
+                f"shot_{i}",
+                progress_callback=progress_callback
+            )
+            
+            # Send progress update for completed shot
+            if progress_queue:
+                progress_queue.put({
+                    'type': 'shot_complete',
+                    'shot_number': i,
+                    'total_shots': len(shots_data),
+                    'message': f'Shot {i} completed!'
+                })
             
             results["shots"].append({
                 "shot_number": i,
@@ -166,8 +290,20 @@ def generate_video_sequence(shots_data, reference_images=None):
         
     except Exception as e:
         results["status"] = "error"
-        results["error"] = str(e)
+        error_str = str(e)
+        results["error"] = error_str
         print(f"Generation error: {e}")
+        
+        # Try to extract the actual error message from OpenAI's error response
+        error_message = parse_openai_error(error_str)
+        
+        # Send error to progress queue if it exists
+        if progress_queue:
+            progress_queue.put({
+                'type': 'error',
+                'message': error_message,
+                'full_error': error_str
+            })
     
     return results
 

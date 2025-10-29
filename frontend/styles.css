@@ -153,18 +153,19 @@ header h1 {
 
 /* Shared Settings */
 .shared-settings-card {
-    background: linear-gradient(135deg, rgba(248, 250, 252, 0.8) 0%, rgba(241, 245, 249, 0.8) 100%);
+    background: linear-gradient(135deg, rgba(239, 246, 255, 0.95) 0%, rgba(224, 242, 254, 0.95) 100%);
     backdrop-filter: blur(10px);
-    border: 1px solid rgba(226, 232, 240, 0.5);
+    border: 1px solid rgba(147, 197, 253, 0.4);
     border-radius: 18px;
     padding: 32px;
     margin-bottom: 32px;
     transition: all 0.3s ease;
+    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.15);
 }
 
 .shared-settings-card:hover {
-    border-color: rgba(102, 126, 234, 0.3);
-    box-shadow: 0 4px 20px rgba(102, 126, 234, 0.1);
+    border-color: rgba(96, 165, 250, 0.5);
+    box-shadow: 0 6px 24px rgba(59, 130, 246, 0.2);
 }
 
 .shared-settings-header {
@@ -253,19 +254,20 @@ header h1 {
 
 /* Shot Panel */
 .shot-panel {
-    background: linear-gradient(135deg, rgba(249, 250, 251, 0.8) 0%, rgba(243, 244, 246, 0.8) 100%);
+    background: linear-gradient(135deg, rgba(255, 251, 245, 0.95) 0%, rgba(254, 243, 199, 0.95) 100%);
     backdrop-filter: blur(10px);
-    border: 1px solid rgba(229, 231, 235, 0.5);
+    border: 1px solid rgba(251, 191, 36, 0.4);
     border-radius: 18px;
     padding: 28px;
     margin-bottom: 24px;
     position: relative;
     transition: all 0.3s ease;
+    box-shadow: 0 4px 16px rgba(245, 158, 11, 0.12);
 }
 
 .shot-panel:hover {
-    border-color: rgba(102, 126, 234, 0.3);
-    box-shadow: 0 4px 20px rgba(102, 126, 234, 0.08);
+    border-color: rgba(251, 191, 36, 0.6);
+    box-shadow: 0 6px 24px rgba(245, 158, 11, 0.18);
     transform: translateY(-2px);
 }
 
@@ -360,7 +362,8 @@ header h1 {
 
 .form-group textarea,
 .form-group input[type="text"],
-.form-group input[type="file"] {
+.form-group input[type="file"],
+.form-group select {
     width: 100%;
     padding: 14px 16px;
     border: 2px solid #e2e8f0;
@@ -373,7 +376,8 @@ header h1 {
 }
 
 .form-group textarea:focus,
-.form-group input[type="text"]:focus {
+.form-group input[type="text"]:focus,
+.form-group select:focus {
     outline: none;
     border-color: #667eea;
     box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);

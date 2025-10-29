@@ -10,6 +10,7 @@ def download_sora_video(
     output_folder: str,
     filename: str = None,
     extension: str = ".mp4",
+    progress_callback=None,
 ) -> Video:
     openai = OpenAI()
     progress = getattr(video, "progress", 0)
@@ -32,6 +33,11 @@ def download_sora_video(
 
         sys.stdout.write(f"\r{status_text}: [{bar}] {progress:.1f}%")
         sys.stdout.flush()
+        
+        # Call the progress callback if provided
+        if progress_callback:
+            progress_callback(progress, status_text)
+        
         time.sleep(2)
 
     sys.stdout.write("\n")

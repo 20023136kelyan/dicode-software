@@ -25,44 +25,43 @@
         <div id="generation-form" class="form-container">
             <h2>Shot Configuration</h2>
             
+            <!-- Video Quality Selection -->
+            <div class="form-group">
+                <label for="video-quality">Video Quality *</label>
+                <select id="video-quality" class="form-select" required>
+                    <option value="1024x1792" selected>High Quality (1024x1792)</option>
+                    <option value="720x1280">Standard Quality (720x1280)</option>
+                </select>
+                <p style="font-size: 0.9em; color: #666; margin-top: 8px;">All shots will be generated at this quality</p>
+            </div>
+            
             <!-- Shared Settings Section -->
             <div id="shared-settings" class="shared-settings-card">
                 <div class="shared-settings-header">
                     <h3>Shared Settings (Optional)</h3>
-                    <button id="apply-to-all-btn" class="btn-secondary">Apply to All Shots</button>
+                    <button id="toggle-shared-settings-btn" class="expand-btn" onclick="toggleSharedSettings()">
+                        <span id="shared-settings-toggle-text">Show Shared Settings</span>
+                    </button>
                 </div>
                 
-                <div class="form-group">
-                    <label for="shared-characters">Character Description</label>
-                    <textarea id="shared-characters" placeholder="Enter character description to use for all shots..."></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label for="shared-environment">Environment Description</label>
-                    <textarea id="shared-environment" placeholder="Enter environment description to use for all shots..."></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label for="shared-lighting">Lighting & Camera Angles</label>
-                    <textarea id="shared-lighting" placeholder="Enter lighting and camera setup to use for all shots..."></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label for="shared-image">Reference Image (Use with Caution)</label>
-                    <input type="file" id="shared-image" accept="image/*" onchange="previewSharedImage()">
-                    <div id="shared-image-preview" class="image-preview-container"></div>
-                    <div style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-left: 4px solid #f59e0b; padding: 16px; margin-top: 12px; border-radius: 12px; box-shadow: 0 2px 8px rgba(245, 158, 11, 0.2);">
-                        <strong style="color: #f59e0b; font-size: 1rem; display: block; margin-bottom: 8px;">⚠️ Content Moderation Warning</strong>
-                        <p style="margin: 8px 0 0 0; font-size: 0.9em; color: #78350f; line-height: 1.6;">
-                            Reference images frequently trigger OpenAI's content moderation.
-                            <strong>Only use if necessary.</strong> Test prompts without images first.
-                        </p>
-                        <p style="margin: 10px 0 0 0; font-size: 0.9em; color: #dc2626; font-weight: 600;">
-                            ❌ DO NOT USE: Images with faces, people, or any human subjects - will trigger moderation
-                        </p>
-                        <p style="margin: 8px 0 0 0; font-size: 0.9em; color: #78350f; line-height: 1.6;">
-                            ✅ SAFE: Landscapes, objects, abstract patterns, buildings, nature (NO people or faces)
-                        </p>
+                <div id="shared-settings-content" class="hidden-field">
+                    <div style="margin-bottom: 20px; text-align: right;">
+                        <button id="apply-to-all-btn" class="btn-secondary">Apply to All Shots</button>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="shared-characters">Character Description</label>
+                        <textarea id="shared-characters" placeholder="Enter character description to use for all shots..."></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="shared-environment">Environment Description</label>
+                        <textarea id="shared-environment" placeholder="Enter environment description to use for all shots..."></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="shared-lighting">Lighting & Camera Angles</label>
+                        <textarea id="shared-lighting" placeholder="Enter lighting and camera setup to use for all shots..."></textarea>
                     </div>
                 </div>
             </div>

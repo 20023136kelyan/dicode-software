@@ -8,6 +8,13 @@ def resize_image(image_path: str, target_size: tuple[int, int] = (1024, 1792)) -
     
     This ensures the image is in a format that's most compatible with Sora's API.
     The image will be cropped to fit the exact target dimensions.
+    
+    Args:
+        image_path: Path to the image file
+        target_size: Tuple of (width, height) for target dimensions (default: 1024x1792)
+    
+    Returns:
+        str: Path to the resized image file
     """
     img = Image.open(image_path)
     width, height = img.size

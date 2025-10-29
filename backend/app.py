@@ -1,8 +1,11 @@
 import os
 import json
 import sys
-from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask import Flask, request, jsonify, send_file, send_from_directory, Response, stream_with_context
 from flask_cors import CORS
+import queue
+import threading
+import uuid
 
 # Add backend directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -12,6 +15,11 @@ from stitcher import stitch_videos
 
 app = Flask(__name__)
 CORS(app)
+
+# Dictionary to store progress queues for each generation task
+progress_queues = {}
+# Dictionary to store results for each generation task
+generation_results = {}
 
 # Configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -65,6 +73,70 @@ def set_key():
     return jsonify({"success": True, "message": "API key updated. Please restart the server."})
 
 
+@app.route('/api/progress/<task_id>', methods=['GET'])
+def stream_progress(task_id):
+    """Stream progress updates via Server-Sent Events"""
+    def generate():
+        if task_id not in progress_queues:
+            yield f"data: {json.dumps({'error': 'Task not found'})}\n\n"
+            return
+        
+        q = progress_queues[task_id]
+        
+        while True:
+            try:
+                message = q.get(timeout=1)
+                if message is None:  # End of stream
+                    break
+                yield f"data: {json.dumps(message)}\n\n"
+            except queue.Empty:
+                yield ": keepalive\n\n"  # Keep connection alive
+            except Exception as e:
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                break
+        
+        # Clean up
+        del progress_queues[task_id]
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+
+def run_generation_in_thread(shots_data, reference_images, task_id, result_container, q, quality='1024x1792'):
+    """Run video generation in a separate thread"""
+    try:
+        result = generate_video_sequence(shots_data, reference_images or [], progress_queue=q, task_id=task_id, quality=quality)
+        
+        # Clean up temporary images (including .jpg versions if converted)
+        if reference_images:
+            for img_path in reference_images:
+                if img_path and os.path.exists(img_path):
+                    try:
+                        os.remove(img_path)
+                    except:
+                        pass
+                # Also try to remove the .jpg version if it was created
+                if img_path:
+                    jpeg_path = os.path.splitext(img_path)[0] + '.jpg'
+                    if os.path.exists(jpeg_path):
+                        try:
+                            os.remove(jpeg_path)
+                        except:
+                            pass
+        
+        result_container['result'] = result
+        generation_results[task_id] = result
+        
+        # Send final result message
+        q.put({'type': 'complete', 'result': result})
+    except Exception as e:
+        error_msg = str(e)
+        result_container['error'] = error_msg
+        q.put({'type': 'error', 'message': error_msg})
+        generation_results[task_id] = {'status': 'error', 'error': error_msg}
+    finally:
+        q.put(None)  # Signal end of stream
+
+
 @app.route('/api/generate', methods=['POST'])
 def generate():
     """Generate video sequence"""
@@ -77,29 +149,30 @@ def generate():
                 return jsonify({"error": "No shots provided"}), 400
             
             shots_data = json.loads(shots_json)
+            quality = request.form.get('quality', '1024x1792')
             
-            # Handle uploaded images - map each shot to its reference image
+            # Handle uploaded images - only shot 1 uses reference images (remix shots 2 and 3 don't)
             reference_images = [None] * len(shots_data)  # Initialize with None
-            for i in range(1, len(shots_data) + 1):
-                img_key = f'image_{i}'
-                if img_key in request.files:
-                    file = request.files[img_key]
-                    if file.filename:
-                        # Save temporarily
-                        import hashlib
-                        from werkzeug.utils import secure_filename
-                        
-                        filename = secure_filename(file.filename)
-                        img_hash = hashlib.md5(filename.encode()).hexdigest()
-                        img_path = os.path.join(BASE_DIR, "temp", f"{img_hash}_{filename}")
-                        
-                        os.makedirs(os.path.dirname(img_path), exist_ok=True)
-                        file.save(img_path)
-                        reference_images[i - 1] = img_path  # Map to shot index
+            # Only process image_1 (shots 2 and 3 are remix and don't support reference images)
+            if 'image_1' in request.files:
+                file = request.files['image_1']
+                if file.filename:
+                    # Save temporarily
+                    import hashlib
+                    from werkzeug.utils import secure_filename
+                    
+                    filename = secure_filename(file.filename)
+                    img_hash = hashlib.md5(filename.encode()).hexdigest()
+                    img_path = os.path.join(BASE_DIR, "temp", f"{img_hash}_{filename}")
+                    
+                    os.makedirs(os.path.dirname(img_path), exist_ok=True)
+                    file.save(img_path)
+                    reference_images[0] = img_path  # Only shot 1 (index 0) gets the image
         else:
             # Handle JSON
             data = request.json
             shots_data = data.get("shots", [])
+            quality = data.get("quality", "1024x1792")
             reference_images = None
         
         if not shots_data:
@@ -108,32 +181,42 @@ def generate():
         if len(shots_data) > 3:
             return jsonify({"error": "Maximum 3 shots allowed"}), 400
         
-        # Generate videos
-        result = generate_video_sequence(shots_data, reference_images or [])
+        # Create a unique task ID and progress queue
+        task_id = str(uuid.uuid4())
+        q = queue.Queue()
+        progress_queues[task_id] = q
         
-        # Clean up temporary images (including .jpg versions if converted)
-        if reference_images:
-            for img_path in reference_images:
-                if os.path.exists(img_path):
-                    try:
-                        os.remove(img_path)
-                    except:
-                        pass
-                # Also try to remove the .jpg version if it was created
-                jpeg_path = os.path.splitext(img_path)[0] + '.jpg'
-                if os.path.exists(jpeg_path):
-                    try:
-                        os.remove(jpeg_path)
-                    except:
-                        pass
+        # Store reference images in a way that the thread can access them
+        # We'll pass them to the thread, and let it clean them up
+        result_container = {}
         
-        if result.get("status") == "error":
-            return jsonify(result), 500
+        # Start generation in a separate thread
+        thread = threading.Thread(
+            target=run_generation_in_thread,
+            args=(shots_data, reference_images or [], task_id, result_container, q, quality)
+        )
+        thread.daemon = True
+        thread.start()
         
-        return jsonify(result)
+        # Return task ID immediately so frontend can start listening
+        return jsonify({
+            "task_id": task_id,
+            "status": "started",
+            "progress_url": f"/api/progress/{task_id}"
+        })
     
     except Exception as e:
         return jsonify({"error": str(e), "status": "error"}), 500
+
+
+@app.route('/api/generate-result/<task_id>', methods=['GET'])
+def get_result(task_id):
+    """Get the final result of a generation task"""
+    if task_id not in generation_results:
+        return jsonify({"status": "not_found", "message": "Result not found"}), 404
+    
+    result = generation_results[task_id]
+    return jsonify(result)
 
 
 @app.route('/api/stitch/<sequence_id>', methods=['POST'])

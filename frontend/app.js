@@ -69,7 +69,6 @@ function addShot() {
     const sharedCharacters = document.getElementById('shared-characters')?.value || '';
     const sharedEnvironment = document.getElementById('shared-environment')?.value || '';
     const sharedLighting = document.getElementById('shared-lighting')?.value || '';
-    const sharedImage = document.getElementById('shared-image');
     
     let hasSharedSettings = false;
     const hiddenFieldIds = [];
@@ -104,22 +103,6 @@ function addShot() {
         }
     }
     
-    // Handle image file for new shot
-    if (sharedImage && sharedImage.files && sharedImage.files[0]) {
-        const shotImageInput = document.getElementById(`image-${currentShots}`);
-        if (shotImageInput) {
-            const dataTransfer = new DataTransfer();
-            dataTransfer.items.add(sharedImage.files[0]);
-            shotImageInput.files = dataTransfer.files;
-            
-            // Trigger the preview
-            previewImage(currentShots);
-            toggleFieldVisibility(`image-${currentShots}`, true);
-            hiddenFieldIds.push(`image-${currentShots}`);
-            hasSharedSettings = true;
-        }
-    }
-    
     // Show expand button if there are shared settings
     const expandBtn = document.getElementById(`expand-btn-${currentShots}`);
     if (hasSharedSettings && expandBtn) {
@@ -138,23 +121,32 @@ function createShotPanel(shotNumber) {
         <div class="shot-header">
             <span class="shot-number">Shot ${shotNumber}</span>
             <div class="shot-actions">
+                ${shotNumber > 1 ? `
+                <button class="expand-btn" onclick="expandShotFields(${shotNumber})" id="expand-btn-${shotNumber}">
+                    <span id="expand-text-${shotNumber}">Show Character/Environment/Lighting</span>
+                </button>
+                ` : `
                 <button class="expand-btn hidden" onclick="expandShot(${shotNumber})" id="expand-btn-${shotNumber}">
                     <span id="expand-text-${shotNumber}">Show Shared Settings</span>
                 </button>
+                `}
                 <button class="remove-shot-btn" onclick="removeShot(${shotNumber})">🗑️ Remove</button>
             </div>
         </div>
         
-        <div class="form-group">
-            <label for="characters-${shotNumber}">Character Description *</label>
-            <textarea id="characters-${shotNumber}" placeholder="Describe the characters in this shot (e.g., A 30-year-old male programmer with short dark hair, wearing a black t-shirt)" required></textarea>
+        <div class="form-group ${shotNumber > 1 ? 'hidden-field' : ''}" id="form-group-characters-${shotNumber}">
+            <label for="characters-${shotNumber}">Character Description ${shotNumber === 1 ? '*' : '(Optional)'}</label>
+            <textarea id="characters-${shotNumber}" placeholder="Describe the characters in this shot (e.g., A 30-year-old male programmer with short dark hair, wearing a black t-shirt)" ${shotNumber === 1 ? 'required' : ''}></textarea>
+            ${shotNumber > 1 ? `<p style="font-size: 0.85em; color: #666; font-style: italic; margin-top: 4px;">If left empty, uses the same character from Shot 1. Only fill this if you want to change the character.</p>` : ''}
         </div>
         
-        <div class="form-group">
-            <label for="environment-${shotNumber}">Environment Description *</label>
-            <textarea id="environment-${shotNumber}" placeholder="Describe the environment/setting (e.g., modern kitchen with morning light from window)" required></textarea>
+        <div class="form-group ${shotNumber > 1 ? 'hidden-field' : ''}" id="form-group-environment-${shotNumber}">
+            <label for="environment-${shotNumber}">Environment Description ${shotNumber === 1 ? '*' : '(Optional)'}</label>
+            <textarea id="environment-${shotNumber}" placeholder="Describe the environment/setting (e.g., modern kitchen with morning light from window)" ${shotNumber === 1 ? 'required' : ''}></textarea>
+            ${shotNumber > 1 ? `<p style="font-size: 0.85em; color: #666; font-style: italic; margin-top: 4px;">If left empty, uses the same environment from Shot 1. Only fill this if you want to change the environment.</p>` : ''}
         </div>
         
+        ${shotNumber === 1 ? `
         <div class="form-group">
             <label for="image-${shotNumber}">Reference Image (Optional - Use with Caution)</label>
             <input type="file" id="image-${shotNumber}" accept="image/*" onchange="previewImage(${shotNumber})">
@@ -173,10 +165,19 @@ function createShotPanel(shotNumber) {
                 </p>
             </div>
         </div>
+        ` : `
+        <div class="form-group" style="display: none;">
+            <label for="image-${shotNumber}">Reference Image</label>
+            <input type="file" id="image-${shotNumber}" accept="image/*" onchange="previewImage(${shotNumber})" disabled>
+            <div id="image-preview-${shotNumber}" class="image-preview-container"></div>
+            <p style="font-size: 0.85em; color: #666; font-style: italic;">Reference images are only available for Shot 1 (remix shots inherit visuals from previous shot)</p>
+        </div>
+        `}
         
-        <div class="form-group">
-            <label for="lighting-${shotNumber}">Lighting & Camera Angles</label>
+        <div class="form-group ${shotNumber > 1 ? 'hidden-field' : ''}" id="form-group-lighting-${shotNumber}">
+            <label for="lighting-${shotNumber}">Lighting & Camera Angles ${shotNumber > 1 ? '(Optional)' : ''}</label>
             <textarea id="lighting-${shotNumber}" placeholder="Describe lighting and camera setup (e.g., Natural morning light, handheld camera, shallow depth of field, vertical 9:16 format)"></textarea>
+            ${shotNumber > 1 ? `<p style="font-size: 0.85em; color: #666; font-style: italic; margin-top: 4px;">If left empty, uses the same lighting and camera angles from Shot 1. Only fill this if you want to change the lighting/camera.</p>` : ''}
         </div>
         
         <div class="form-group">
@@ -200,7 +201,65 @@ function removeShot(shotNumber) {
         currentShots--;
         updateShotsCount();
         enableAddButton(currentShots < 3);
+        // Renumber all remaining shots
+        renumberShots();
     }
+}
+
+// Renumber all shots sequentially starting from 1
+function renumberShots() {
+    const container = document.getElementById('shots-container');
+    const shots = container.querySelectorAll('.shot-panel');
+    
+    shots.forEach((panel, index) => {
+        const newNumber = index + 1;
+        const oldNumber = panel.id.replace('shot-', '');
+        
+        // Update panel ID
+        panel.id = `shot-${newNumber}`;
+        
+        // Update all IDs inside this shot
+        const elementsToUpdate = panel.querySelectorAll('[id^="characters-"], [id^="environment-"], [id^="image-"], [id^="lighting-"], [id^="dialog-"], [id^="image-preview-"], [id^="expand-btn-"], [id^="expand-text-"], [id^="form-group-"]');
+        elementsToUpdate.forEach(el => {
+            const oldId = el.id;
+            // Replace the old number with new number in the ID
+            el.id = oldId.replace(`-${oldNumber}`, `-${newNumber}`);
+        });
+        
+        // Update shot number display
+        const shotNumberEl = panel.querySelector('.shot-number');
+        if (shotNumberEl) {
+            shotNumberEl.textContent = `Shot ${newNumber}`;
+        }
+        
+        // Update onclick handlers
+        const removeBtn = panel.querySelector('.remove-shot-btn');
+        if (removeBtn) {
+            removeBtn.setAttribute('onclick', `removeShot(${newNumber})`);
+        }
+        
+        const expandBtn = panel.querySelector('.expand-btn');
+        if (expandBtn) {
+            // Update button handler based on shot number
+            if (newNumber > 1) {
+                expandBtn.setAttribute('onclick', `expandShotFields(${newNumber})`);
+                // Update button text if visible
+                const expandText = document.getElementById(`expand-text-${newNumber}`);
+                if (expandText && !expandBtn.classList.contains('hidden')) {
+                    const isExpanded = expandBtn.classList.contains('expanded');
+                    expandText.textContent = isExpanded ? 'Hide Character/Environment/Lighting' : 'Show Character/Environment/Lighting';
+                }
+            } else {
+                expandBtn.setAttribute('onclick', `expandShot(${newNumber})`);
+            }
+        }
+        
+        // Update file input onchange
+        const fileInput = panel.querySelector(`#image-${newNumber}`);
+        if (fileInput) {
+            fileInput.setAttribute('onchange', `previewImage(${newNumber})`);
+        }
+    });
 }
 
 // Update shots count display
@@ -238,7 +297,7 @@ function toggleFieldVisibility(fieldId, hide) {
     }
 }
 
-// Expand hidden fields for a specific shot
+// Expand hidden fields for a specific shot (for shared settings)
 function expandShot(shotNumber) {
     const expandText = document.getElementById(`expand-text-${shotNumber}`);
     const expandBtn = document.getElementById(`expand-btn-${shotNumber}`);
@@ -292,15 +351,74 @@ function expandShot(shotNumber) {
     }
 }
 
+// Expand character, environment, and lighting fields for shots 2 and 3
+function expandShotFields(shotNumber) {
+    const expandText = document.getElementById(`expand-text-${shotNumber}`);
+    const expandBtn = document.getElementById(`expand-btn-${shotNumber}`);
+    
+    if (!expandBtn) return;
+    
+    const isExpanded = expandBtn.classList.contains('expanded');
+    const fieldIds = [
+        `form-group-characters-${shotNumber}`,
+        `form-group-environment-${shotNumber}`,
+        `form-group-lighting-${shotNumber}`
+    ];
+    
+    if (isExpanded) {
+        // Hide fields
+        fieldIds.forEach(fieldId => {
+            const formGroup = document.getElementById(fieldId);
+            if (formGroup) {
+                formGroup.classList.add('hidden-field');
+            }
+        });
+        expandBtn.classList.remove('expanded');
+        expandText.textContent = 'Show Character/Environment/Lighting';
+    } else {
+        // Show fields
+        fieldIds.forEach(fieldId => {
+            const formGroup = document.getElementById(fieldId);
+            if (formGroup) {
+                formGroup.classList.remove('hidden-field');
+            }
+        });
+        expandBtn.classList.add('expanded');
+        expandText.textContent = 'Hide Character/Environment/Lighting';
+    }
+}
+
+// Toggle shared settings visibility
+function toggleSharedSettings() {
+    const content = document.getElementById('shared-settings-content');
+    const toggleBtn = document.getElementById('toggle-shared-settings-btn');
+    const toggleText = document.getElementById('shared-settings-toggle-text');
+    
+    if (!content || !toggleBtn || !toggleText) return;
+    
+    const isExpanded = toggleBtn.classList.contains('expanded');
+    
+    if (isExpanded) {
+        // Hide shared settings
+        content.classList.add('hidden-field');
+        toggleBtn.classList.remove('expanded');
+        toggleText.textContent = 'Show Shared Settings';
+    } else {
+        // Show shared settings
+        content.classList.remove('hidden-field');
+        toggleBtn.classList.add('expanded');
+        toggleText.textContent = 'Hide Shared Settings';
+    }
+}
+
 // Apply shared settings to all shots
 function applySharedSettings() {
     const sharedCharacters = document.getElementById('shared-characters')?.value || '';
     const sharedEnvironment = document.getElementById('shared-environment')?.value || '';
     const sharedLighting = document.getElementById('shared-lighting')?.value || '';
-    const sharedImage = document.getElementById('shared-image');
     
-    if (!sharedCharacters && !sharedEnvironment && !sharedLighting && (!sharedImage || !sharedImage.files || !sharedImage.files[0])) {
-        alert('Please enter at least one shared setting (Characters, Environment, Lighting, or Image)');
+    if (!sharedCharacters && !sharedEnvironment && !sharedLighting) {
+        alert('Please enter at least one shared setting (Characters, Environment, or Lighting)');
         return;
     }
     
@@ -344,23 +462,6 @@ function applySharedSettings() {
             }
         }
         
-        // Handle image file - create a new FileList for each shot's input
-        if (sharedImage && sharedImage.files && sharedImage.files[0]) {
-            const shotImageInput = document.getElementById(`image-${i}`);
-            if (shotImageInput) {
-                const dataTransfer = new DataTransfer();
-                dataTransfer.items.add(sharedImage.files[0]);
-                shotImageInput.files = dataTransfer.files;
-                
-                // Trigger the preview
-                previewImage(i);
-                // Hide the field
-                toggleFieldVisibility(`image-${i}`, true);
-                hiddenFieldIds.push(`image-${i}`);
-                hasSharedSettings = true;
-            }
-        }
-        
         // Show expand button if there are shared settings
         const expandBtn = document.getElementById(`expand-btn-${i}`);
         if (hasSharedSettings && expandBtn) {
@@ -385,20 +486,6 @@ function applySharedSettings() {
 function previewImage(shotNumber) {
     const input = document.getElementById(`image-${shotNumber}`);
     const previewContainer = document.getElementById(`image-preview-${shotNumber}`);
-    
-    if (input.files && input.files[0]) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            previewContainer.innerHTML = `<img src="${e.target.result}" alt="Preview" class="image-preview">`;
-        };
-        reader.readAsDataURL(input.files[0]);
-    }
-}
-
-// Preview shared image
-function previewSharedImage() {
-    const input = document.getElementById('shared-image');
-    const previewContainer = document.getElementById('shared-image-preview');
     
     if (input.files && input.files[0]) {
         const reader = new FileReader();
@@ -436,9 +523,14 @@ async function generateVideos() {
             if (panel) {
                 const data = collectShotData(i);
                 
-                // Basic validation
-                if (!data.characters || !data.environment || !data.dialog) {
-                    alert(`Shot ${i} is missing required fields (Characters, Environment, or Dialog)`);
+                // Basic validation - only require characters and environment for shot 1
+                if (i === 1 && (!data.characters || !data.environment || !data.dialog)) {
+                    alert(`Shot 1 is missing required fields (Characters, Environment, or Dialog)`);
+                    return;
+                }
+                // For shots 2 and 3, only dialog is required
+                if (i > 1 && !data.dialog) {
+                    alert(`Shot ${i} is missing required field (Dialog)`);
                     return;
                 }
                 
@@ -455,37 +547,32 @@ async function generateVideos() {
         const progressContainer = document.getElementById('progress-container');
         progressContainer.innerHTML = '<div class="progress-item">Initializing generation...</div>';
         
-        // Collect image files from individual shots AND check for shared image
-        const imageFiles = [];
-        const sharedImageInput = document.getElementById('shared-image');
-        const sharedImage = sharedImageInput && sharedImageInput.files && sharedImageInput.files[0] ? sharedImageInput.files[0] : null;
+        // Get video quality
+        const quality = document.getElementById('video-quality')?.value || '1024x1792';
         
-        for (let i = 1; i <= currentShots; i++) {
-            const input = document.getElementById(`image-${i}`);
-            if (input && input.files && input.files[0]) {
-                imageFiles[i] = input.files[0];
-            } else if (sharedImage) {
-                // If individual shot doesn't have an image, use the shared image
-                imageFiles[i] = sharedImage;
-            }
+        // Collect image file only for shot 1 (remix shots 2 and 3 don't use reference images)
+        const imageFiles = [];
+        
+        // Only collect image for shot 1
+        const shot1Input = document.getElementById('image-1');
+        if (shot1Input && shot1Input.files && shot1Input.files[0]) {
+            imageFiles[1] = shot1Input.files[0];
         }
         
         // Use FormData if we have images, otherwise use JSON
         let body, headers;
-        if (imageFiles.some(f => f)) {
+        if (imageFiles[1]) {
             const formData = new FormData();
             formData.append('shots', JSON.stringify(shotsData));
+            formData.append('quality', quality);
             
-            for (let i = 1; i < imageFiles.length; i++) {
-                if (imageFiles[i]) {
-                    formData.append(`image_${i}`, imageFiles[i]);
-                }
-            }
+            // Only append image_1 (shots 2 and 3 don't use reference images)
+            formData.append('image_1', imageFiles[1]);
             
             body = formData;
             headers = {}; // Let browser set Content-Type with boundary
         } else {
-            body = JSON.stringify({ shots: shotsData });
+            body = JSON.stringify({ shots: shotsData, quality: quality });
             headers = { 'Content-Type': 'application/json' };
         }
         
@@ -508,22 +595,107 @@ async function generateVideos() {
             throw new Error(errorMessage);
         }
         
-        const result = await response.json();
+        const startResult = await response.json();
         
-        if (result.error || result.status === 'error') {
-            throw new Error(result.error || 'Video generation failed');
+        if (startResult.error || startResult.status === 'error') {
+            throw new Error(startResult.error || 'Video generation failed to start');
         }
         
-        // Store results
-        sequenceResults = result;
+        // Get the task_id and connect to progress stream
+        const taskId = startResult.task_id;
         
-        // Display results
-        await displayResults(result);
+        // Connect to Server-Sent Events for progress updates
+        const eventSource = new EventSource(`${API_BASE_URL}/progress/${taskId}`);
+        
+        let finalResult = null;
+        
+        eventSource.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'progress') {
+                // Update progress display
+                updateProgressDisplay(data);
+            } else if (data.type === 'shot_start') {
+                // Shot started
+                progressContainer.innerHTML += `<div class="progress-item">${data.message}</div>`;
+            } else if (data.type === 'shot_complete') {
+                // Shot completed
+                progressContainer.innerHTML += `<div class="progress-item" style="color: #10b981;">✓ ${data.message}</div>`;
+            } else if (data.type === 'complete') {
+                // Generation complete
+                finalResult = data.result;
+                eventSource.close();
+                
+                // Store results
+                sequenceResults = finalResult;
+                
+                // Display results
+                displayResults(finalResult);
+            } else if (data.type === 'error') {
+                // Error occurred
+                eventSource.close();
+                showError(data.message);
+                document.getElementById('generate-btn').disabled = false;
+            }
+        };
+        
+        eventSource.onerror = function(error) {
+            console.error('EventSource failed:', error);
+            eventSource.close();
+            
+            // Fallback: try to get the result
+            setTimeout(async () => {
+                try {
+                    const resultResponse = await fetch(`${API_BASE_URL}/generate-result/${taskId}`);
+                    if (resultResponse.ok) {
+                        const result = await resultResponse.json();
+                        sequenceResults = result;
+                        displayResults(result);
+                    } else {
+                        showError('Failed to get generation result');
+                        document.getElementById('generate-btn').disabled = false;
+                    }
+                } catch (e) {
+                    showError('Connection error');
+                    document.getElementById('generate-btn').disabled = false;
+                }
+            }, 1000);
+        };
         
     } catch (error) {
         showError(error.message);
         document.getElementById('generate-btn').disabled = false;
     }
+}
+
+// Update progress display
+function updateProgressDisplay(data) {
+    const progressContainer = document.getElementById('progress-container');
+    
+    // Find or create progress item for this shot
+    let progressItem = document.getElementById(`shot-${data.shot_number}-progress`);
+    
+    if (!progressItem) {
+        progressItem = document.createElement('div');
+        progressItem.id = `shot-${data.shot_number}-progress`;
+        progressItem.className = 'progress-item';
+        progressContainer.appendChild(progressItem);
+    }
+    
+    // Create progress bar HTML
+    const progressBar = `
+        <div style="margin: 10px 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                <span>${data.message}</span>
+                <span style="font-weight: bold;">${data.progress.toFixed(1)}%</span>
+            </div>
+            <div style="background: #e5e7eb; border-radius: 10px; height: 8px; overflow: hidden;">
+                <div style="background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%); height: 100%; width: ${data.progress}%; transition: width 0.3s ease;"></div>
+            </div>
+        </div>
+    `;
+    
+    progressItem.innerHTML = progressBar;
 }
 
 // Display generation results
@@ -578,6 +750,7 @@ async function displayResults(result) {
                         <button class="download-btn" onclick="downloadShot('${result.sequence_id}', ${index + 1})" style="background-color: #6366f1;">
                             Download Shot ${index + 1}
                         </button>
+                        ${shot.video_id ? `<p style="margin-top: 10px; font-size: 0.85em; color: #666; font-family: monospace; word-break: break-all;">Video ID: ${shot.video_id}</p>` : ''}
                     </div>
                 `;
             });
@@ -606,6 +779,7 @@ async function displayResults(result) {
                 <button class="download-btn" onclick="downloadShot('${result.sequence_id}', 1)">
                     📥 Download Video
                 </button>
+                ${result.shots[0].video_id ? `<p style="margin-top: 10px; font-size: 0.85em; color: #666; font-family: monospace; word-break: break-all;">Video ID: ${result.shots[0].video_id}</p>` : ''}
             </div>
         `;
         html += '</div>';
@@ -625,8 +799,29 @@ function showError(message) {
     const progressContainer = document.getElementById('progress-container');
     let errorHtml = `<div class="error-message">`;
     
+    // Check if it's a billing error
+    if (message.toLowerCase().includes('billing')) {
+        errorHtml += `<h3>💳 Billing Limit Reached</h3>`;
+        errorHtml += `<p style="color: #dc2626; font-weight: 600;">Your OpenAI account has reached its billing limit.</p>`;
+        errorHtml += `<p><strong>What this means:</strong></p>`;
+        errorHtml += `<ul style="text-align: left; margin: 20px 40px;">`;
+        errorHtml += `<li>Your account's spending limit has been reached</li>`;
+        errorHtml += `<li>Payment method may need to be updated</li>`;
+        errorHtml += `<li>You may have exceeded your monthly spending cap</li>`;
+        errorHtml += `</ul>`;
+        errorHtml += `<div style="background: #fef3c7; border: 2px solid #f59e0b; padding: 15px; border-radius: 8px; margin: 15px 0;">`;
+        errorHtml += `<strong>🔧 How to Fix:</strong>`;
+        errorHtml += `<ol style="text-align: left; margin: 10px 0 0 25px;">`;
+        errorHtml += `<li>Visit <a href="https://platform.openai.com/account/billing" target="_blank" style="color: #3b82f6; text-decoration: underline;">https://platform.openai.com/account/billing</a></li>`;
+        errorHtml += `<li>Add or update your payment method</li>`;
+        errorHtml += `<li>Check and increase your spending limits if needed</li>`;
+        errorHtml += `<li>Wait a few minutes for changes to take effect</li>`;
+        errorHtml += `<li>Try generating again</li>`;
+        errorHtml += `</ol>`;
+        errorHtml += `</div>`;
+    }
     // Check if it's a moderation error
-    if (message.toLowerCase().includes('moderation')) {
+    else if (message.toLowerCase().includes('moderation')) {
         errorHtml += `<h3>⚠️ Content Moderation Issue</h3>`;
         errorHtml += `<p>Your video request was blocked by OpenAI's content moderation system.</p>`;
         errorHtml += `<p><strong>Most likely cause:</strong> The reference image you uploaded triggered content moderation.</p>`;
@@ -653,7 +848,15 @@ function showError(message) {
         errorHtml += `<p>${message}</p>`;
     }
     
-    errorHtml += `<button class="download-btn" onclick="location.reload()" style="margin-top: 20px;">Go Back & Remove Images</button>`;
+    // Only show the "Go Back" button for moderation errors
+    if (!message.toLowerCase().includes('billing') && !message.toLowerCase().includes('moderation')) {
+        errorHtml += `<button class="download-btn" onclick="location.reload()" style="margin-top: 20px;">Go Back & Try Again</button>`;
+    } else if (message.toLowerCase().includes('moderation')) {
+        errorHtml += `<button class="download-btn" onclick="location.reload()" style="margin-top: 20px;">Go Back & Remove Images</button>`;
+    } else if (message.toLowerCase().includes('billing')) {
+        errorHtml += `<button class="download-btn" onclick="window.open('https://platform.openai.com/account/billing', '_blank')" style="margin-top: 20px; margin-bottom: 20px; display: block; width: 100%;">Open Billing Settings</button>`;
+        errorHtml += `<button class="download-btn" onclick="location.reload()" style="background-color: #6b7280; display: block; width: 100%;">Refresh Page</button>`;
+    }
     errorHtml += `</div>`;
     
     progressContainer.innerHTML = errorHtml;
@@ -662,7 +865,8 @@ function showError(message) {
 // Make functions globally available
 window.removeShot = removeShot;
 window.previewImage = previewImage;
-window.previewSharedImage = previewSharedImage;
 window.expandShot = expandShot;
+window.expandShotFields = expandShotFields;
+window.toggleSharedSettings = toggleSharedSettings;
 window.downloadShot = downloadShot;
 
