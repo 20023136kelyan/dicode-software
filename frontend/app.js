@@ -186,7 +186,7 @@ function createShotPanel(shotNumber) {
         </div>
         
         <div style="text-align: center;">
-            <span class="duration-badge">Duration: 12 seconds (max per shot. Combine multiple shots for longer videos)</span>
+            <span class="duration-badge">Duration: 12 seconds</span>
         </div>
     `;
     
@@ -548,7 +548,10 @@ async function generateVideos() {
         progressContainer.innerHTML = '<div class="progress-item">Initializing generation...</div>';
         
         // Get video quality
-        const quality = document.getElementById('video-quality')?.value || '1024x1792';
+        const quality = document.getElementById('video-quality')?.value || '720x1280';
+        
+        // Get Sora model
+        const model = document.getElementById('sora-model')?.value || 'sora-2-pro';
         
         // Collect image file only for shot 1 (remix shots 2 and 3 don't use reference images)
         const imageFiles = [];
@@ -565,6 +568,7 @@ async function generateVideos() {
             const formData = new FormData();
             formData.append('shots', JSON.stringify(shotsData));
             formData.append('quality', quality);
+            formData.append('model', model);
             
             // Only append image_1 (shots 2 and 3 don't use reference images)
             formData.append('image_1', imageFiles[1]);
@@ -572,7 +576,7 @@ async function generateVideos() {
             body = formData;
             headers = {}; // Let browser set Content-Type with boundary
         } else {
-            body = JSON.stringify({ shots: shotsData, quality: quality });
+            body = JSON.stringify({ shots: shotsData, quality: quality, model: model });
             headers = { 'Content-Type': 'application/json' };
         }
         
@@ -707,84 +711,31 @@ async function displayResults(result) {
     
     let html = '<div class="video-results">';
     
-    // Automatically stitch if multiple shots
-    if (result.shots && result.shots.length > 1) {
-        html += '<div class="video-result-card">';
-        html += '<h3>Stitching sequence...</h3>';
-        html += '<p>Combining all shots...</p>';
-        html += '</div>';
-        
-        resultsContainer.innerHTML = html;
-        
-        try {
-            // Call the stitch API
-            const response = await fetch(`${API_BASE_URL}/stitch/${result.sequence_id}`, {
-                method: 'POST'
-            });
-            
-            const stitchResult = await response.json();
-            
-            if (stitchResult.error) {
-                throw new Error(stitchResult.error);
-            }
-            
-            // Show download button for stitched sequence
-            html = '<div class="video-results">';
+    // Display all shots separately
+    if (result.shots && result.shots.length > 0) {
+        result.shots.forEach((shot, index) => {
             html += `
-                <div class="video-result-card">
-                    <h3>✓ Full Sequence Ready</h3>
-                    <p>All ${result.shots.length} shots combined</p>
-                    <button class="download-btn" onclick="window.location.href='${API_BASE_URL}/download-sequence/${result.sequence_id}'">
-                        📥 Download Full Sequence
+                <div class="video-result-card" style="margin-top: ${index > 0 ? '15px' : '0'};">
+                    <h4>Shot ${index + 1}</h4>
+                    <p>Status: ${shot.status || 'completed'}</p>
+                    <button class="download-btn" onclick="downloadShot('${result.sequence_id}', ${index + 1})">
+                        📥 Download Shot ${index + 1}
                     </button>
+                    ${shot.video_id ? `<p style="margin-top: 10px; font-size: 0.85em; color: #666; font-family: monospace; word-break: break-all;">Video ID: ${shot.video_id}</p>` : ''}
                 </div>
             `;
-            
-            // Add individual shots section
-            html += '<div style="margin-top: 20px;">';
-            html += '<h4 style="text-align: center; color: #666;">Individual Shots (Optional)</h4>';
-            result.shots.forEach((shot, index) => {
-                html += `
-                    <div class="video-result-card" style="margin-top: 10px;">
-                        <h4>Shot ${index + 1}</h4>
-                        <button class="download-btn" onclick="downloadShot('${result.sequence_id}', ${index + 1})" style="background-color: #6366f1;">
-                            Download Shot ${index + 1}
-                        </button>
-                        ${shot.video_id ? `<p style="margin-top: 10px; font-size: 0.85em; color: #666; font-family: monospace; word-break: break-all;">Video ID: ${shot.video_id}</p>` : ''}
-                    </div>
-                `;
-            });
-            html += '</div>';
-            html += '</div>';
-            
-            resultsContainer.innerHTML = html;
-            
-        } catch (error) {
-            html = '<div class="video-results">';
-            html += `
-                <div class="error-message">
-                    <h3>⚠️ Stitching Failed</h3>
-                    <p>${error.message}</p>
-                </div>
-            `;
-            html += '</div>';
-            resultsContainer.innerHTML = html;
-        }
-    } else if (result.shots && result.shots.length === 1) {
-        // Single shot - just show download button
+        });
+    } else {
         html += `
             <div class="video-result-card">
-                <h3>✓ Video Ready</h3>
-                <p>Status: ${result.shots[0].status}</p>
-                <button class="download-btn" onclick="downloadShot('${result.sequence_id}', 1)">
-                    📥 Download Video
-                </button>
-                ${result.shots[0].video_id ? `<p style="margin-top: 10px; font-size: 0.85em; color: #666; font-family: monospace; word-break: break-all;">Video ID: ${result.shots[0].video_id}</p>` : ''}
+                <h3>⚠️ No videos generated</h3>
+                <p>No shots were successfully generated.</p>
             </div>
         `;
-        html += '</div>';
-        resultsContainer.innerHTML = html;
     }
+    
+    html += '</div>';
+    resultsContainer.innerHTML = html;
     
     document.getElementById('generate-btn').disabled = false;
 }

@@ -152,7 +152,7 @@ def build_prompt(shot_data, shot_number=1, shots_data=None):
     return ". ".join(prompt_parts)
 
 
-def generate_video_sequence(shots_data, reference_images=None, progress_queue=None, task_id=None, quality='1024x1792'):
+def generate_video_sequence(shots_data, reference_images=None, progress_queue=None, task_id=None, quality='720x1280', model='sora-2-pro'):
     """
     Generate a video sequence with 1-3 shots using Sora API.
     
@@ -161,7 +161,8 @@ def generate_video_sequence(shots_data, reference_images=None, progress_queue=No
         reference_images: List of uploaded image file paths
         progress_queue: Queue to send progress updates
         task_id: Task ID for tracking
-        quality: Video quality/resolution (default: '1024x1792')
+        quality: Video quality/resolution (default: '720x1280')
+        model: Sora model to use - 'sora-2' or 'sora-2-pro' (default: 'sora-2-pro')
     
     Returns:
         dict: Generation results with status and video paths
@@ -209,13 +210,15 @@ def generate_video_sequence(shots_data, reference_images=None, progress_queue=No
                 })
             
             # Build video creation parameters
-            # Note: Using sora-2-pro for higher quality/resolution options
+            # Use user-selected model (sora-2 or sora-2-pro)
             video_params = {
-                "model": "sora-2-pro",
+                "model": model,
                 "prompt": prompt,
                 "size": quality,  # Dynamic quality based on user selection
                 "seconds": "12",  # Maximum available: 4, 8, or 12 seconds
             }
+            
+            print(f"Shot {i}: Using model: {model}, quality/resolution: {quality}")
             
             # For the first shot, create a new video with optional reference image
             if i == 1:
@@ -243,6 +246,8 @@ def generate_video_sequence(shots_data, reference_images=None, progress_queue=No
                 # For subsequent shots, remix from the immediately previous shot
                 # This creates a sequential sequence where each shot continues from the last
                 # Note: remix doesn't support input_reference, so we only use image for the first shot
+                # Remix videos automatically inherit the quality/resolution from the source video
+                print(f"Shot {i}: Remixing from Shot {i-1} (quality: {quality} - inherited from source video)")
                 remix_params = {
                     "video_id": previous_video.id,
                     "prompt": prompt,

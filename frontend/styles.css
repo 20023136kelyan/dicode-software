@@ -351,6 +351,30 @@ header h1 {
     margin-bottom: 20px;
 }
 
+.selector-row {
+    display: flex;
+    gap: 16px;
+    width: 100%;
+}
+
+.selector-item {
+    flex: 1;
+    width: 50%;
+}
+
+.selector-item label {
+    display: block;
+    margin-bottom: 10px;
+    font-weight: 600;
+    color: #334155;
+    font-size: 0.95rem;
+    letter-spacing: -0.1px;
+}
+
+.selector-item select {
+    width: 100%;
+}
+
 .form-group label {
     display: block;
     margin-bottom: 10px;
@@ -409,13 +433,13 @@ header h1 {
 }
 
 .duration-badge {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
+    background: transparent;
+    color: #000000;
     padding: 8px 18px;
     border-radius: 20px;
     font-size: 0.9rem;
     font-weight: 600;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    box-shadow: none;
     display: inline-block;
 }
 

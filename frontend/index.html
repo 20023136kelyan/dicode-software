@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DiCode Video Generator</title>
+    <title>DICode Video Generator</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>DiCode Video Generator</h1>
+            <h1>DICode Video Generator</h1>
             <p class="subtitle">Create stunning videos with AI-powered shot sequences</p>
         </header>
 
@@ -25,14 +25,25 @@
         <div id="generation-form" class="form-container">
             <h2>Shot Configuration</h2>
             
-            <!-- Video Quality Selection -->
+            <!-- Video Quality and Model Selection -->
             <div class="form-group">
-                <label for="video-quality">Video Quality *</label>
-                <select id="video-quality" class="form-select" required>
-                    <option value="1024x1792" selected>High Quality (1024x1792)</option>
-                    <option value="720x1280">Standard Quality (720x1280)</option>
-                </select>
-                <p style="font-size: 0.9em; color: #666; margin-top: 8px;">All shots will be generated at this quality</p>
+                <div class="selector-row">
+                    <div class="selector-item">
+                        <label for="video-quality">Video Quality *</label>
+                        <select id="video-quality" class="form-select" required>
+                            <option value="1024x1792">High Quality (1024x1792)</option>
+                            <option value="720x1280" selected>Standard Quality (720x1280)</option>
+                        </select>
+                    </div>
+                    <div class="selector-item">
+                        <label for="sora-model">Sora Model *</label>
+                        <select id="sora-model" class="form-select" required>
+                            <option value="sora-2-pro" selected>Sora 2 Pro</option>
+                            <option value="sora-2">Sora 2</option>
+                        </select>
+                    </div>
+                </div>
+                <p style="font-size: 0.9em; color: #666; margin-top: 8px;">All shots will be generated at this quality and model</p>
             </div>
             
             <!-- Shared Settings Section -->

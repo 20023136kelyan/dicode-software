@@ -101,10 +101,10 @@ def stream_progress(task_id):
     return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
 
-def run_generation_in_thread(shots_data, reference_images, task_id, result_container, q, quality='1024x1792'):
+def run_generation_in_thread(shots_data, reference_images, task_id, result_container, q, quality='720x1280', model='sora-2-pro'):
     """Run video generation in a separate thread"""
     try:
-        result = generate_video_sequence(shots_data, reference_images or [], progress_queue=q, task_id=task_id, quality=quality)
+        result = generate_video_sequence(shots_data, reference_images or [], progress_queue=q, task_id=task_id, quality=quality, model=model)
         
         # Clean up temporary images (including .jpg versions if converted)
         if reference_images:
@@ -149,7 +149,10 @@ def generate():
                 return jsonify({"error": "No shots provided"}), 400
             
             shots_data = json.loads(shots_json)
-            quality = request.form.get('quality', '1024x1792')
+            quality = request.form.get('quality', '720x1280')
+            model = request.form.get('model', 'sora-2-pro')
+            print(f"Received quality selection: {quality}")
+            print(f"Received model selection: {model}")
             
             # Handle uploaded images - only shot 1 uses reference images (remix shots 2 and 3 don't)
             reference_images = [None] * len(shots_data)  # Initialize with None
@@ -172,7 +175,10 @@ def generate():
             # Handle JSON
             data = request.json
             shots_data = data.get("shots", [])
-            quality = data.get("quality", "1024x1792")
+            quality = data.get("quality", "720x1280")
+            model = data.get("model", "sora-2-pro")
+            print(f"Received quality selection: {quality}")
+            print(f"Received model selection: {model}")
             reference_images = None
         
         if not shots_data:
@@ -193,7 +199,7 @@ def generate():
         # Start generation in a separate thread
         thread = threading.Thread(
             target=run_generation_in_thread,
-            args=(shots_data, reference_images or [], task_id, result_container, q, quality)
+            args=(shots_data, reference_images or [], task_id, result_container, q, quality, model)
         )
         thread.daemon = True
         thread.start()
