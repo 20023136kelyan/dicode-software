@@ -60,7 +60,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-The backend will run on `http://localhost:5000`
+The backend will run on `http://localhost:8080`
 
 ### 3. Frontend Setup
 
