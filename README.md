@@ -11,6 +11,8 @@ A full-stack web application for generating video sequences using OpenAI's Sora 
 - **Progress Tracking**: Real-time status updates during generation
 - **Dual Downloads**: Download individual shots or the complete stitched sequence
 - **Modern UI**: Clean, responsive interface with no build step required
+- **Remix Mode**: Remix an existing Sora video (single or multi-shot) with new dialog and adjustments
+- **Model & Quality Selection**: Choose model (e.g. `sora-2-pro`) and output quality (e.g. `720x1280`)
 
 ## Project Structure
 
@@ -134,18 +136,11 @@ To stop the server later, press `Ctrl+C` in the terminal where it's running.
 
 ### Step 7: Open the Frontend
 
-Open a **new terminal window** (keep the backend server running):
+With the backend running, open your browser to:
 
-**Option A: Direct File (Simplest)**
-- Navigate to the `frontend` folder
-- Double-click `index.html` to open it in your default browser
+`http://localhost:8080`
 
-**Option B: Serve with HTTP Server (Recommended for CORS)**
-```bash
-cd frontend
-python3 -m http.server 8000
-```
-Then open your browser and go to: `http://localhost:8000`
+The backend serves the frontend files directly, so no separate static server is required. If you prefer to open the HTML file directly or use a separate static server, you can still open `frontend/index.html` or run `python3 -m http.server` in the `frontend` directory.
 
 ### Step 8: Verify Everything Works
 
@@ -186,10 +181,11 @@ Then simply open `frontend/index.html` in your browser.
    - Fill in required fields:
      - **Character Description**: Describe the characters (required)
      - **Environment Description**: Describe the setting (required)
-     - **Reference Image**: Optional image to influence generation
+     - **Reference Image (Shot 1 only)**: Optional image to influence generation. Shots 2 and 3 are generated via remix and do not accept image references.
      - **Lighting & Camera Angles**: Lighting and camera setup
      - **Dialog**: What the character says
    - Duration is fixed at 10 seconds per shot
+   - Choose **Model** and **Quality** if exposed in the UI (defaults are `sora-2-pro` and `720x1280`)
 
 5. **Generate**: Click "Generate Videos" and wait for processing
 
@@ -200,6 +196,9 @@ Then simply open `frontend/index.html` in your browser.
 - `GET /api/check-key` - Check if API key is configured
 - `POST /api/set-key` - Update API key (requires server restart)
 - `POST /api/generate` - Generate video sequence
+- `GET /api/progress/<task_id>` - Stream progress events for a generation/remix task (SSE)
+- `GET /api/generate-result/<task_id>` - Fetch the final result for a task
+- `POST /api/remix` - Remix existing video(s) with new dialog and options (single or multi-shot)
 - `POST /api/stitch/<sequence_id>` - Stitch shots into one video
 - `GET /api/download/<sequence_id>/<shot_number>` - Download individual shot
 - `GET /api/download-sequence/<sequence_id>` - Download stitched sequence
@@ -221,8 +220,8 @@ Generated videos are stored in `backend/output/<sequence_id>/` where `<sequence_
 
 ### Video Generation Process
 
-1. **First Shot**: Uses `openai.videos.create()` to generate initial video
-2. **Subsequent Shots**: Uses `openai.videos.remix()` to maintain visual consistency across shots
+1. **First Shot**: Uses `openai.videos.create()` to generate initial video (optional image reference supported)
+2. **Subsequent Shots**: Uses `openai.videos.remix()` to maintain visual consistency across shots (no image reference)
 3. **Prompt Building**: Combines user inputs into comprehensive Sora prompts
 4. **Progress Tracking**: Polls OpenAI API for generation status
 5. **Download**: Downloads completed videos to local storage
@@ -233,7 +232,7 @@ Uses MoviePy to concatenate multiple MP4 files into a single video sequence.
 
 ### Frontend-Backend Communication
 
-The frontend uses vanilla JavaScript with fetch API to communicate with the Flask backend. No frameworks or build tools required.
+The frontend uses vanilla JavaScript with fetch API to communicate with the Flask backend. No frameworks or build tools required. The backend serves `index.html`, `styles.css`, and `app.js` so the app is accessible at `http://localhost:8080/` when the server is running.
 
 ## Troubleshooting
 
@@ -307,5 +306,5 @@ This project is provided as-is for educational and development purposes.
 - Maximum 3 shots per sequence
 - Videos are generated vertically (720x1280) by default
 - The remix feature ensures visual consistency across shots
-- Reference images are optional and enhance generation quality
+- Reference images are optional and enhance generation quality (supported for the first shot only)
 
