@@ -37,54 +37,149 @@ A full-stack web application for generating video sequences using OpenAI's Sora 
 
 ## Setup Instructions
 
-### 1. Prerequisites
+Follow these steps **in order** if you're starting fresh after downloading from GitHub:
 
-- Python 3.8 or higher
-- pip (Python package manager)
+### Step 1: Verify Prerequisites
 
-### 2. Backend Setup
+Make sure you have:
+- **Python 3.8 or higher** installed
+- **pip** (Python package manager)
 
-1. Install Python dependencies:
+To check your Python version:
 ```bash
-cd backend
-pip install -r requirements.txt
+python3 --version
 ```
 
-2. Configure API Key:
-   - Copy `config.example.json` to `config.json`
-   - Edit `config.json` and add your OpenAI API key
-   - Or the API key is already configured in `config.json`
+### Step 2: Navigate to Project Directory
 
-3. Start the Flask server:
+Open your terminal and navigate to the project folder:
 ```bash
+cd /path/to/Video_Gen\ copy
+```
+
+(Replace `/path/to/Video_Gen\ copy` with your actual project path)
+
+### Step 3: Set Up Python Virtual Environment
+
+Create and activate a virtual environment (recommended to avoid conflicts):
+
+**On macOS/Linux:**
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+**On Windows:**
+```bash
+python -m venv venv
+venv\Scripts\activate
+```
+
+**Note:** If a `venv` folder already exists, you can skip the creation step and just activate it.
+
+You should see `(venv)` at the start of your command prompt when activated. If you don't see this, the virtual environment is not active - repeat the activation command for your operating system.
+
+### Step 4: Install Python Dependencies
+
+Install all required packages:
+```bash
+pip install -r backend/requirements.txt
+```
+
+Wait for all packages to install. This may take a few minutes.
+
+### Step 5: Configure API Key
+
+1. **Copy the example config file:**
+   
+   **On macOS/Linux:**
+   ```bash
+   cp backend/config.example.json backend/config.json
+   ```
+   
+   **On Windows:**
+   ```bash
+   copy backend\config.example.json backend\config.json
+   ```
+   
+   Or manually copy the file in Windows Explorer/Finder.
+
+2. **Edit the config file:**
+   - Open `backend/config.json` in a text editor
+   - Replace `"your-api-key-here"` with your actual OpenAI API key
+   - Your config file should look like:
+     ```json
+     {
+         "openai_api_key": "sk-proj-your-actual-key-here"
+     }
+     ```
+   - **Important:** Never commit this file to git (it's already in .gitignore)
+
+### Step 6: Start the Backend Server
+
+Start the Flask backend server:
+```bash
+cd backend
 python app.py
 ```
 
-The backend will run on `http://localhost:8080`
-
-### 3. Frontend Setup
-
-Simply open `frontend/index.html` in your web browser. No build step or additional setup required.
-
-Or serve it with a simple HTTP server:
-```bash
-cd frontend
-# Python 3
-python -m http.server 8000
-
-# Or use Node.js http-server
-npx http-server -p 8000
+You should see output like:
+```
+ * Running on http://0.0.0.0:8080
 ```
 
-Then open `http://localhost:8000` in your browser.
+**Keep this terminal window open** - the server needs to keep running.
+
+To stop the server later, press `Ctrl+C` in the terminal where it's running.
+
+### Step 7: Open the Frontend
+
+Open a **new terminal window** (keep the backend server running):
+
+**Option A: Direct File (Simplest)**
+- Navigate to the `frontend` folder
+- Double-click `index.html` to open it in your default browser
+
+**Option B: Serve with HTTP Server (Recommended for CORS)**
+```bash
+cd frontend
+python3 -m http.server 8000
+```
+Then open your browser and go to: `http://localhost:8000`
+
+### Step 8: Verify Everything Works
+
+1. In the web interface, check the API key status indicator (should show as configured)
+2. If it shows "not configured", go back to Step 5 and verify your `config.json` file
+3. Once the indicator shows the API key is configured, you're ready to generate videos!
+
+---
+
+## Quick Start Script (Alternative Method)
+
+If you prefer an automated setup, you can use the provided script:
+
+```bash
+chmod +x start_server.sh
+./start_server.sh
+```
+
+This script will:
+- Create a virtual environment if it doesn't exist
+- Install dependencies automatically
+- Start the backend server
+
+Then simply open `frontend/index.html` in your browser.
 
 ## Usage
 
-1. **Configure API Key**: Make sure your OpenAI API key is in `backend/config.json`
+**Prerequisites:** Complete the Setup Instructions above first.
 
-2. **Start the Backend**: Run `python backend/app.py`
+1. **Make sure the backend is running** (from Step 6 above) - you should see the Flask server running in a terminal
 
-3. **Open the Frontend**: Open `frontend/index.html` in your browser
+2. **Open the frontend** (from Step 7 above) - the web interface should be open in your browser
+
+3. **Verify API Key**: Check the API key status indicator in the web interface - it should show as configured
 
 4. **Create Shots**:
    - Click "Add Shot" to create additional shots (up to 3)
@@ -142,20 +237,53 @@ The frontend uses vanilla JavaScript with fetch API to communicate with the Flas
 
 ## Troubleshooting
 
+### Setup Issues
+
+**"python3: command not found"**
+- Make sure Python 3 is installed. On macOS, you can install it via Homebrew: `brew install python3`
+- On Windows, download from python.org
+- Try using `python` instead of `python3` on some systems
+
+**"pip: command not found"**
+- Make sure pip is installed. Try: `python3 -m ensurepip --upgrade`
+- On some systems, use `pip3` instead of `pip`
+
+**"Module not found" errors after installation**
+- Make sure your virtual environment is activated (you should see `(venv)` in your terminal prompt)
+- Reinstall dependencies: `pip install -r backend/requirements.txt`
+- Make sure you're installing from the project root directory
+
+**"Port 8080 already in use"**
+- Another process is using port 8080. Either:
+  - Stop the other process
+  - Edit `backend/app.py` and change `port=8080` to a different port (e.g., `port=8081`)
+  - Update `frontend/app.js` to use the same port in `API_BASE_URL`
+
+**Frontend can't connect to backend**
+- Make sure the backend server is running (Step 6)
+- Make sure you're accessing the frontend from the correct URL
+- Check browser console (F12) for CORS errors
+- If opening `index.html` directly doesn't work, try using a local HTTP server (Option B in Step 7)
+
 ### API Key Issues
-- Make sure your API key is in `backend/config.json`
+- Make sure `backend/config.json` exists (copy from `config.example.json` if needed)
+- Verify the API key is correct and has quotes: `"openai_api_key": "sk-proj-..."`
 - Check the API key status indicator on the web interface
-- Restart the server after updating the config file
+- **Restart the server** after updating the config file (stop with Ctrl+C, then restart)
+- Make sure your OpenAI API key has access to Sora 2
 
 ### Generation Failures
-- Check that all required fields are filled
-- Ensure you have sufficient API credits
+- Check that all required fields are filled (Character and Environment descriptions)
+- Ensure you have sufficient API credits in your OpenAI account
 - Review error messages in the progress section
+- Check the backend terminal for detailed error messages
+- Verify your API key has Sora 2 access enabled
 
 ### Video Download Issues
 - Check that the generation completed successfully
-- Verify output files exist in `backend/output/`
-- Check browser console for errors
+- Verify output files exist in `backend/output/<sequence_id>/`
+- Check browser console (F12) for errors
+- Make sure the backend server is still running
 
 ## Dependencies
 

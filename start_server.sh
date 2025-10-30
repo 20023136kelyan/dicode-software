@@ -31,7 +31,7 @@ fi
 
 # Start the Flask server
 echo ""
-echo "Starting Flask server on http://localhost:5000"
+echo "Starting Flask server on http://localhost:8080"
 echo "Open frontend/index.html in your browser to use the app"
 echo ""
 
