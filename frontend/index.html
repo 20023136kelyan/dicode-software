@@ -13,6 +13,12 @@
             <p class="subtitle">Create stunning videos with AI-powered shot sequences</p>
         </header>
 
+        <!-- Page Switcher -->
+        <div class="tab-switcher">
+            <button id="tab-generate" class="tab-btn active">Generate</button>
+            <button id="tab-remix" class="tab-btn">Remix</button>
+        </div>
+
         <!-- API Key Status -->
         <div id="api-status" class="status-card">
             <div class="status-indicator">
@@ -87,6 +93,25 @@
             </div>
 
             <button id="generate-btn" class="btn-primary">✨ Generate Video Sequence</button>
+        </div>
+
+        <!-- Remix Form -->
+        <div id="remix-form" class="form-container" style="display: none;">
+            <h2>Remix Existing Video</h2>
+
+            <div class="form-group">
+                <label for="remix-video-id">Video ID *</label>
+                <input type="text" id="remix-video-id" placeholder="Paste the source video id to remix" required>
+            </div>
+
+            <div class="shots-controls">
+                <button id="add-remix-shot-btn" class="btn-secondary">➕ Add Shot</button>
+                <span id="remix-shots-count">1 of 3 shots</span>
+            </div>
+
+            <div id="remix-shots-container"></div>
+
+            <button id="remix-btn" class="btn-primary">🎛️ Remix Video</button>
         </div>
 
         <!-- Progress Section -->

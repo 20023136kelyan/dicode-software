@@ -2,12 +2,15 @@ const API_BASE_URL = 'http://localhost:8080/api';
 
 let currentShots = 1;
 let sequenceResults = null;
+let currentRemixShots = 1;
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
     checkApiKey();
     initializeForm();
     setupEventListeners();
+    setupTabs();
+    initializeRemixForm();
 });
 
 // Check API key status
@@ -51,6 +54,244 @@ function setupEventListeners() {
     document.getElementById('apply-to-all-btn').addEventListener('click', applySharedSettings);
     
     document.getElementById('generate-btn').addEventListener('click', generateVideos);
+    const remixBtn = document.getElementById('remix-btn');
+    if (remixBtn) {
+        remixBtn.addEventListener('click', submitRemix);
+    }
+    const addRemixShotBtn = document.getElementById('add-remix-shot-btn');
+    if (addRemixShotBtn) {
+        addRemixShotBtn.addEventListener('click', () => {
+            if (currentRemixShots < 3) addRemixShot();
+        });
+    }
+}
+
+// Tabs between Generate and Remix
+function setupTabs() {
+    const tabGenerate = document.getElementById('tab-generate');
+    const tabRemix = document.getElementById('tab-remix');
+    const genForm = document.getElementById('generation-form');
+    const remixForm = document.getElementById('remix-form');
+    if (!tabGenerate || !tabRemix || !genForm || !remixForm) return;
+    tabGenerate.addEventListener('click', () => {
+        tabGenerate.classList.add('active');
+        tabRemix.classList.remove('active');
+        genForm.style.display = 'block';
+        remixForm.style.display = 'none';
+        document.getElementById('progress-section').style.display = 'none';
+        document.getElementById('results-section').style.display = 'none';
+    });
+    tabRemix.addEventListener('click', () => {
+        tabRemix.classList.add('active');
+        tabGenerate.classList.remove('active');
+        genForm.style.display = 'none';
+        remixForm.style.display = 'block';
+        document.getElementById('progress-section').style.display = 'none';
+        document.getElementById('results-section').style.display = 'none';
+    });
+}
+
+// Initialize remix form with the first shot
+function initializeRemixForm() {
+    const container = document.getElementById('remix-shots-container');
+    if (!container) return;
+    container.innerHTML = '';
+    currentRemixShots = 1;
+    const panel = createRemixShotPanel(1);
+    container.appendChild(panel);
+    updateRemixShotsCount();
+}
+
+function addRemixShot() {
+    if (currentRemixShots >= 3) return;
+    currentRemixShots++;
+    updateRemixShotsCount();
+    enableAddRemixButton(currentRemixShots < 3);
+    const container = document.getElementById('remix-shots-container');
+    const panel = createRemixShotPanel(currentRemixShots);
+    container.appendChild(panel);
+}
+
+function removeRemixShot(shotNumber) {
+    const panel = document.getElementById(`remix-shot-${shotNumber}`);
+    if (panel) {
+        panel.remove();
+        currentRemixShots--;
+        updateRemixShotsCount();
+        enableAddRemixButton(currentRemixShots < 3);
+        renumberRemixShots();
+    }
+}
+
+function renumberRemixShots() {
+    const container = document.getElementById('remix-shots-container');
+    const shots = container.querySelectorAll('.shot-panel');
+    shots.forEach((panel, index) => {
+        const newNumber = index + 1;
+        const oldNumber = panel.id.replace('remix-shot-', '');
+        panel.id = `remix-shot-${newNumber}`;
+        const ids = panel.querySelectorAll('[id^="remix-dialog-"], [id^="remix-expand-btn-"], [id^="remix-expand-text-"], [id^="remix-form-group-"]');
+        ids.forEach(el => { el.id = el.id.replace(`-${oldNumber}`, `-${newNumber}`); });
+        const numEl = panel.querySelector('.shot-number');
+        if (numEl) numEl.textContent = `Shot ${newNumber}`;
+        const removeBtn = panel.querySelector('.remove-shot-btn');
+        if (removeBtn) removeBtn.setAttribute('onclick', `removeRemixShot(${newNumber})`);
+        const expandBtn = panel.querySelector('.expand-btn');
+        if (expandBtn) expandBtn.setAttribute('onclick', `expandRemixShotFields(${newNumber})`);
+    });
+}
+
+function updateRemixShotsCount() {
+    const el = document.getElementById('remix-shots-count');
+    if (el) el.textContent = `${currentRemixShots} of 3 shots`;
+}
+
+function enableAddRemixButton(enabled) {
+    const btn = document.getElementById('add-remix-shot-btn');
+    if (!btn) return;
+    btn.disabled = !enabled;
+}
+
+function createRemixShotPanel(shotNumber) {
+    const panel = document.createElement('div');
+    panel.className = 'shot-panel';
+    panel.id = `remix-shot-${shotNumber}`;
+    panel.innerHTML = `
+        <div class="shot-header">
+            <span class="shot-number">Shot ${shotNumber}</span>
+            <div class="shot-actions">
+                <button class="expand-btn" onclick="expandRemixShotFields(${shotNumber})" id="remix-expand-btn-${shotNumber}">
+                    <span id="remix-expand-text-${shotNumber}">Show Character/Environment/Lighting</span>
+                </button>
+                <button class="remove-shot-btn" onclick="removeRemixShot(${shotNumber})">🗑️ Remove</button>
+            </div>
+        </div>
+        <div class="form-group hidden-field" id="remix-form-group-characters-${shotNumber}">
+            <label>Character Description ${shotNumber === 1 ? '(Optional)' : '(Optional)'}</label>
+            <textarea id="remix-characters-${shotNumber}" placeholder="Describe the characters (optional)"></textarea>
+        </div>
+        <div class="form-group hidden-field" id="remix-form-group-environment-${shotNumber}">
+            <label>Environment Description ${shotNumber === 1 ? '(Optional)' : '(Optional)'}</label>
+            <textarea id="remix-environment-${shotNumber}" placeholder="Describe the environment (optional)"></textarea>
+        </div>
+        <div class="form-group hidden-field" id="remix-form-group-lighting-${shotNumber}">
+            <label>Lighting & Camera Angles ${shotNumber === 1 ? '(Optional)' : '(Optional)'}</label>
+            <textarea id="remix-lighting-${shotNumber}" placeholder="Lighting and camera setup (optional)"></textarea>
+        </div>
+        <div class="form-group">
+            <label for="remix-dialog-${shotNumber}">Dialog *</label>
+            <textarea id="remix-dialog-${shotNumber}" placeholder="New dialog for this shot" required></textarea>
+        </div>
+        <div style="text-align: center;">
+            <span class="duration-badge">Duration: 12 seconds</span>
+        </div>
+    `;
+    return panel;
+}
+
+function expandRemixShotFields(shotNumber) {
+    const expandText = document.getElementById(`remix-expand-text-${shotNumber}`);
+    const expandBtn = document.getElementById(`remix-expand-btn-${shotNumber}`);
+    if (!expandBtn) return;
+    const isExpanded = expandBtn.classList.contains('expanded');
+    const fieldIds = [
+        `remix-form-group-characters-${shotNumber}`,
+        `remix-form-group-environment-${shotNumber}`,
+        `remix-form-group-lighting-${shotNumber}`
+    ];
+    if (isExpanded) {
+        fieldIds.forEach(id => document.getElementById(id)?.classList.add('hidden-field'));
+        expandBtn.classList.remove('expanded');
+        if (expandText) expandText.textContent = 'Show Character/Environment/Lighting';
+    } else {
+        fieldIds.forEach(id => document.getElementById(id)?.classList.remove('hidden-field'));
+        expandBtn.classList.add('expanded');
+        if (expandText) expandText.textContent = 'Hide Character/Environment/Lighting';
+    }
+}
+
+// Submit Remix
+async function submitRemix() {
+    const videoId = document.getElementById('remix-video-id')?.value.trim();
+    if (!videoId) { alert('Video ID is required'); return; }
+
+    // Collect shots
+    const shots = [];
+    for (let i = 1; i <= currentRemixShots; i++) {
+        const panel = document.getElementById(`remix-shot-${i}`);
+        if (!panel) continue;
+        const dialog = document.getElementById(`remix-dialog-${i}`)?.value.trim();
+        if (!dialog) { alert(`Shot ${i} is missing required field (Dialog)`); return; }
+        shots.push({
+            characters: document.getElementById(`remix-characters-${i}`)?.value || '',
+            environment: document.getElementById(`remix-environment-${i}`)?.value || '',
+            lighting: document.getElementById(`remix-lighting-${i}`)?.value || '',
+            camera_angles: document.getElementById(`remix-lighting-${i}`)?.value || '',
+            dialog
+        });
+    }
+
+    const payload = { video_id: videoId, shots };
+
+    try {
+        // Show progress area
+        document.getElementById('progress-section').style.display = 'block';
+        document.getElementById('results-section').style.display = 'none';
+        const progressContainer = document.getElementById('progress-container');
+        progressContainer.innerHTML = '<div class="progress-item">Initializing remix...</div>';
+        const btn = document.getElementById('remix-btn');
+        btn.disabled = true;
+
+        const response = await fetch(`${API_BASE_URL}/remix`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            let errorMessage = `Server error: ${response.status}`;
+            try { errorMessage = JSON.parse(errorText).error || errorMessage; } catch {}
+            throw new Error(errorMessage);
+        }
+
+        const startResult = await response.json();
+        if (startResult.error || startResult.status === 'error') {
+            throw new Error(startResult.error || 'Remix failed to start');
+        }
+
+        const taskId = startResult.task_id;
+        const eventSource = new EventSource(`${API_BASE_URL}/progress/${taskId}`);
+        eventSource.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.type === 'progress') {
+                updateProgressDisplay(data);
+            } else if (data.type === 'shot_start') {
+                progressContainer.innerHTML += `<div class="progress-item">${data.message}</div>`;
+            } else if (data.type === 'shot_complete') {
+                progressContainer.innerHTML += `<div class="progress-item" style="color: #10b981;">✓ ${data.message}</div>`;
+            } else if (data.type === 'complete') {
+                eventSource.close();
+                sequenceResults = data.result;
+                displayResults(sequenceResults);
+                btn.disabled = false;
+            } else if (data.type === 'error') {
+                eventSource.close();
+                showError(data.message);
+                btn.disabled = false;
+            }
+        };
+
+        eventSource.onerror = function(error) {
+            console.error('EventSource failed:', error);
+            eventSource.close();
+            btn.disabled = false;
+        };
+    } catch (error) {
+        showError(error.message);
+        const btn = document.getElementById('remix-btn');
+        if (btn) btn.disabled = false;
+    }
 }
 
 // Add a new shot panel
@@ -820,4 +1061,6 @@ window.expandShot = expandShot;
 window.expandShotFields = expandShotFields;
 window.toggleSharedSettings = toggleSharedSettings;
 window.downloadShot = downloadShot;
+window.removeRemixShot = removeRemixShot;
+window.expandRemixShotFields = expandRemixShotFields;
 

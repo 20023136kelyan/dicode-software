@@ -117,8 +117,21 @@ def build_prompt(shot_data, shot_number=1, shots_data=None):
         if camera_angles:
             prompt_parts.append(f"{camera_angles}")
         
-        # Add explicit maintenance instructions
-        prompt_parts.append("maintaining exact same appearance, clothing, voice, tone, and speaking style from previous shot")
+        # Voice/mic consistency: prefer explicit voice spec if provided, else match previous shot
+        voice_spec = shot_data.get("voice", "").strip()
+        if not voice_spec and shots_data and len(shots_data) > 0:
+            voice_spec = (shots_data[0].get("voice", "") or "").strip()
+        if voice_spec:
+            prompt_parts.append(
+                f"Use the same speaking voice: {voice_spec}. Maintain identical microphone tone and recording chain."
+            )
+        else:
+            prompt_parts.append(
+                "Use the exact same speaking voice, accent, delivery, and microphone tone as the previous shot."
+            )
+        
+        # Add explicit maintenance instructions for visuals and performance
+        prompt_parts.append("maintaining exact same appearance, clothing, tone, and speaking style from previous shot")
         
         # Change only dialog and maintain background audio
         if shot_data.get("dialog"):
@@ -148,6 +161,13 @@ def build_prompt(shot_data, shot_number=1, shots_data=None):
     # Add dialog
     if shot_data.get("dialog"):
         prompt_parts.append(f"'{shot_data['dialog']}'")
+    
+    # Optional: seed an explicit voice spec for shot 1 if provided to stabilize across sequence
+    voice_spec = (shot_data.get("voice", "") or "").strip()
+    if voice_spec:
+        prompt_parts.append(
+            f"Speaking voice: {voice_spec}. Microphone tone and recording chain should be consistent across shots."
+        )
     
     return ". ".join(prompt_parts)
 
@@ -333,4 +353,211 @@ def check_video_status(video_id):
         }
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+def remix_existing_video(video_id, shot_data, progress_queue=None):
+    """Remix an existing Sora video by id with a new prompt built from provided fields.
+
+    Args:
+        video_id: The source Sora video id to remix
+        shot_data: Dict with optional keys characters, environment, lighting, camera_angles, dialog, voice
+        progress_queue: Optional queue to stream progress updates
+
+    Returns:
+        dict containing status, output_dir, sequence_id, and single-shot results
+    """
+    api_key = load_api_key()
+    if not api_key or not api_key.strip():
+        return {
+            "error": "API key not configured or is empty",
+            "status": "error"
+        }
+
+    if not os.environ.get("OPENAI_API_KEY"):
+        os.environ["OPENAI_API_KEY"] = api_key
+
+    openai_client = OpenAI(api_key=api_key.strip())
+
+    # Create unique output folder
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = os.path.join(os.path.dirname(__file__), "output", f"sequence_{timestamp}")
+    os.makedirs(output_dir, exist_ok=True)
+
+    results = {
+        "sequence_id": f"sequence_{timestamp}",
+        "output_dir": output_dir,
+        "shots": [],
+        "status": "in_progress"
+    }
+
+    try:
+        # Build a remix prompt. We reuse build_prompt with shot_number=2 so it uses remix-style constraints
+        prompt = build_prompt(shot_data or {}, shot_number=2, shots_data=[shot_data or {}])
+
+        if progress_queue:
+            progress_queue.put({
+                'type': 'shot_start',
+                'shot_number': 1,
+                'total_shots': 1,
+                'message': 'Starting remix...'
+            })
+
+        remix_params = {
+            "video_id": video_id,
+            "prompt": prompt,
+        }
+
+        video = openai_client.videos.remix(**remix_params)
+
+        def progress_callback(progress, status):
+            if progress_queue:
+                progress_queue.put({
+                    'type': 'progress',
+                    'shot_number': 1,
+                    'total_shots': 1,
+                    'progress': progress,
+                    'status': status,
+                    'message': f'Remix: {status}... {progress:.1f}%'
+                })
+
+        downloaded_video = download_sora_video(
+            video,
+            output_dir,
+            "shot_1",
+            progress_callback=progress_callback
+        )
+
+        if progress_queue:
+            progress_queue.put({
+                'type': 'shot_complete',
+                'shot_number': 1,
+                'total_shots': 1,
+                'message': 'Remix completed!'
+            })
+
+        results["shots"].append({
+            "shot_number": 1,
+            "video_id": downloaded_video.id,
+            "file_path": os.path.join(output_dir, "shot_1.mp4"),
+            "status": "completed"
+        })
+
+        results["status"] = "completed"
+    except Exception as e:
+        results["status"] = "error"
+        error_str = str(e)
+        results["error"] = error_str
+        error_message = parse_openai_error(error_str)
+        if progress_queue:
+            progress_queue.put({
+                'type': 'error',
+                'message': error_message,
+                'full_error': error_str
+            })
+
+    return results
+
+
+def remix_video_sequence(video_id, shots_data, progress_queue=None):
+    """Remix up to 3 shots starting from a single source video id.
+
+    The first remix uses the provided video_id. Each subsequent shot remixes from
+    the immediately previous remix result to maintain visual and audio consistency.
+    """
+    api_key = load_api_key()
+    if not api_key or not api_key.strip():
+        return {
+            "error": "API key not configured or is empty",
+            "status": "error"
+        }
+
+    if not os.environ.get("OPENAI_API_KEY"):
+        os.environ["OPENAI_API_KEY"] = api_key
+
+    openai_client = OpenAI(api_key=api_key.strip())
+
+    # Create unique output folder
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = os.path.join(os.path.dirname(__file__), "output", f"sequence_{timestamp}")
+    os.makedirs(output_dir, exist_ok=True)
+
+    results = {
+        "sequence_id": f"sequence_{timestamp}",
+        "output_dir": output_dir,
+        "shots": [],
+        "status": "in_progress"
+    }
+
+    try:
+        previous_video_id = video_id
+
+        for i, shot_data in enumerate(shots_data, 1):
+            # Use remix-style prompt rules (like shot_number > 1 in build_prompt)
+            prompt = build_prompt(shot_data or {}, shot_number=2, shots_data=[shot_data or {}])
+
+            if progress_queue:
+                progress_queue.put({
+                    'type': 'shot_start',
+                    'shot_number': i,
+                    'total_shots': len(shots_data),
+                    'message': f'Starting remix of Shot {i}...'
+                })
+
+            remix_params = {
+                "video_id": previous_video_id,
+                "prompt": prompt,
+            }
+
+            video = openai_client.videos.remix(**remix_params)
+
+            def progress_callback(progress, status):
+                if progress_queue:
+                    progress_queue.put({
+                        'type': 'progress',
+                        'shot_number': i,
+                        'total_shots': len(shots_data),
+                        'progress': progress,
+                        'status': status,
+                        'message': f'Shot {i}: {status}... {progress:.1f}%'
+                    })
+
+            downloaded_video = download_sora_video(
+                video,
+                output_dir,
+                f"shot_{i}",
+                progress_callback=progress_callback
+            )
+
+            if progress_queue:
+                progress_queue.put({
+                    'type': 'shot_complete',
+                    'shot_number': i,
+                    'total_shots': len(shots_data),
+                    'message': f'Shot {i} completed!'
+                })
+
+            results["shots"].append({
+                "shot_number": i,
+                "video_id": downloaded_video.id,
+                "file_path": os.path.join(output_dir, f"shot_{i}.mp4"),
+                "status": "completed"
+            })
+
+            # Next shot remixes from this new result
+            previous_video_id = downloaded_video.id
+
+        results["status"] = "completed"
+    except Exception as e:
+        results["status"] = "error"
+        error_str = str(e)
+        results["error"] = error_str
+        error_message = parse_openai_error(error_str)
+        if progress_queue:
+            progress_queue.put({
+                'type': 'error',
+                'message': error_message,
+                'full_error': error_str
+            })
+
+    return results
 

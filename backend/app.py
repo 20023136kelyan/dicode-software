@@ -10,7 +10,7 @@ import uuid
 # Add backend directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from generator import generate_video_sequence, check_video_status, load_api_key
+from generator import generate_video_sequence, check_video_status, load_api_key, remix_existing_video, remix_video_sequence
 from stitcher import stitch_videos
 
 app = Flask(__name__)
@@ -137,6 +137,21 @@ def run_generation_in_thread(shots_data, reference_images, task_id, result_conta
         q.put(None)  # Signal end of stream
 
 
+def run_remix_in_thread(video_id, shot_data, task_id, result_container, q):
+    """Run remix in a separate thread"""
+    try:
+        result = remix_existing_video(video_id, shot_data, progress_queue=q)
+        result_container['result'] = result
+        generation_results[task_id] = result
+        q.put({'type': 'complete', 'result': result})
+    except Exception as e:
+        error_msg = str(e)
+        result_container['error'] = error_msg
+        q.put({'type': 'error', 'message': error_msg})
+        generation_results[task_id] = {'status': 'error', 'error': error_msg}
+    finally:
+        q.put(None)
+
 @app.route('/api/generate', methods=['POST'])
 def generate():
     """Generate video sequence"""
@@ -223,6 +238,85 @@ def get_result(task_id):
     
     result = generation_results[task_id]
     return jsonify(result)
+
+
+@app.route('/api/remix', methods=['POST'])
+def remix():
+    """Remix an existing video by id with new dialog and optional fields"""
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "Invalid JSON"}), 400
+        video_id = data.get('video_id')
+        if not video_id:
+            return jsonify({"error": "video_id is required"}), 400
+
+        # Branch: multi-shot via 'shots' or single-shot via top-level fields
+        shots = data.get('shots')
+
+        # Create task + progress queue
+        task_id = str(uuid.uuid4())
+        q = queue.Queue()
+        progress_queues[task_id] = q
+        result_container = {}
+
+        if isinstance(shots, list) and 1 <= len(shots) <= 3:
+            # Normalize and validate each shot
+            normalized = []
+            for s in shots:
+                s = s or {}
+                sd = {
+                    'characters': s.get('characters', '') or '',
+                    'environment': s.get('environment', '') or '',
+                    'lighting': s.get('lighting', '') or '',
+                    'camera_angles': s.get('camera_angles', '') or '',
+                    'dialog': s.get('dialog', '') or '',
+                }
+                if not sd['dialog']:
+                    return jsonify({"error": "Each shot requires dialog"}), 400
+                normalized.append(sd)
+
+            def run_multi():
+                try:
+                    result = remix_video_sequence(video_id, normalized, progress_queue=q)
+                    result_container['result'] = result
+                    generation_results[task_id] = result
+                    q.put({'type': 'complete', 'result': result})
+                except Exception as e:
+                    error_msg = str(e)
+                    result_container['error'] = error_msg
+                    q.put({'type': 'error', 'message': error_msg})
+                    generation_results[task_id] = {'status': 'error', 'error': error_msg}
+                finally:
+                    q.put(None)
+
+            thread = threading.Thread(target=run_multi)
+        else:
+            # Single-shot
+            shot_data = {
+                'characters': data.get('characters', '') or '',
+                'environment': data.get('environment', '') or '',
+                'lighting': data.get('lighting', '') or '',
+                'camera_angles': data.get('camera_angles', '') or '',
+                'dialog': data.get('dialog', '') or ''
+            }
+            if not shot_data['dialog']:
+                return jsonify({"error": "dialog is required"}), 400
+
+            thread = threading.Thread(
+                target=run_remix_in_thread,
+                args=(video_id, shot_data, task_id, result_container, q)
+            )
+        thread.daemon = True
+        thread.start()
+
+        return jsonify({
+            "task_id": task_id,
+            "status": "started",
+            "progress_url": f"/api/progress/{task_id}"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "error"}), 500
 
 
 @app.route('/api/stitch/<sequence_id>', methods=['POST'])

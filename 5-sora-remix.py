@@ -61,7 +61,7 @@ remix_video = download_sora_video(remix_video, output_dir, "shot_2")
 
 print("\nGenerating Shot 3 via remix...")
 remix_video_2 = openai.videos.remix(
-    video_id=video.id,
+    video_id=remix_video.id,
     prompt=shots[2],
 )
 
