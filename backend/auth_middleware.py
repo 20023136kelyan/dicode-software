@@ -1,39 +1,86 @@
 """
 Firebase Authentication Middleware for Flask
-Verifies Firebase ID tokens from Authorization header
+Verifies Firebase ID tokens from Authorization header using Google's public keys
+No service account needed!
 """
 
 import os
+import json
 from functools import wraps
 from flask import request, jsonify
-import firebase_admin
-from firebase_admin import credentials, auth
+import requests
+from jose import jwt, JWTError
 
-# Initialize Firebase Admin SDK
+# Firebase public keys URL
+FIREBASE_KEYS_URL = "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
+
+# Cache for public keys
+_firebase_public_keys = None
+_keys_cache_time = 0
+
 def initialize_firebase_admin():
-    """Initialize Firebase Admin SDK with credentials"""
+    """No initialization needed for public key verification"""
+    print("Using Firebase public key verification (no credentials required)")
+
+
+def get_firebase_public_keys():
+    """Fetch Firebase public keys for token verification"""
+    global _firebase_public_keys, _keys_cache_time
+    import time
+
+    # Cache keys for 1 hour
+    current_time = time.time()
+    if _firebase_public_keys and (current_time - _keys_cache_time) < 3600:
+        return _firebase_public_keys
+
     try:
-        # Check if already initialized
-        firebase_admin.get_app()
-        print("Firebase Admin already initialized")
-    except ValueError:
-        # Not initialized yet, initialize now
-        # Initialize without credentials - we only need to verify ID tokens
-        # This works on any platform (Railway, Cloud Run, local, etc.)
-        firebase_admin.initialize_app(options={
-            'projectId': os.environ.get('FIREBASE_PROJECT_ID', 'dicode-video-gen'),
-        })
-        print("Firebase Admin initialized successfully")
+        response = requests.get(FIREBASE_KEYS_URL, timeout=5)
+        response.raise_for_status()
+        _firebase_public_keys = response.json()
+        _keys_cache_time = current_time
+        return _firebase_public_keys
+    except Exception as e:
+        print(f"Error fetching Firebase public keys: {e}")
+        return _firebase_public_keys if _firebase_public_keys else {}
 
 
 def verify_token(id_token):
     """
-    Verify Firebase ID token
+    Verify Firebase ID token using Google's public keys
     Returns decoded token if valid, None otherwise
     """
     try:
-        decoded_token = auth.verify_id_token(id_token)
+        # Get Firebase public keys
+        public_keys = get_firebase_public_keys()
+        if not public_keys:
+            print("No public keys available")
+            return None
+
+        # Get the key ID from token header
+        unverified_header = jwt.get_unverified_header(id_token)
+        key_id = unverified_header.get('kid')
+
+        if not key_id or key_id not in public_keys:
+            print(f"Invalid key ID: {key_id}")
+            return None
+
+        # Get the public key
+        public_key = public_keys[key_id]
+
+        # Verify the token
+        project_id = os.environ.get('FIREBASE_PROJECT_ID', 'dicode-video-gen')
+        decoded_token = jwt.decode(
+            id_token,
+            public_key,
+            algorithms=['RS256'],
+            audience=project_id,
+            issuer=f'https://securetoken.google.com/{project_id}'
+        )
+
         return decoded_token
+    except JWTError as e:
+        print(f"JWT verification failed: {e}")
+        return None
     except Exception as e:
         print(f"Token verification failed: {e}")
         return None
