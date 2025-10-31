@@ -47,17 +47,24 @@ def parse_openai_error(error_str):
 
 
 def load_api_key():
-    """Load API key from config.json"""
+    """Load API key from environment variable or config.json"""
+    # First, try to load from environment variable (for Railway, Cloud Run, etc.)
+    api_key = os.environ.get('OPENAI_API_KEY')
+    if api_key:
+        print(f"API key loaded from environment variable (length: {len(api_key)})")
+        return api_key
+
+    # Fall back to config.json for local development
     config_path = os.path.join(os.path.dirname(__file__), "config.json")
     if not os.path.exists(config_path):
-        print(f"Config file not found at {config_path}")
+        print(f"Config file not found at {config_path} and no OPENAI_API_KEY environment variable")
         return None
-    
+
     with open(config_path, "r") as f:
         config = json.load(f)
         api_key = config.get("openai_api_key")
         if api_key:
-            print(f"API key loaded successfully (length: {len(api_key)})")
+            print(f"API key loaded from config.json (length: {len(api_key)})")
         else:
             print("API key not found in config.json")
         return api_key
