@@ -1,22 +1,160 @@
-const API_BASE_URL = 'http://localhost:8080/api';
+// ===== BACKEND CONFIGURATION =====
+// Set your backend URL here:
+// - For local backend: 'http://localhost:8080/api'
+// - For ngrok tunnel: 'https://your-id.ngrok-free.app/api'
+// - For localtunnel: 'https://your-subdomain.loca.lt/api'
+// - For Cloud Run: 'https://your-backend.run.app/api'
+// - Leave null for auto-detection (localhost in dev)
+const BACKEND_URL = 'https://video-gen-backend-859383774863.us-central1.run.app/api';  // Auto-updated by script
+
+// API Base URL - uses BACKEND_URL if set, otherwise auto-detects
+const API_BASE_URL = (() => {
+    // Use configured URL if provided
+    if (BACKEND_URL) {
+        return BACKEND_URL;
+    }
+
+    // Auto-detect: use localhost
+    return 'http://localhost:8080/api';
+})();
 
 let currentShots = 1;
 let sequenceResults = null;
 let currentRemixShots = 1;
+let currentUser = null;
+let authToken = null;
+
+// ===== AUTHENTICATION =====
+async function setupAuth() {
+    console.log('Setting up authentication...');
+
+    // Check if Firebase is available
+    if (typeof firebase === 'undefined') {
+        console.error('Firebase is not loaded!');
+        alert('Firebase SDK not loaded. Please refresh the page.');
+        return;
+    }
+
+    console.log('Firebase available:', firebase);
+
+    const auth = firebase.auth();
+    console.log('Auth instance:', auth);
+
+    // Listen for auth state changes
+    auth.onAuthStateChanged(async (user) => {
+        console.log('Auth state changed, user:', user);
+        currentUser = user;
+
+        if (user) {
+            // User is signed in
+            authToken = await user.getIdToken();
+            document.getElementById('user-email').textContent = user.email;
+            document.getElementById('user-info').style.display = 'block';
+            document.getElementById('login-prompt').style.display = 'none';
+
+            // Enable forms
+            document.getElementById('generation-form').style.pointerEvents = 'auto';
+            document.getElementById('generation-form').style.opacity = '1';
+            document.getElementById('remix-form').style.pointerEvents = 'auto';
+            document.getElementById('remix-form').style.opacity = '1';
+
+            // Check API key now that we're authenticated
+            checkApiKey();
+        } else {
+            // User is signed out
+            authToken = null;
+            document.getElementById('user-info').style.display = 'none';
+            document.getElementById('login-prompt').style.display = 'block';
+
+            // Disable forms
+            document.getElementById('generation-form').style.pointerEvents = 'none';
+            document.getElementById('generation-form').style.opacity = '0.5';
+            document.getElementById('remix-form').style.pointerEvents = 'none';
+            document.getElementById('remix-form').style.opacity = '0.5';
+
+            document.getElementById('status-text').textContent = 'Please sign in to continue';
+        }
+    });
+
+    // Login button
+    const loginBtn = document.getElementById('login-btn');
+    console.log('Login button element:', loginBtn);
+
+    if (loginBtn) {
+        loginBtn.addEventListener('click', async () => {
+            console.log('Login button clicked!');
+            const provider = new firebase.auth.GoogleAuthProvider();
+            provider.addScope('email');
+            try {
+                console.log('Attempting sign in...');
+                await auth.signInWithPopup(provider);
+            } catch (error) {
+                console.error('Login error:', error);
+                alert('Login failed: ' + error.message);
+            }
+        });
+        console.log('Login button event listener attached');
+    } else {
+        console.error('Login button not found!');
+    }
+
+    // Logout button
+    document.getElementById('logout-btn').addEventListener('click', async () => {
+        try {
+            await auth.signOut();
+        } catch (error) {
+            console.error('Logout error:', error);
+        }
+    });
+}
+
+// Helper function to get auth headers
+async function getAuthHeaders() {
+    if (!currentUser) {
+        return {};
+    }
+
+    // Refresh token if needed
+    authToken = await currentUser.getIdToken(true);
+
+    return {
+        'Authorization': `Bearer ${authToken}`
+    };
+}
 
 // Initialize app
-document.addEventListener('DOMContentLoaded', () => {
-    checkApiKey();
-    initializeForm();
-    setupEventListeners();
-    setupTabs();
-    initializeRemixForm();
+document.addEventListener('DOMContentLoaded', async () => {
+    console.log('DOM Content Loaded - Starting initialization...');
+
+    try {
+        // Wait for Firebase to initialize
+        console.log('Initializing Firebase...');
+        await window.firebaseInit.initializeFirebase();
+        console.log('Firebase initialized');
+
+        // Setup authentication
+        console.log('Setting up auth...');
+        await setupAuth();
+        console.log('Auth setup complete');
+
+        initializeForm();
+        setupEventListeners();
+        setupTabs();
+        initializeRemixForm();
+        console.log('App initialization complete!');
+    } catch (error) {
+        console.error('Error during initialization:', error);
+        alert('Failed to initialize app: ' + error.message);
+    }
 });
 
 // Check API key status
 async function checkApiKey() {
     try {
-        const response = await fetch(`${API_BASE_URL}/check-key`);
+        const authHeaders = await getAuthHeaders();
+        const response = await fetch(`${API_BASE_URL}/check-key`, {
+            headers: authHeaders
+        });
         const data = await response.json();
         
         const statusDot = document.getElementById('status-dot');
@@ -242,9 +380,10 @@ async function submitRemix() {
         const btn = document.getElementById('remix-btn');
         btn.disabled = true;
 
+        const authHeaders = await getAuthHeaders();
         const response = await fetch(`${API_BASE_URL}/remix`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHeaders },
             body: JSON.stringify(payload)
         });
 
@@ -803,6 +942,9 @@ async function generateVideos() {
             imageFiles[1] = shot1Input.files[0];
         }
         
+        // Get auth headers
+        const authHeaders = await getAuthHeaders();
+
         // Use FormData if we have images, otherwise use JSON
         let body, headers;
         if (imageFiles[1]) {
@@ -810,17 +952,17 @@ async function generateVideos() {
             formData.append('shots', JSON.stringify(shotsData));
             formData.append('quality', quality);
             formData.append('model', model);
-            
+
             // Only append image_1 (shots 2 and 3 don't use reference images)
             formData.append('image_1', imageFiles[1]);
-            
+
             body = formData;
-            headers = {}; // Let browser set Content-Type with boundary
+            headers = { ...authHeaders }; // Auth headers only, browser sets Content-Type
         } else {
             body = JSON.stringify({ shots: shotsData, quality: quality, model: model });
-            headers = { 'Content-Type': 'application/json' };
+            headers = { 'Content-Type': 'application/json', ...authHeaders };
         }
-        
+
         // Call backend API
         const response = await fetch(`${API_BASE_URL}/generate`, {
             method: 'POST',

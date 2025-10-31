@@ -6,15 +6,33 @@ from flask_cors import CORS
 import queue
 import threading
 import uuid
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+load_dotenv(env_path)
 
 # Add backend directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from generator import generate_video_sequence, check_video_status, load_api_key, remix_existing_video, remix_video_sequence
 from stitcher import stitch_videos
+from auth_middleware import initialize_firebase_admin, require_auth, optional_auth
 
 app = Flask(__name__)
-CORS(app)
+
+# Configure CORS - Allow all origins since we're handling auth with Firebase tokens
+CORS(app, resources={
+    r"/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": False
+    }
+})
+
+# Initialize Firebase Admin SDK
+initialize_firebase_admin()
 
 # Dictionary to store progress queues for each generation task
 progress_queues = {}
@@ -45,7 +63,14 @@ def serve_js():
     return send_from_directory(FRONTEND_DIR, 'app.js')
 
 
+@app.route('/firebase-init.js')
+def serve_firebase_init():
+    """Serve Firebase initialization script"""
+    return send_from_directory(FRONTEND_DIR, 'firebase-init.js')
+
+
 @app.route('/api/check-key', methods=['GET'])
+@optional_auth
 def check_key():
     """Check if API key is configured"""
     api_key = load_api_key()
@@ -53,6 +78,30 @@ def check_key():
         "configured": api_key is not None,
         "has_value": bool(api_key and api_key != "your-api-key-here")
     })
+
+
+@app.route('/api/firebase-config', methods=['GET'])
+def get_firebase_config():
+    """Get Firebase configuration from environment variables"""
+    config = {
+        "apiKey": os.getenv('FIREBASE_API_KEY'),
+        "authDomain": os.getenv('FIREBASE_AUTH_DOMAIN'),
+        "projectId": os.getenv('FIREBASE_PROJECT_ID'),
+        "storageBucket": os.getenv('FIREBASE_STORAGE_BUCKET'),
+        "messagingSenderId": os.getenv('FIREBASE_MESSAGING_SENDER_ID'),
+        "appId": os.getenv('FIREBASE_APP_ID')
+    }
+    
+    # Check if all required fields are present
+    missing_fields = [key for key, value in config.items() if not value]
+    
+    if missing_fields:
+        return jsonify({
+            "error": "Firebase configuration incomplete",
+            "missing_fields": missing_fields
+        }), 400
+    
+    return jsonify(config)
 
 
 @app.route('/api/set-key', methods=['POST'])
@@ -153,6 +202,7 @@ def run_remix_in_thread(video_id, shot_data, task_id, result_container, q):
         q.put(None)
 
 @app.route('/api/generate', methods=['POST'])
+@require_auth
 def generate():
     """Generate video sequence"""
     try:
@@ -241,6 +291,7 @@ def get_result(task_id):
 
 
 @app.route('/api/remix', methods=['POST'])
+@require_auth
 def remix():
     """Remix an existing video by id with new dialog and optional fields"""
     try:
@@ -320,6 +371,7 @@ def remix():
 
 
 @app.route('/api/stitch/<sequence_id>', methods=['POST'])
+@require_auth
 def stitch(sequence_id):
     """Stitch multiple shots into a single video"""
     try:
@@ -365,6 +417,7 @@ def stitch(sequence_id):
 
 
 @app.route('/api/download/<sequence_id>/<shot_number>', methods=['GET'])
+@require_auth
 def download_shot(sequence_id, shot_number):
     """Download individual shot"""
     shot_path = os.path.join(OUTPUT_DIR, sequence_id, f"shot_{shot_number}.mp4")
@@ -376,6 +429,7 @@ def download_shot(sequence_id, shot_number):
 
 
 @app.route('/api/download-sequence/<sequence_id>', methods=['GET'])
+@require_auth
 def download_sequence(sequence_id):
     """Download stitched sequence"""
     stitched_path = os.path.join(OUTPUT_DIR, sequence_id, "stitched_sequence.mp4")
@@ -398,5 +452,7 @@ if __name__ == '__main__':
     temp_dir = os.path.join(BASE_DIR, "temp")
     os.makedirs(temp_dir, exist_ok=True)
     
-    app.run(debug=True, host='0.0.0.0', port=8080)
+    # Get port from environment variable (for Cloud Run) or use default
+    port = int(os.environ.get('PORT', 8080))
+    app.run(debug=True, host='0.0.0.0', port=port)
 
