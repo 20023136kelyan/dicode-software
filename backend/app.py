@@ -417,19 +417,19 @@ def stitch(sequence_id):
 
 
 @app.route('/api/download/<sequence_id>/<shot_number>', methods=['GET'])
-@require_auth
+@optional_auth
 def download_shot(sequence_id, shot_number):
-    """Download individual shot"""
+    """Download individual shot - auth optional (protected by unique sequence_id)"""
     shot_path = os.path.join(OUTPUT_DIR, sequence_id, f"shot_{shot_number}.mp4")
-    
+
     if not os.path.exists(shot_path):
         return jsonify({"error": "Shot not found"}), 404
-    
+
     return send_file(shot_path, as_attachment=True)
 
 
 @app.route('/api/download-sequence/<sequence_id>', methods=['GET'])
-@require_auth
+@optional_auth
 def download_sequence(sequence_id):
     """Download stitched sequence"""
     stitched_path = os.path.join(OUTPUT_DIR, sequence_id, "stitched_sequence.mp4")
