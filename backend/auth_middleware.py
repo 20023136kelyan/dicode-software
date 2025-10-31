@@ -18,9 +18,9 @@ def initialize_firebase_admin():
         print("Firebase Admin already initialized")
     except ValueError:
         # Not initialized yet, initialize now
-        # Use default credentials from environment (works on Cloud Run)
-        cred = credentials.ApplicationDefault()
-        firebase_admin.initialize_app(cred, {
+        # Initialize without credentials - we only need to verify ID tokens
+        # This works on any platform (Railway, Cloud Run, local, etc.)
+        firebase_admin.initialize_app(options={
             'projectId': os.environ.get('FIREBASE_PROJECT_ID', 'dicode-video-gen'),
         })
         print("Firebase Admin initialized successfully")
