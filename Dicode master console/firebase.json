@@ -1,0 +1,58 @@
+{
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs20",
+    "ignore": [
+      "venv",
+      "node_modules",
+      ".git",
+      "firebase-debug.log",
+      "firebase-debug.*.log",
+      "__pycache__",
+      "*.pyc"
+    ]
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "hosting": {
+    "site": "dicode-suite",
+    "public": "client/out",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "!**/_next/**",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/api/**",
+        "function": "api"
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(js|css)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "max-age=31536000"
+          }
+        ]
+      },
+      {
+        "source": "**/*.@(jpg|jpeg|gif|png|svg|webp)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "max-age=31536000"
+          }
+        ]
+      }
+    ]
+  }
+}

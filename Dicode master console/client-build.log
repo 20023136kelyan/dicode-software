@@ -1,0 +1,23 @@
+
+> client@0.1.0 build
+> next build
+
+   ▲ Next.js 16.0.1 (Turbopack)
+   - Environments: .env
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 1951.5ms
+   Running TypeScript ...
+Failed to compile.
+
+./src/app/assets/page.tsx:104:14
+Type error: Cannot find name 'MagnifyingGlassIcon'.
+
+[0m [90m 102 |[39m         [33m<[39m[33mdiv[39m className[33m=[39m[32m"flex items-center gap-4"[39m[33m>[39m
+ [90m 103 |[39m           [33m<[39m[33mdiv[39m className[33m=[39m[32m"flex-1 relative"[39m[33m>[39m
+[31m[1m>[22m[39m[90m 104 |[39m             [33m<[39m[33mMagnifyingGlassIcon[39m className[33m=[39m[32m"absolute left-0 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400"[39m [33m/[39m[33m>[39m
+ [90m     |[39m              [31m[1m^[22m[39m
+ [90m 105 |[39m             [33m<[39m[33minput[39m
+ [90m 106 |[39m               type[33m=[39m[32m"text"[39m
+ [90m 107 |[39m               value[33m=[39m{searchQuery}[0m
+Next.js build worker exited with code: 1 and signal: null

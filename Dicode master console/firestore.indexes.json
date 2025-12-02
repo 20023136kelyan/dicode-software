@@ -1,0 +1,215 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "invitations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "organizationId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "invitations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "organizationId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "campaignEnrollments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "campaignId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "enrolledAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "campaignEnrollments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "enrolledAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "campaignEnrollments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "campaignId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "campaignProgress",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "campaignId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "videoId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "campaignProgress",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "campaignId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "campaignResponses",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "campaignId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "answeredAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "campaignResponses",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "campaignId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "answeredAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "campaignNotifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "scheduledFor",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "campaignNotifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "campaignId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "campaignNotifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "campaignId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "campaignInstances",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "parentCampaignId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "instanceNumber",
+          "order": "DESCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

@@ -1,0 +1,129 @@
+@import "tailwindcss";
+
+:root {
+  --color-primary: #F7B500;
+  --color-primary-dark: #E5A500;
+  --color-dark-bg: #1A1A1A;
+  --color-dark-card: #2A2A2A;
+  --color-dark-border: #3A3A3A;
+  --color-dark-text: #E5E5E5;
+  --color-dark-text-muted: #A0A0A0;
+  --color-blue-primary: #2B6CB0;
+  --color-blue-light: #4299E1;
+
+  --font-family-sans: Inter, system-ui, sans-serif;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-dark-border);
+  }
+
+  body {
+    background-color: var(--color-dark-bg);
+    color: var(--color-dark-text);
+    font-family: var(--font-family-sans);
+    -webkit-font-smoothing: antialiased;
+    margin: 0;
+    padding: 0;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+
+  /* Custom scrollbar */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background-color: var(--color-dark-card);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: var(--color-dark-border);
+    border-radius: 9999px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-dark-text-muted);
+  }
+
+  /* Button styles */
+  .btn-primary {
+    background-color: var(--color-primary);
+    color: var(--color-dark-bg);
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    font-weight: 500;
+    transition: colors 150ms;
+  }
+
+  .btn-primary:hover {
+    background-color: var(--color-primary-dark);
+  }
+
+  .btn-secondary {
+    background-color: var(--color-dark-card);
+    color: var(--color-dark-text);
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    font-weight: 500;
+    transition: colors 150ms;
+  }
+
+  .btn-secondary:hover {
+    background-color: var(--color-dark-border);
+  }
+
+  /* Fallback primary utilities (ensure visibility even if Tailwind theme fails) */
+  .bg-primary { background-color: var(--color-primary) !important; color: var(--color-dark-bg); }
+  .bg-primary-dark { background-color: var(--color-primary-dark) !important; }
+  .text-primary { color: var(--color-primary) !important; }
+  .border-primary { border-color: var(--color-primary) !important; }
+
+  /* Card styles */
+  .card {
+    background-color: var(--color-dark-card);
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+    border: 1px solid var(--color-dark-border);
+  }
+
+  .card.card--no-border {
+    border: none !important;
+  }
+
+  /* Input styles */
+  .input {
+    background-color: var(--color-dark-card);
+    border: 1px solid var(--color-dark-border);
+    border-radius: 0.5rem;
+    padding: 0.5rem 1rem;
+    color: var(--color-dark-text);
+    outline: none;
+  }
+
+  .input::placeholder {
+    color: var(--color-dark-text-muted);
+  }
+
+  .input:focus {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(to right, var(--color-blue-light), var(--color-primary));
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+  }
+}

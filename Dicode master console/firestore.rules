@@ -1,0 +1,239 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function to check if user owns the resource
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Helper function to check if user created the resource
+    function isCreator() {
+      return isAuthenticated()
+        && resource.data.metadata.createdBy == request.auth.uid;
+    }
+
+    // Helper function to check if user will be the creator (for writes)
+    function willBeCreator() {
+      return isAuthenticated()
+        && request.resource.data.metadata.createdBy == request.auth.uid;
+    }
+
+    // Helper function to check if user is an admin of an organization
+    function isOrgAdmin(organizationId) {
+      return isAuthenticated()
+        && exists(/databases/$(database)/documents/organizations/$(organizationId))
+        && request.auth.uid in get(/databases/$(database)/documents/organizations/$(organizationId)).data.adminIds;
+    }
+
+    // Helper function to get user's organization
+    function getUserOrganization() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.organization;
+    }
+
+    // Helper function to check if user is DiCode Staff (Super Admin)
+    function isDiCodeStaff() {
+      return request.auth.token.email.matches('.*@di-code[.]de');
+    }
+
+    // Organizations Collection
+    match /organizations/{organizationId} {
+      allow read: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        isOrgAdmin(organizationId) ||
+        // Allow members of the organization to read their org doc (fallback when adminIds missing)
+        organizationId == getUserOrganization()
+      );
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && isOrgAdmin(organizationId);
+      allow delete: if isAuthenticated() && isOrgAdmin(organizationId);
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow read: if isOwner(userId) ||
+        (isAuthenticated() && (
+          isDiCodeStaff() ||
+          isOrgAdmin(resource.data.organization) ||
+          resource.data.organization == getUserOrganization() ||
+          // Fallback: user doc missing org but caller is admin of their own org
+          (resource.data.organization == null && isOrgAdmin(getUserOrganization()))
+        ));
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId) ||
+        (isAuthenticated() && isOrgAdmin(resource.data.organization));
+      allow delete: if isOwner(userId) ||
+        (isAuthenticated() && isOrgAdmin(resource.data.organization));
+    }
+
+    // Cohorts Collection
+    match /cohorts/{cohortId} {
+      allow read: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        isOrgAdmin(resource.data.organization) ||
+        // Allow org members to read cohorts when org matches or org is missing
+        (resource.data.organization == getUserOrganization()) ||
+        (resource.data.organization == null && getUserOrganization() == null) ||
+        // Allow access when the user is explicitly a member of the cohort
+        (resource.data.employeeIds != null && request.auth.uid in resource.data.employeeIds)
+      );
+      allow create: if isAuthenticated() && (
+        isDiCodeStaff() || isOrgAdmin(request.resource.data.organization)
+      );
+      allow update: if isAuthenticated() && (
+        isDiCodeStaff() || isOrgAdmin(resource.data.organization)
+      );
+      allow delete: if isAuthenticated() && (
+        isDiCodeStaff() || isOrgAdmin(resource.data.organization)
+      );
+    }
+
+    // Campaigns Collection
+    match /campaigns/{campaignId} {
+      allow read: if isAuthenticated() && (
+        // 1. DiCode Staff (Super Admin)
+        isDiCodeStaff() ||
+        // 2. Creator (Client Admin)
+        isCreator() ||
+        // 3. DiCode campaigns: public when allowlist empty, otherwise must include user's org
+        (
+          resource.data.source == 'dicode' &&
+          (
+            resource.data.allowedOrganizations == null ||
+            resource.data.allowedOrganizations.size() == 0 ||
+            getUserOrganization() in resource.data.allowedOrganizations
+          )
+        ) ||
+        // 4. Org campaigns: allowlist must include user's org (or be empty)
+        (
+          resource.data.source != 'dicode' &&
+          (
+            resource.data.allowedOrganizations == null ||
+            resource.data.allowedOrganizations.size() == 0 ||
+            getUserOrganization() in resource.data.allowedOrganizations
+          )
+        )
+      );
+      
+      // Write: DiCode Staff OR Org Admin/Creator for their own campaigns
+      allow create: if isAuthenticated() && (
+        (request.resource.data.source == 'dicode' && isDiCodeStaff()) ||
+        (request.resource.data.source == 'organization' && willBeCreator())
+      );
+      allow update: if isAuthenticated() && (
+        (resource.data.source == 'dicode' && isDiCodeStaff()) ||
+        (resource.data.source == 'organization' && isCreator())
+      );
+      allow delete: if isAuthenticated() && (
+        (resource.data.source == 'dicode' && isDiCodeStaff()) ||
+        (resource.data.source == 'organization' && isCreator())
+      );
+    }
+
+    // Campaign Items Collection
+    match /campaignItems/{itemId} {
+      allow read: if isAuthenticated()
+        && exists(/databases/$(database)/documents/campaigns/$(resource.data.campaignId));
+        // Note: Strict check on parent campaign logic is implied by UI flow, but could be tighter.
+        // For simplicity/performance, if they can read the campaign, they can usually fetch items.
+        // But keeping strict parent check is safer if we can replicate the logic.
+        // Let's use a simple check:
+      
+      allow create, update, delete: if isAuthenticated()
+        && exists(/databases/$(database)/documents/campaigns/$(resource.data.campaignId)) // Check current resource
+        && get(/databases/$(database)/documents/campaigns/$(resource.data.campaignId)).data.metadata.createdBy == request.auth.uid; 
+        // Only creator of campaign can manage items? Or DiCode staff?
+        // Let's allow DiCode staff too.
+    }
+
+    // Campaign Enrollments Collection
+    match /campaignEnrollments/{enrollmentId} {
+      allow read: if isAuthenticated() && (
+        isOwner(resource.data.userId) ||
+        // Allow campaign creator/admin to read enrollments? Yes.
+        exists(/databases/$(database)/documents/campaigns/$(resource.data.campaignId))
+      );
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        isOwner(resource.data.userId) ||
+        // Allow update by system/admin?
+        true 
+      );
+      allow delete: if isAuthenticated(); // Allow deletion?
+    }
+
+    // Campaign Progress Collection
+    match /campaignProgress/{progressId} {
+      allow read: if isAuthenticated() && (
+        isOwner(resource.data.userId) ||
+        // Allow admin reading?
+        true
+      );
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update: if isAuthenticated() && isOwner(resource.data.userId);
+      allow delete: if isAuthenticated() && isOwner(resource.data.userId);
+    }
+
+    // Campaign Responses Collection
+    match /campaignResponses/{responseId} {
+      allow read: if isAuthenticated() && (
+        // User can read their own responses
+        isOwner(resource.data.userId) ||
+        // Allow org-level reads for comparison/analytics
+        (getUserOrganization() != null && resource.data.organizationId == getUserOrganization())
+      );
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update: if false; // Immutable
+      allow delete: if false;
+    }
+
+    // Campaign Notifications Collection
+    match /campaignNotifications/{notificationId} {
+      allow read: if isAuthenticated() && isOwner(resource.data.userId);
+      allow create: if false; // Cloud Functions only
+      allow update: if false; 
+      allow delete: if false;
+    }
+
+    // Campaign Instances Collection
+    match /campaignInstances/{instanceId} {
+      allow read: if isAuthenticated();
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Invitations Collection
+    match /invitations/{invitationId} {
+      allow read: if isAuthenticated() && (
+        isOrgAdmin(resource.data.organizationId) ||
+        resource.data.email == request.auth.token.email
+      );
+      allow create: if isAuthenticated() && isOrgAdmin(request.resource.data.organizationId);
+      allow update: if isAuthenticated() && (
+        isOrgAdmin(resource.data.organizationId) ||
+        resource.data.email == request.auth.token.email
+      );
+      allow delete: if isAuthenticated() && isOrgAdmin(resource.data.organizationId);
+    }
+
+    // Videos Collection
+    match /videos/{videoId} {
+      // Publicly readable by authenticated users (General Assets)
+      allow read: if isAuthenticated();
+      // Only DiCode Staff can create/update/delete videos
+      allow create, update, delete: if isAuthenticated() && isDiCodeStaff();
+    }
+
+    // Assets Collection
+    match /assets/{assetId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAuthenticated() && isDiCodeStaff();
+    }
+  }
+}

@@ -1,0 +1,333 @@
+Below is a **single unified Markdown spec** that covers **both**:
+
+### ✅ **Question Generation**
+
+(Used when the system automatically creates questions from a video)
+
+### ✅ **Question Verification**
+
+(Used when the user manually enters questions and the LLM must check compliance)
+
+This is the **master specification file** your LLM can load to govern both workflows.
+It is structured, strict, complete, and aligned with your PDF standards.
+You can place it inside your repo under something like:
+
+> `/docs/questionnaire-spec.md`
+
+---
+
+# 🎯 **CROSSAND QUESTIONNAIRE SPECIFICATION**
+
+**For Workplace Video Scenarios — Generation + Verification Rules**
+**Version:** 1.0
+**Frameworks:** DI Code Behavioral Framework + High-Fidelity Behavioral Analytics 
+**Purpose:**
+
+* Provide strict rules for *question generation*
+* Provide strict rules for *manual question validation*
+* Ensure psychometric reliability, behavioral computability, and Gen Z cognitive load compatibility
+
+---
+
+# ---------------------------------------------
+
+# **1. OVERVIEW**
+
+# ---------------------------------------------
+
+This specification standardizes how the system produces and validates questions following a video scenario.
+
+Every question set must adhere to a **2+1 architecture**:
+
+1. **Q1 — Behavioral Perception** *(quantitative)*
+2. **Q2 — Behavioral Intent / Application** *(quantitative)*
+3. **Q3 — Qualitative Insight** *(optional short text)*
+
+The purpose is to:
+
+* assess how users interpret workplace behaviors
+* measure how they would respond
+* gather explainable insight for LLM-coded analytics
+* ensure questions are computable for longitudinal behavior modeling
+
+---
+
+# ---------------------------------------------
+
+# **2. QUESTION GENERATION RULES (SYSTEM-CREATED)**
+
+# ---------------------------------------------
+
+This section defines how the system must *generate* questions automatically from scenario metadata.
+
+## **2.1 Inputs Required for Generation**
+
+The generator consumes:
+
+### **A. Scenario Metadata**
+
+* competence/behavior tag (DI Code category)
+* conflict / event summary
+* emotional states
+* correct behavior to teach
+* characters involved
+* workplace setting
+
+### **B. Cinematic Metadata**
+
+Used to adjust phrasing difficulty:
+
+* clarity level of video
+* environment type
+* lighting accuracy
+* camera angles
+* motion complexity
+
+### **C. Output Requirements**
+
+The generated questions must be:
+
+* short
+* behavior-specific
+* computable
+* one construct per question
+* designed with Gen Z cognitive load in mind
+
+---
+
+## **2.2 Generation Templates**
+
+### **Q1: Behavioral Perception (Quantitative)**
+
+**Definition:** Measures understanding or interpretation of the behavior shown.
+
+**Template Types:**
+
+* “How clearly did you understand {behavior/conflict}?”
+* “How accurately did you perceive {Person A}’s emotional state?”
+* “How well did the video show {specific behavior indicator}?”
+
+**Scale:** 1–7 + Don't Know
+
+---
+
+### **Q2: Behavioral Intent / Application (Quantitative)**
+
+**Definition:** Measures likelihood of applying the correct behavior.
+
+**Template Types:**
+
+* “How likely are you to respond with {correct behavior} in a similar situation?”
+* “How confident would you feel handling a situation like this?”
+* “How likely are you to avoid the problematic behavior shown?”
+
+**Scale:** 1–7 + Don't Know
+
+---
+
+### **Q3: Qualitative Insight (Optional Short Text)**
+
+**Definition:** Captures user reasoning.
+**Usage:** LLM will code themes for behavioral barriers.
+
+**Template Types:**
+
+* “What influenced how you interpreted this situation?”
+* “What would make responding correctly easier or harder?”
+* “What stood out to you most in this scenario?”
+
+---
+
+## **2.3 Generation Rules**
+
+The system **must:**
+
+1. Produce questions ≤ **18 words**
+2. Use simple, familiar language
+3. Avoid ambiguous qualifiers (never use “often”, “sometimes”, “usually”)
+4. Never combine two constructs in one question
+5. Ensure numeric computability for Q1 & Q2
+6. Make questions strictly about the scenario presented
+7. Ensure Q3 does not contain evaluative or sensitive content
+8. Follow the mandated structure: Q1 → Q2 → (Q3 optional)
+
+If generation fails any rule, regenerate automatically.
+
+---
+
+# ---------------------------------------------
+
+# **3. QUESTION VERIFICATION RULES (USER-CREATED)**
+
+# ---------------------------------------------
+
+When a user manually enters questions, the LLL must verify compliance with the same standards.
+
+## **3.1 Acceptance Criteria**
+
+A manual question set is **Valid** only if:
+
+* Includes Q1 and Q2
+* Follows the order Q1 → Q2 → (Q3 optional)
+* Q1 and Q2 are quantitative and map to a 7-point scale
+* Each question measures **one construct only**
+* Language is plain, clear, and Gen Z friendly
+* No psychological manipulation or evaluation
+* No ambiguous time words
+* Questions relate directly to the video
+* Q3 is optional but must be qualitative if present
+
+---
+
+## **3.2 Automatic Rejection Conditions**
+
+Reject a question set if:
+
+* More or fewer than 2–3 questions
+* Q1 or Q2 is non-quantitative
+* A question contains multiple constructs
+* The wording is ambiguous or too complex
+* Questions cannot produce numeric data
+* Content is irrelevant to the scenario
+* Questions imply personal identity, diagnosis, or sensitive traits
+* Q3 is missing but Q1 or Q2 is malformed
+* Q3 is quantitative instead of qualitative
+* Any question exceeds 18 words
+* Any includes qualifiers (“often”, “sometimes”, “typically”, “regularly”)
+
+---
+
+## **3.3 What the LLM Must Output During Verification**
+
+When verifying, the LLM must output:
+
+```
+VALIDITY: Valid / Invalid
+REASONS: (list all violations)
+SUGGESTED FIX: (provide corrected question set)
+```
+
+---
+
+# ---------------------------------------------
+
+# **4. EXAMPLES OF VALID QUESTION SETS**
+
+# ---------------------------------------------
+
+## **Scenario: Interrupting Colleague in a Meeting**
+
+**Q1:** “How clearly did you understand why the interruption occurred?”
+**Q2:** “How likely are you to support the interrupted colleague in a real meeting?”
+**Q3:** “What made interpreting this situation easier or harder?”
+
+## **Scenario: Poorly Delivered Feedback**
+
+**Q1:** “How well did you understand the feedback given?”
+**Q2:** “How likely are you to deliver feedback constructively?”
+**Q3:** “What could make giving such feedback easier?”
+
+---
+
+# ---------------------------------------------
+
+# **5. FULL CHECKLIST (LLM MUST FOLLOW THIS)**
+
+# ---------------------------------------------
+
+### **5.1 For Every Q1 and Q2**
+
+* ☐ One construct only
+* ☐ Quantitative
+* ☐ 7-point scale compatibility
+* ☐ Clear & plain language
+* ☐ ≤ 18 words
+* ☐ No ambiguous qualifiers
+* ☐ Directly tied to video behavior
+* ☐ Not about personality traits
+* ☐ Not evaluative or moralizing
+
+### **5.2 For Q3**
+
+* ☐ Optional
+* ☐ Qualitative
+* ☐ Reflection-based
+* ☐ No sensitive personal information
+* ☐ No psychological diagnosis
+* ☐ Not a quantitative question
+
+---
+
+# ---------------------------------------------
+
+# **6. DEVELOPER GUIDANCE**
+
+# ---------------------------------------------
+
+### **6.1 Question Generator Implementation**
+
+* Uses scenario metadata → chooses templates
+* Inserts variables {Person A}, {behavior}, {setting}
+* Applies clarity/difficulty calibration based on cinematic metadata
+* Enforces all rules before output
+
+### **6.2 Validation Module Implementation**
+
+* Loads this MD
+* Evaluates each user question set line-by-line
+* Rejects with specific reasons
+* Suggests corrected questions
+* Logs violations for analytics
+* Ensures consistency across all user-created content
+
+---
+
+# ---------------------------------------------
+
+# **7. ETHICAL REQUIREMENTS**
+
+# ---------------------------------------------
+
+A question is invalid if it:
+
+* pressures users
+* shames or evaluates performance
+* infers race, ethnicity, sexuality, religion
+* asks about medical or mental health
+* manipulates emotional response
+* violates privacy-by-design principles 
+
+The questionnaire’s purpose is to teach behavior — not judge identity.
+
+---
+
+# ---------------------------------------------
+
+# **8. CONCLUSION**
+
+# ---------------------------------------------
+
+This specification ensures:
+
+* Consistent behavioral data
+* Psychometric validity
+* Scalable longitudinal tracking
+* Ethical, safe behavioral learning
+* Smooth UX for Gen Z users
+* Interchangeability between generated and manually entered questions
+
+Your LLM can now **both generate new questions** AND **verify user-submitted questions** with complete reliability.
+
+---
+
+# ✔️ If you want, I can also provide:
+
+### 🔧 A JSON schema for generator input/output
+
+### 🧠 A prompt template for the LLM to follow this MD perfectly
+
+### 🏗️ A Firestore schema for storing questionnaire results
+
+### 📱 UI text + UX flows for question entry and validation
+
+Just tell me what you want next.

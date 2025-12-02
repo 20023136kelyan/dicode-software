@@ -1,0 +1,23 @@
+
+> client@0.1.0 build
+> next build
+
+   ▲ Next.js 16.0.1 (Turbopack)
+   - Environments: .env
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 1785.6ms
+   Running TypeScript ...
+Failed to compile.
+
+./src/app/assets/page.tsx:256:58
+Type error: Property 'toDate' does not exist on type 'Date'.
+
+[0m [90m 254 |[39m                   [33m<[39m[33mdiv[39m className[33m=[39m[32m"mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-400"[39m[33m>[39m
+ [90m 255 |[39m                     [33m<[39m[33mspan[39m[33m>[39m
+[31m[1m>[22m[39m[90m 256 |[39m                       [33mCreated[39m {asset[33m.[39mmetadata[33m.[39mcreatedAt[33m?[39m[33m.[39mtoDate[33m?[39m[33m.[39m()[33m.[39mtoLocaleDateString[33m?[39m[33m.[39m() [33m?[39m[33m?[39m [32m''[39m}
+ [90m     |[39m                                                          [31m[1m^[22m[39m
+ [90m 257 |[39m                     [33m<[39m[33m/[39m[33mspan[39m[33m>[39m
+ [90m 258 |[39m                     [33m<[39m[33mspan[39m className[33m=[39m[32m"inline-flex items-center gap-1 text-slate-500"[39m[33m>[39m
+ [90m 259 |[39m                       {asset[33m.[39mtype [33m===[39m [32m'character'[39m [33m&&[39m [33m<[39m[33mSparkles[39m className[33m=[39m[32m"h-3.5 w-3.5"[39m [33m/[39m[33m>[39m}[0m
+Next.js build worker exited with code: 1 and signal: null
