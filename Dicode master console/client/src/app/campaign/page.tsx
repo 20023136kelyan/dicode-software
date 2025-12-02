@@ -165,100 +165,120 @@ export default function CampaignDetailPage() {
 
   return (
     <MainLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-12 h-12 rounded-xl bg-sky-500 flex items-center justify-center shadow-lg shadow-sky-500/25">
-                <BookOpenIcon className="w-8 h-8 text-white" />
+      <div className="space-y-8 text-slate-900">
+        {/* Hero Header */}
+        <section className="rounded-[32px] border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-8 shadow-xl shadow-slate-100">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-4">
+              <div className="flex items-center gap-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-lg">
+                  <BookOpenIcon className="h-7 w-7" />
               </div>
               <div>
-                <h1 className="text-3xl font-bold text-gray-900">{campaign.title}</h1>
-                <div className="flex items-center gap-3 mt-1">
-                  <span className="text-sm text-gray-500">
-                    {campaign.items.length} video{campaign.items.length !== 1 ? 's' : ''}
+                  <div className="flex items-center gap-3">
+                    <h1 className="text-3xl font-semibold text-slate-900">{campaign.title}</h1>
+                    <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                      campaign.metadata.isPublished 
+                        ? 'bg-emerald-100 text-emerald-700' 
+                        : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {campaign.metadata.isPublished ? 'Published' : 'Draft'}
                   </span>
-                  <span className="text-gray-300">•</span>
-                  <span className={`text-sm ${campaign.metadata.isPublished ? 'text-emerald-600' : 'text-yellow-600'}`}>
-                    {campaign.metadata.isPublished ? '● Published' : '● Draft'}
-                  </span>
-                </div>
+                  </div>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {campaign.items.length} video{campaign.items.length !== 1 ? 's' : ''} • Created {formatDate(campaign.metadata.createdAt)}
+                  </p>
               </div>
             </div>
             {campaign.description && (
-              <p className="text-gray-600 mt-3 max-w-3xl">{campaign.description}</p>
+                <p className="text-slate-600 max-w-2xl">{campaign.description}</p>
             )}
-          </div>
-
-          <div className="flex items-center gap-3">
+              <div className="flex flex-wrap gap-3">
             <button
               onClick={() => router.push(`/campaign/edit?id=${campaign.id}`)}
-              className="px-4 py-2.5 bg-white border border-gray-200 rounded-xl font-semibold text-gray-700 hover:border-gray-300 hover:shadow-sm transition-all flex items-center gap-2"
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:shadow-sm"
             >
-              <PencilIcon className="w-4 h-4" />
-              Edit
+                  <PencilIcon className="h-4 w-4" />
+                  Edit Campaign
             </button>
             <button
               onClick={handleTogglePublish}
               disabled={publishing}
-              className={`px-4 py-2.5 rounded-xl font-semibold transition-all flex items-center gap-2 ${
+                  className={`inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition disabled:opacity-50 ${
                 campaign.metadata.isPublished
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'btn-primary'
-              } disabled:opacity-50`}
+                      ? 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      : 'bg-slate-900 text-white shadow-[0_15px_45px_rgba(15,23,42,0.25)] hover:brightness-110'
+                  }`}
             >
               {campaign.metadata.isPublished ? (
                 <>
-                  <ClockIcon className="w-4 h-4" />
+                      <ClockIcon className="h-4 w-4" />
                   Unpublish
                 </>
               ) : (
                 <>
-                  <CheckCircleIcon className="w-4 h-4" />
-                  Publish
+                      <CheckCircleIcon className="h-4 w-4" />
+                      Publish Campaign
                 </>
               )}
             </button>
           </div>
         </div>
 
+            <div className="grid w-full max-w-sm gap-4 sm:grid-cols-2">
+              <div className="rounded-2xl border border-white/70 bg-white/90 p-4 text-center shadow-sm">
+                <p className="text-3xl font-semibold text-slate-900">{campaign.items.length}</p>
+                <p className="mt-2 text-xs uppercase tracking-[0.35em] text-slate-400">Videos</p>
+              </div>
+              <div className="rounded-2xl border border-white/70 bg-white/90 p-4 text-center shadow-sm">
+                <p className="text-3xl font-semibold text-slate-900">{totalQuestions}</p>
+                <p className="mt-2 text-xs uppercase tracking-[0.35em] text-slate-400">Questions</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* Campaign Info Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Skill Focus */}
-          <div className="bg-white border border-gray-200 rounded-2xl p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center">
-                <BookOpenIcon className="w-6 h-6 text-sky-600" />
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-100">
+                <BookOpenIcon className="h-5 w-5 text-sky-600" />
               </div>
               <div>
-                <p className="text-xs text-gray-500 font-medium">Skill Focus</p>
-                <p className="text-sm font-semibold text-gray-800">{campaign.skillFocus}</p>
+                <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">Skill Focus</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">{campaign.skillFocus}</p>
               </div>
             </div>
           </div>
 
           {/* Organization Access */}
-          <div className="bg-white border border-gray-200 rounded-2xl p-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
-                <UserGroupIcon className="w-6 h-6 text-purple-600" />
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-100">
+                <UserGroupIcon className="h-5 w-5 text-violet-600" />
               </div>
               <div>
-                <p className="text-xs text-gray-500 font-medium">Organization Access</p>
+                <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">Organization Access</p>
                 {campaign.allowedOrganizations && campaign.allowedOrganizations.length > 0 ? (
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {campaign.allowedOrganizations.map((org) => (
+                    {campaign.allowedOrganizations.slice(0, 3).map((org) => (
                       <span
                         key={org}
-                        className="px-2 py-0.5 bg-purple-50 border border-purple-200 rounded text-xs text-purple-700 font-medium"
+                        className="rounded-full bg-violet-50 border border-violet-200 px-2 py-0.5 text-xs font-medium text-violet-700"
                       >
                         {org}
                       </span>
                     ))}
+                    {campaign.allowedOrganizations.length > 3 && (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                        +{campaign.allowedOrganizations.length - 3} more
+                      </span>
+                    )}
                   </div>
                 ) : (
-                  <p className="text-sm font-semibold text-gray-800">All Organizations</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900">All Organizations</p>
                 )}
               </div>
             </div>
@@ -266,14 +286,14 @@ export default function CampaignDetailPage() {
 
           {/* Schedule */}
           {campaign.schedule && (
-            <div className="bg-white border border-gray-200 rounded-2xl p-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                  <CalendarIcon className="w-6 h-6 text-emerald-600" />
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex items-center gap-4">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-100">
+                  <CalendarIcon className="h-5 w-5 text-emerald-600" />
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500 font-medium">Schedule</p>
-                  <p className="text-sm font-semibold text-gray-800 capitalize">
+                  <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">Schedule</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900 capitalize">
                     {campaign.schedule.frequency}
                   </p>
                 </div>
@@ -284,27 +304,27 @@ export default function CampaignDetailPage() {
 
         {/* Schedule Details */}
         {campaign.schedule && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-              <CalendarIcon className="w-5 h-5 text-gray-600" />
+          <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="text-base font-semibold text-slate-900 mb-5 flex items-center gap-2">
+              <CalendarIcon className="h-5 w-5 text-slate-400" />
               Schedule Details
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div>
-                <p className="text-xs text-gray-500 font-medium mb-1">Start Date</p>
-                <p className="text-sm text-gray-800">
-                  {new Date(campaign.schedule.startDate).toLocaleDateString()}
+                <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Start Date</p>
+                <p className="text-sm font-medium text-slate-900">
+                  {formatDate(campaign.schedule.startDate)}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-gray-500 font-medium mb-1">End Date</p>
-                <p className="text-sm text-gray-800">
-                  {new Date(campaign.schedule.endDate).toLocaleDateString()}
+                <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">End Date</p>
+                <p className="text-sm font-medium text-slate-900">
+                  {formatDate(campaign.schedule.endDate)}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-gray-500 font-medium mb-1">Frequency</p>
-                <p className="text-sm text-gray-800 capitalize">{campaign.schedule.frequency}</p>
+                <p className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Frequency</p>
+                <p className="text-sm font-medium text-slate-900 capitalize">{campaign.schedule.frequency}</p>
               </div>
             </div>
           </div>
@@ -312,71 +332,86 @@ export default function CampaignDetailPage() {
 
         {/* Automation Settings */}
         {campaign.automation && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-              <BellIcon className="w-5 h-5 text-gray-600" />
+          <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="text-base font-semibold text-slate-900 mb-5 flex items-center gap-2">
+              <BellIcon className="h-5 w-5 text-slate-400" />
               Automation Settings
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex items-center gap-3">
-                <div className={`w-5 h-5 rounded flex items-center justify-center ${campaign.anonymousResponses ? 'bg-green-100' : 'bg-gray-100'}`}>
-                  {campaign.anonymousResponses && <CheckCircleIcon className="w-4 h-4 text-green-600" />}
+              <div className="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+                <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${campaign.anonymousResponses ? 'bg-emerald-100' : 'bg-slate-100'}`}>
+                  {campaign.anonymousResponses ? (
+                    <CheckCircleIcon className="h-5 w-5 text-emerald-600" />
+                  ) : (
+                    <ShieldCheckIcon className="h-5 w-5 text-slate-400" />
+                  )}
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-800">Anonymous Responses</p>
-                  <p className="text-xs text-gray-500">Responses are kept anonymous</p>
+                  <p className="text-sm font-semibold text-slate-900">Anonymous Responses</p>
+                  <p className="text-xs text-slate-500">Responses are kept anonymous</p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <div className={`w-5 h-5 rounded flex items-center justify-center ${campaign.automation.autoSendInvites ? 'bg-green-100' : 'bg-gray-100'}`}>
-                  {campaign.automation.autoSendInvites && <EnvelopeIcon className="w-4 h-4 text-green-600" />}
+              <div className="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+                <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${campaign.automation.autoSendInvites ? 'bg-emerald-100' : 'bg-slate-100'}`}>
+                  {campaign.automation.autoSendInvites ? (
+                    <EnvelopeIcon className="h-5 w-5 text-emerald-600" />
+                  ) : (
+                    <EnvelopeIcon className="h-5 w-5 text-slate-400" />
+                  )}
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-800">Auto-Send Invites</p>
-                  <p className="text-xs text-gray-500">Automatically send invitations</p>
+                  <p className="text-sm font-semibold text-slate-900">Auto-Send Invites</p>
+                  <p className="text-xs text-slate-500">Automatically send invitations</p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <div className={`w-5 h-5 rounded flex items-center justify-center ${campaign.automation.sendReminders ? 'bg-green-100' : 'bg-gray-100'}`}>
-                  {campaign.automation.sendReminders && <BellIcon className="w-4 h-4 text-green-600" />}
+              <div className="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+                <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${campaign.automation.sendReminders ? 'bg-emerald-100' : 'bg-slate-100'}`}>
+                  {campaign.automation.sendReminders ? (
+                    <BellIcon className="h-5 w-5 text-emerald-600" />
+                  ) : (
+                    <BellIcon className="h-5 w-5 text-slate-400" />
+                  )}
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-800">Send Reminders</p>
-                  <p className="text-xs text-gray-500">Send reminder notifications</p>
+                  <p className="text-sm font-semibold text-slate-900">Send Reminders</p>
+                  <p className="text-xs text-slate-500">Send reminder notifications</p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <div className={`w-5 h-5 rounded flex items-center justify-center ${campaign.automation.sendConfirmations ? 'bg-green-100' : 'bg-gray-100'}`}>
-                  {campaign.automation.sendConfirmations && <ShieldCheckIcon className="w-4 h-4 text-green-600" />}
+              <div className="flex items-center gap-4 rounded-xl border border-slate-100 bg-slate-50/50 p-4">
+                <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${campaign.automation.sendConfirmations ? 'bg-emerald-100' : 'bg-slate-100'}`}>
+                  {campaign.automation.sendConfirmations ? (
+                    <CheckCircleIcon className="h-5 w-5 text-emerald-600" />
+                  ) : (
+                    <ShieldCheckIcon className="h-5 w-5 text-slate-400" />
+                  )}
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-gray-800">Send Confirmations</p>
-                  <p className="text-xs text-gray-500">Send confirmation emails</p>
+                  <p className="text-sm font-semibold text-slate-900">Send Confirmations</p>
+                  <p className="text-xs text-slate-500">Send confirmation emails</p>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Organization filters are shown in the overview section above */}
-
         {/* Videos List */}
-        <div className="bg-white border border-gray-200 rounded-2xl p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-            <PlayIcon className="w-5 h-5 text-gray-600" />
+        <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+          <h3 className="text-base font-semibold text-slate-900 mb-5 flex items-center gap-2">
+            <PlayIcon className="h-5 w-5 text-slate-400" />
             Videos in Campaign ({campaign.items.length})
           </h3>
 
           {campaign.items.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 mx-auto rounded-2xl bg-gray-100 flex items-center justify-center mb-4">
-                <PlayIcon className="w-10 h-10 text-gray-400" />
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 py-16 text-center">
+              <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100">
+                <PlayIcon className="h-8 w-8 text-slate-400" />
               </div>
-              <p className="text-gray-500 mb-4">No videos added to this campaign yet</p>
+              <p className="text-sm text-slate-500 mb-4">No videos added to this campaign yet</p>
               <button
-                onClick={() => router.push('/library')}
-                className="px-6 py-3 btn-primary rounded-xl font-semibold transition-all inline-block"
+                onClick={() => router.push('/videos')}
+                className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_15px_45px_rgba(15,23,42,0.25)] transition hover:brightness-110"
               >
+                <SparklesIcon className="h-4 w-4" />
                 Add Videos from Library
               </button>
             </div>
@@ -387,38 +422,37 @@ export default function CampaignDetailPage() {
                 return (
                   <div
                     key={item.id}
-                    className="border border-gray-200 rounded-xl p-4 hover:shadow-lg hover:border-gray-300 transition-all"
+                    className="group rounded-2xl border border-slate-200 bg-white p-5 transition hover:border-slate-300 hover:shadow-lg"
                   >
                     <div className="flex items-start gap-4">
-                      <div className="w-10 h-10 rounded-lg bg-sky-500 flex items-center justify-center text-white font-semibold shadow-lg shadow-sky-500/25 flex-shrink-0">
+                      <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-slate-900 text-sm font-semibold text-white shadow-lg">
                         {index + 1}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h4 className="text-base font-semibold text-gray-800 mb-1">
+                        <h4 className="text-base font-semibold text-slate-900 mb-1">
                           {video ? video.title : 'Loading...'}
-
                         </h4>
                         {video?.description && (
-                          <p className="text-sm text-gray-600 mb-2">{video.description}</p>
+                          <p className="text-sm text-slate-500 mb-3">{video.description}</p>
                         )}
                         {video?.questions && video.questions.length > 0 && (
-                          <div className="mt-3 space-y-2">
-                            <p className="text-xs font-semibold text-gray-700">
+                          <div className="mt-4 space-y-3">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                               Questions ({video.questions.length})
                             </p>
                             {video.questions.map((question) => (
                               <div
                                 key={question.id}
-                                className="bg-gray-50 rounded-lg p-3 border border-gray-100"
+                                className="rounded-xl border border-slate-100 bg-slate-50/50 p-4"
                               >
-                                <div className="flex items-start justify-between gap-2 mb-1">
-                                  <p className="text-sm text-gray-800 flex-1">{question.statement}</p>
-                                  <span className="text-xs px-2 py-1 bg-sky-500/10 border border-sky-500/20 rounded-lg text-sky-600 whitespace-nowrap">
+                                <div className="flex items-start justify-between gap-3 mb-2">
+                                  <p className="text-sm text-slate-700 flex-1">{question.statement}</p>
+                                  <span className="rounded-full bg-sky-100 border border-sky-200 px-2.5 py-0.5 text-xs font-medium text-sky-700 whitespace-nowrap">
                                     {question.type}
                                   </span>
                                 </div>
                                 {question.competency && (
-                                  <p className="text-xs text-gray-500 mt-1">
+                                  <p className="text-xs text-slate-400">
                                     Competency: {question.competency}
                                   </p>
                                 )}
@@ -429,8 +463,9 @@ export default function CampaignDetailPage() {
 
                         {/* Warning for legacy questions on campaign item */}
                         {item.questions && item.questions.length > 0 && (!video?.questions || video.questions.length === 0) && (
-                          <div className="mt-3 px-3 py-2 bg-yellow-50 border border-yellow-200 rounded-lg text-xs text-yellow-700">
-                            ⚠️ Questions are stored on the campaign item (legacy). They should be migrated to the video.
+                          <div className="mt-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+                            <span>⚠️</span>
+                            <span>Questions are stored on the campaign item (legacy). They should be migrated to the video.</span>
                           </div>
                         )}
                       </div>

@@ -165,6 +165,8 @@ export interface VideoFormProps {
   draftNoticeVisible: boolean;
   onDismissDraftNotice: () => void;
   onClearDraft: () => void;
+  // Stats for header display
+  sessionItemsCount?: number;
 }
 
 const PRO_TIPS = [
@@ -223,6 +225,7 @@ const VideoForm = ({
   draftNoticeVisible,
   onDismissDraftNotice,
   onClearDraft,
+  sessionItemsCount = 0,
 }: VideoFormProps) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const previousPromptRef = useRef(prompt);
@@ -334,71 +337,80 @@ const VideoForm = ({
   }, [prompt, seconds, shotsEnabled, activeAssets.length]);
 
   return (
-    <Card className="flex h-full flex-col overflow-hidden border-none shadow-none">
+    <Card className="flex h-full flex-col overflow-hidden border-none shadow-none bg-transparent">
       <CardContent className="flex flex-1 min-h-0 flex-col overflow-y-auto space-y-6 px-0">
-        {draftNoticeVisible && (
-          <div className="mx-6 flex flex-wrap items-center justify-between gap-3 rounded-[32px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-emerald-800">
-            <div>
-              <p className="text-sm font-semibold">Draft restored</p>
-              <p className="text-xs">
-                We reloaded your last session. Clear it anytime to start fresh.
-              </p>
+        <section className="rounded-2xl border border-slate-200 bg-white p-6">
+          <div className="flex flex-col gap-5">
+            {/* Header Row: Remix ID + Stats + Draft Notice */}
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <label
+                  htmlFor="remix-id"
+                  className="text-xs font-medium text-slate-500 whitespace-nowrap"
+                >
+                  Remix from
+                </label>
+                <Input
+                  id="remix-id"
+                  value={remixId}
+                  onChange={(event) => onRemixIdChange(event.target.value)}
+                  placeholder="Enter video ID..."
+                  className="h-8 w-40 rounded-lg border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 placeholder:text-slate-400 focus:bg-white focus:border-slate-300"
+                />
+                {remixId && (
+                  <button
+                    type="button"
+                    onClick={() => onRemixIdChange("")}
+                    className="text-xs text-slate-400 hover:text-slate-600"
+                  >
+                    Clear
+                  </button>
+                )}
             </div>
-            <div className="flex gap-2">
+              <div className="flex items-center gap-3">
+                {/* Stats */}
+                <div className="hidden sm:flex items-center gap-2 text-xs text-slate-500">
+                  <span className="font-medium text-slate-700">{shotsEnabled ? shots.length : 1}</span>
+                  <span>shot{(shotsEnabled ? shots.length : 1) !== 1 ? 's' : ''}</span>
+                  <span className="text-slate-300">·</span>
+                  <span className="font-medium text-slate-700">{activeAssets.length}</span>
+                  <span>asset{activeAssets.length !== 1 ? 's' : ''}</span>
+                  <span className="text-slate-300">·</span>
+                  <span className="font-medium text-slate-700">{sessionItemsCount}</span>
+                  <span>in queue</span>
+                </div>
+                {/* Draft Notice */}
+                {draftNoticeVisible && (
+                  <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-1.5">
+                    <p className="text-xs text-emerald-700 font-medium">Draft restored</p>
               <button
                 type="button"
                 onClick={onClearDraft}
-                className="rounded-full border border-emerald-200 px-4 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-white"
+                      className="text-xs text-emerald-600 hover:text-emerald-800"
               >
-                Clear draft
+                      Clear
               </button>
               <button
                 type="button"
                 onClick={onDismissDraftNotice}
-                className="rounded-full border border-transparent px-3 py-1 text-xs font-semibold text-emerald-700/70 hover:text-emerald-900"
+                      className="text-emerald-500 hover:text-emerald-700"
               >
-                Dismiss
+                      <X className="h-3 w-3" />
               </button>
-            </div>
           </div>
         )}
-        <section className="rounded-[32px] border border-border/60 bg-card/80 p-6 shadow-[0_0_40px_0px_rgba(0,0,0,0.1)]">
-          <div className="flex flex-col gap-5">
-            <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-              <label
-                htmlFor="remix-id"
-                className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
-              >
-                Remix from video ID
-              </label>
-              <Input
-                id="remix-id"
-                value={remixId}
-                onChange={(event) => onRemixIdChange(event.target.value)}
-                placeholder="video_..."
-                className="h-9 w-full max-w-xs rounded-none border-0 border-b border-border/70 bg-transparent px-0 text-sm text-foreground shadow-none transition focus-visible:border-border focus-visible:outline-none focus-visible:ring-0"
-              />
+              </div>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 pb-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Prompt & settings
-                </p>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
                 {shotsEnabled ? (
-                  <p className="text-[11px] text-muted-foreground">
-                    Editing shot {activeShotNumber} of {Math.max(shots.length, 1)}
-                  </p>
+                  <span className="rounded-lg bg-sky-100 px-2.5 py-1 text-xs font-medium text-sky-700">
+                    Shot {activeShotNumber} of {Math.max(shots.length, 1)}
+                  </span>
                 ) : null}
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={onClearDraft}
-                  className="rounded-full border border-border/50 px-3 py-1 text-[11px] font-semibold text-muted-foreground transition hover:border-border hover:text-foreground"
-                >
-                  Clear draft
-                </button>
                 {shotsEnabled ? (
                   <>
                     <div className="flex flex-wrap items-center gap-1 rounded-full bg-muted/40 p-1">
@@ -778,7 +790,6 @@ const VideoForm = ({
         </section>
 
         <AssetPickerRow
-          className="rounded-[32px] border border-border/60 bg-card/70 p-5 shadow-[0_0_40px_0px_rgba(0,0,0,0.1)]"
           onAssetSelect={handleAssetSelect}
           selectedAssetIds={activeAssets.map((asset) => asset.id)}
         />

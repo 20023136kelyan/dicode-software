@@ -163,29 +163,31 @@ const AnalyticsTrend: React.FC = () => {
     const filteredCampaigns = activeCampaigns.filter(campaign => campaign.id === selectedCampaignId);
 
     return (
-      <div className="space-y-6">
-        {/* Page Title and Filter */}
+      <div className="max-w-6xl mx-auto space-y-6">
+        {/* Action Bar */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <h1 className="text-3xl font-bold">Campaign Analytics</h1>
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 flex-1 sm:flex-initial">
-              <label className="text-sm text-dark-text-muted whitespace-nowrap">Filter by Campaign:</label>
-              <select
-                value={selectedCampaignId}
-                onChange={(e) => setSelectedCampaignId(e.target.value)}
-                className="input px-4 py-2 w-full sm:min-w-[250px]"
-              >
-                {activeCampaigns.map((campaign) => (
-                  <option key={campaign.id} value={campaign.id}>
-                    {campaign.name}
-                  </option>
-                ))}
-              </select>
+          <div className="flex items-center gap-6 text-sm">
+            <div>
+              <span className="text-dark-text font-semibold">{activeCampaigns.length}</span>
+              <span className="text-dark-text-muted ml-1">campaigns</span>
             </div>
-            <button className="flex items-center justify-center gap-2 px-4 py-2 hover:bg-dark-card rounded-lg border border-dark-border w-full sm:w-auto">
-            <span>Share</span>
-            <Share2 size={18} />
-          </button>
+          </div>
+          <div className="flex items-center gap-3">
+            <select
+              value={selectedCampaignId}
+              onChange={(e) => setSelectedCampaignId(e.target.value)}
+              className="input px-3 py-2 min-w-[200px]"
+            >
+              {activeCampaigns.map((campaign) => (
+                <option key={campaign.id} value={campaign.id}>
+                  {campaign.name}
+                </option>
+              ))}
+            </select>
+            <button className="btn-secondary flex items-center gap-2">
+              <Share2 size={16} />
+              Share
+            </button>
           </div>
         </div>
 
@@ -383,20 +385,7 @@ const AnalyticsTrend: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="px-4 py-2 bg-dark-card rounded-lg border border-dark-border flex items-center gap-2">
-            <span className="text-sm">Analytics</span>
-            <span className="text-dark-text-muted">/</span>
-            <span className="text-sm font-medium">
-              {tab === 'campaigns' ? 'Campaigns' : 'Trend'}
-            </span>
-          </div>
-        </div>
-      </div>
-
+    <div className="max-w-6xl mx-auto space-y-6">
       {/* Tabs */}
       <div className="border-b border-dark-border">
         <div className="flex gap-6">

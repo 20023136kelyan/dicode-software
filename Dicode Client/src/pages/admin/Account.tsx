@@ -25,7 +25,7 @@ const Account = () => {
     securityAlerts: true,
   });
 
-  const panelClass = 'rounded-2xl border border-dark-border/70 bg-dark-card/80 p-6';
+  const panelClass = 'card';
 
   const handleProfileUpdate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,22 +45,7 @@ const Account = () => {
   };
 
   return (
-    <div className="p-8">
-      {/* Header */}
-      <div className="mb-10 border-b border-dark-border/70 pb-8">
-        <div className="flex flex-wrap items-start justify-between gap-8">
-          <div>
-                <p className="text-[11px] uppercase tracking-[0.4em] text-dark-text-muted">Admin Profile</p>
-            <h1 className="mt-3 text-4xl font-semibold text-dark-text">Account Settings</h1>
-            <p className="mt-2 max-w-2xl text-sm text-dark-text-muted">
-              Manage your profile information, security preferences, and notification settings.
-            </p>
-          </div>
-          <div className="text-right text-xs text-dark-text-muted max-w-sm">
-            Keep your details up to date so invite emails and reports use your preferred contact info.
-          </div>
-        </div>
-      </div>
+    <div className="max-w-6xl mx-auto space-y-6">
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Content - Profile & Security */}

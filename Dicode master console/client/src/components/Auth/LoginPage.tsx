@@ -1,8 +1,9 @@
 'use client';
 
 import Image from 'next/image';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { Eye, EyeOff } from 'lucide-react';
 
 const GoogleGlyph = () => (
   <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
@@ -25,42 +26,20 @@ const GoogleGlyph = () => (
   </svg>
 );
 
-const BrandTile = () => (
-  <div className="flex items-center gap-4">
-    <Image
-      src="/dicode_logo.png"
-      alt="DiCode logo"
-      width={64}
-      height={64}
-      className="h-16 w-16 object-contain"
-      priority
-    />
-    <div>
-      <p className="text-xs uppercase tracking-[0.6em] text-slate-400">DiCode internal suite</p>
-      <p className="text-sm text-slate-500">Employees only</p>
-    </div>
-  </div>
-);
-
 export default function LoginPage() {
   const { signInWithGoogle, signInWithEmail } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const greeting = useMemo(() => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 18) return 'Good afternoon';
-    return 'Good evening';
-  }, []);
 
   const handleGoogleSignIn = async () => {
     try {
       setLoading(true);
       setError(null);
-      await signInWithGoogle();
+      await signInWithGoogle(rememberMe);
     } catch (err: any) {
       setError(err.message || 'Failed to sign in with Google');
     } finally {
@@ -73,7 +52,7 @@ export default function LoginPage() {
     try {
       setLoading(true);
       setError(null);
-      await signInWithEmail(email, password);
+      await signInWithEmail(email, password, rememberMe);
     } catch (err: any) {
       setError(err.message || 'Failed to sign in');
     } finally {
@@ -81,67 +60,43 @@ export default function LoginPage() {
     }
   };
 
-  const authHeadline = 'Sign in to DiCode Suite';
-  const authSubline = 'Secure entry to campaign ops, AI copilots, knowledge hubs, and more.';
-
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-white via-slate-50 to-sky-50 text-slate-900">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-32 left-1/4 h-80 w-80 rounded-full bg-sky-200/40 blur-3xl" />
-        <div className="absolute top-1/3 -left-16 h-72 w-72 rounded-full bg-rose-200/30 blur-[100px]" />
-        <div className="absolute bottom-0 right-0 h-[22rem] w-[22rem] rounded-full bg-indigo-200/30 blur-[120px]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.5),_transparent)]" />
+    <div className="flex min-h-screen">
+      {/* Left Panel - Login Form */}
+      <div className="flex w-full flex-col justify-between bg-white px-8 py-10 lg:w-1/2 lg:px-16 xl:px-24">
+        {/* Logo */}
+        <div className="flex items-center gap-4">
+          <Image
+            src="/dicode_logo.png"
+            alt="DiCode logo"
+            width={56}
+            height={56}
+            className="h-14 w-14 object-contain"
+            priority
+          />
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-semibold text-slate-900">DiCode</span>
+            <span className="text-xl font-light text-slate-400">Suite</span>
       </div>
-
-      <div className="relative z-10 px-6 py-16 lg:px-12">
-        <div className="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-[1.1fr_0.9fr]">
-          <section className="space-y-8 text-center lg:text-left">
-            <div className="flex flex-col items-center gap-5 lg:items-start">
-              <BrandTile />
-              <h1 className="text-4xl font-semibold leading-tight text-slate-900 sm:text-5xl">
-                {greeting}, welcome to DiCode’s internal software suite.
-              </h1>
             </div>
 
-            <p className="mx-auto max-w-2xl text-base text-slate-600 lg:mx-0">
-              This portal houses every DiCode employee workflow—campaign management, AI storytelling, enablement tools,
-              and operational dashboards—so your teams stay aligned in one secure control room.
+        {/* Form Section */}
+        <div className="mx-auto w-full max-w-md">
+          <div className="mb-8">
+            <h1 className="text-3xl font-semibold text-slate-900">Welcome Back</h1>
+            <p className="mt-2 text-slate-500">
+              Enter your email and password to access your account.
             </p>
-          </section>
-
-          <section className="rounded-[30px] border border-slate-200 bg-white/95 p-8 shadow-xl shadow-slate-200/60 backdrop-blur">
-            <div className="flex flex-col gap-6">
-              <div className="flex flex-col gap-4">
-                <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.35em] text-slate-400">Workspace access</p>
-                  <h2 className="text-2xl font-semibold text-slate-900">{authHeadline}</h2>
-                  <p className="text-sm text-slate-600">{authSubline}</p>
-                </div>
               </div>
 
               {error && (
-                <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
                   {error}
                 </div>
               )}
 
-              <button
-                onClick={handleGoogleSignIn}
-                disabled={loading}
-                className="flex w-full items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 font-medium text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <GoogleGlyph />
-                <span>{loading ? 'Please wait...' : 'Continue with Google'}</span>
-              </button>
-
-              <div className="flex items-center gap-3 text-xs uppercase tracking-[0.4em] text-slate-300">
-                <span className="h-px flex-1 bg-slate-200" />
-                or
-                <span className="h-px flex-1 bg-slate-200" />
-              </div>
-
               <form onSubmit={handleEmailAuth} className="space-y-5">
-                <div className="space-y-2">
+            <div className="space-y-1.5">
                   <label htmlFor="email" className="block text-sm font-medium text-slate-700">
                     Email
                   </label>
@@ -151,45 +106,237 @@ export default function LoginPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:border-[#F5BC1D] focus:ring-2 focus:ring-[#F5BC1D]/30 focus:outline-none"
-                    placeholder="you@dicode.com"
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 placeholder:text-slate-400 transition-colors focus:border-slate-400 focus:ring-2 focus:ring-slate-200 focus:outline-none"
+                placeholder="you@company.com"
                   />
                 </div>
 
-                <div className="space-y-2">
+            <div className="space-y-1.5">
                   <label htmlFor="password" className="block text-sm font-medium text-slate-700">
                     Password
                   </label>
+              <div className="relative">
                   <input
                     id="password"
-                    type="password"
+                  type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
                     minLength={6}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-900 placeholder:text-slate-400 focus:border-[#F5BC1D] focus:ring-2 focus:ring-[#F5BC1D]/30 focus:outline-none"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 pr-12 text-slate-900 placeholder:text-slate-400 transition-colors focus:border-slate-400 focus:ring-2 focus:ring-slate-200 focus:outline-none"
                     placeholder="••••••••"
                   />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
+                />
+                <span className="text-sm text-slate-600">Remember Me</span>
+              </label>
+              <button type="button" className="text-sm font-medium text-slate-700 hover:text-slate-900">
+                Forgot Your Password?
+              </button>
                 </div>
 
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full rounded-2xl bg-[#F5BC1D] py-3 text-base font-semibold text-slate-900 transition hover:bg-[#e0a915] disabled:cursor-not-allowed disabled:opacity-70"
+              className="w-full rounded-full bg-slate-900 py-3.5 text-base font-semibold text-white transition-all hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  {loading ? 'Please wait...' : 'Sign in'}
+              {loading ? 'Please wait...' : 'Log In'}
                 </button>
               </form>
 
-              <p className="text-center text-sm text-slate-500">
-                Need access? Contact the DiCode IT onboarding team to provision your account.
-              </p>
+          <div className="my-6 flex items-center gap-3">
+            <span className="h-px flex-1 bg-slate-200" />
+            <span className="text-sm text-slate-400">Or Login With</span>
+            <span className="h-px flex-1 bg-slate-200" />
+          </div>
 
-              <p className="text-center text-xs text-slate-400">
-                Internal use only. Contact DiCode IT Security if you need help logging in.
-              </p>
+          <div className="grid grid-cols-2 gap-4">
+            <button
+              onClick={handleGoogleSignIn}
+              disabled={loading}
+              className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <GoogleGlyph />
+              <span>Google</span>
+            </button>
+            <button
+              disabled
+              className="flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 font-medium text-slate-400 opacity-60"
+            >
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
+                <path d="M14.94 4.88c-.08.05-1.52.87-1.52 2.67 0 2.08 1.83 2.82 1.89 2.84-.01.05-.29 1.01-0.97 2-.59.86-1.2 1.71-2.16 1.71-.94 0-1.19-.55-2.28-.55-1.06 0-1.44.57-2.31.57-.88 0-1.5-.8-2.19-1.78-.82-1.16-1.49-2.97-1.49-4.68 0-2.75 1.79-4.21 3.54-4.21.93 0 1.71.61 2.29.61.56 0 1.43-.65 2.49-.65.4 0 1.84.04 2.79 1.38l-.08.09zM11.39 2.29c.43-.51.73-1.22.73-1.93 0-.1-.01-.2-.02-.28-.7.03-1.53.47-2.03 1.05-.39.45-.76 1.16-.76 1.88 0 .11.02.22.03.25.05.01.14.02.22.02.63 0 1.4-.42 1.83-.99z"/>
+              </svg>
+              <span>Apple</span>
+            </button>
+          </div>
+
+          <p className="mt-8 text-center text-sm text-slate-500">
+            Don't Have An Account?{' '}
+            <a href="mailto:it@dicode.com" className="font-medium text-slate-900 hover:underline">
+              Contact DiCode IT Team
+            </a>
+          </p>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between text-sm text-slate-400">
+          <span>Copyright © 2025 DiCode Software GmbH.</span>
+          <button className="hover:text-slate-600">Privacy Policy</button>
+        </div>
+      </div>
+
+      {/* Right Panel - Hero Section */}
+      <div className="relative hidden w-1/2 items-center justify-center bg-white p-8 lg:flex">
+        {/* Rounded container */}
+        <div className="relative h-full w-full overflow-hidden rounded-[32px] bg-slate-800 p-12 flex flex-col justify-center">
+          {/* Subtle grid pattern */}
+          <div 
+            className="pointer-events-none absolute inset-0 opacity-[0.03]"
+            style={{
+              backgroundImage: `linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)`,
+              backgroundSize: '40px 40px'
+            }}
+          />
+          
+          {/* Gradient overlay */}
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-700/50 via-slate-800 to-slate-900 rounded-[32px]" />
+
+          {/* Content */}
+          <div className="relative z-10 max-w-xl">
+          <h2 className="text-4xl font-semibold leading-tight text-white xl:text-5xl">
+            DiCode's internal suite for campaign management.
+          </h2>
+          <p className="mt-4 text-lg text-slate-300">
+            Manage behavior campaigns, generate AI videos, and collaborate with your team. All in one place.
+          </p>
+          </div>
+
+          {/* Dashboard Preview Mockup */}
+          <div className="relative z-10 mt-10 animate-float-subtle">
+            <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-600/50 bg-slate-700/30 shadow-2xl backdrop-blur-sm">
+              {/* Browser chrome */}
+              <div className="flex items-center gap-2 border-b border-slate-600/30 bg-slate-700/50 px-4 py-3">
+                <div className="flex gap-1.5">
+                  <div className="h-3 w-3 rounded-full bg-slate-500/50" />
+                  <div className="h-3 w-3 rounded-full bg-slate-500/50" />
+                  <div className="h-3 w-3 rounded-full bg-slate-500/50" />
+                </div>
+                <div className="ml-4 flex-1 rounded-md bg-slate-600/30 px-3 py-1 text-xs text-slate-400">
+                  suite.dicode.com/campaigns
+                </div>
+              </div>
+              
+              {/* Dashboard content */}
+              <div className="flex">
+                {/* Sidebar mockup */}
+                <div className="w-16 border-r border-slate-600/30 bg-slate-700/40 p-3">
+                  <div className="mb-4 h-8 w-8 rounded-lg bg-slate-500/30 animate-pulse-slow" />
+                  <div className="space-y-3">
+                    <div className="h-6 w-6 rounded-md bg-white/20" />
+                    <div className="h-6 w-6 rounded-md bg-slate-500/30" />
+                    <div className="h-6 w-6 rounded-md bg-slate-500/30" />
+                    <div className="h-6 w-6 rounded-md bg-slate-500/30" />
+                  </div>
+                </div>
+                
+                {/* Main content area */}
+                <div className="flex-1 p-4">
+                  {/* Header */}
+                  <div className="mb-4 flex items-center justify-between">
+                    <div className="h-5 w-32 rounded bg-slate-500/40" />
+                    <div className="h-8 w-24 rounded-lg bg-white/20 animate-pulse-slow" />
+                  </div>
+                  
+                  {/* Stats row */}
+                  <div className="mb-4 grid grid-cols-3 gap-3">
+                    <div className="rounded-xl bg-slate-600/30 p-3 animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
+                      <div className="mb-2 h-3 w-12 rounded bg-slate-500/40" />
+                      <div className="h-6 w-16 rounded bg-emerald-400/40 animate-shimmer" />
+                    </div>
+                    <div className="rounded-xl bg-slate-600/30 p-3 animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
+                      <div className="mb-2 h-3 w-12 rounded bg-slate-500/40" />
+                      <div className="h-6 w-12 rounded bg-sky-400/40 animate-shimmer" style={{ animationDelay: '0.5s' }} />
+                    </div>
+                    <div className="rounded-xl bg-slate-600/30 p-3 animate-fade-in-up" style={{ animationDelay: '0.3s' }}>
+                      <div className="mb-2 h-3 w-12 rounded bg-slate-500/40" />
+                      <div className="h-6 w-14 rounded bg-amber-400/40 animate-shimmer" style={{ animationDelay: '1s' }} />
+                    </div>
+                  </div>
+                  
+                  {/* Campaign cards */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3 rounded-xl bg-slate-600/20 p-3 animate-slide-in-right" style={{ animationDelay: '0.4s' }}>
+                      <div className="h-10 w-10 rounded-lg bg-slate-500/40" />
+                      <div className="flex-1">
+                        <div className="mb-1 h-3 w-24 rounded bg-slate-400/40" />
+                        <div className="h-2 w-32 rounded bg-slate-500/30" />
+                      </div>
+                      <div className="h-5 w-16 rounded-full bg-emerald-400/30 animate-pulse-slow" />
+                    </div>
+                    <div className="flex items-center gap-3 rounded-xl bg-slate-600/20 p-3 animate-slide-in-right" style={{ animationDelay: '0.5s' }}>
+                      <div className="h-10 w-10 rounded-lg bg-slate-500/40" />
+                      <div className="flex-1">
+                        <div className="mb-1 h-3 w-28 rounded bg-slate-400/40" />
+                        <div className="h-2 w-36 rounded bg-slate-500/30" />
+                      </div>
+                      <div className="h-5 w-14 rounded-full bg-amber-400/30 animate-pulse-slow" style={{ animationDelay: '0.3s' }} />
+                    </div>
+                    <div className="flex items-center gap-3 rounded-xl bg-slate-600/20 p-3 animate-slide-in-right" style={{ animationDelay: '0.6s' }}>
+                      <div className="h-10 w-10 rounded-lg bg-slate-500/40" />
+                      <div className="flex-1">
+                        <div className="mb-1 h-3 w-20 rounded bg-slate-400/40" />
+                        <div className="h-2 w-28 rounded bg-slate-500/30" />
+                      </div>
+                      <div className="h-5 w-16 rounded-full bg-emerald-400/30 animate-pulse-slow" style={{ animationDelay: '0.6s' }} />
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-          </section>
+            
+            {/* Decorative floating elements */}
+            <div className="absolute -right-4 -top-4 h-16 w-24 rounded-xl border border-slate-600/30 bg-slate-700/30 backdrop-blur-sm animate-float-1" />
+            <div className="absolute -bottom-4 -left-4 h-20 w-32 rounded-xl border border-slate-600/30 bg-slate-700/30 backdrop-blur-sm animate-float-2" />
+          </div>
+
+          {/* Bottom stats or trust indicators */}
+          <div className="relative z-10 mt-12 flex items-center gap-6">
+            <div>
+              <p className="text-xl font-semibold text-white">Campaigns</p>
+              <p className="text-sm text-slate-400">Design & publish</p>
+            </div>
+            <div className="h-10 w-px bg-slate-600" />
+            <div>
+              <p className="text-xl font-semibold text-white">Video Gen</p>
+              <p className="text-sm text-slate-400">AI-powered</p>
+            </div>
+            <div className="h-10 w-px bg-slate-600" />
+            <div>
+              <p className="text-xl font-semibold text-white">Assets</p>
+              <p className="text-sm text-slate-400">Centralized library</p>
+            </div>
+            <div className="h-10 w-px bg-slate-600" />
+            <div>
+              <p className="text-xl font-semibold text-white">Access</p>
+              <p className="text-sm text-slate-400">Team control</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>

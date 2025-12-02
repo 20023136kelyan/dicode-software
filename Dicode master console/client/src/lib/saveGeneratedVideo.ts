@@ -1,6 +1,6 @@
 import { GenerationResult, ShotData } from './types';
 import { downloadVideoFromBackend, uploadVideoBlob, generateVideoPath } from './storage';
-import { createVideo } from './firestore';
+import { createVideo, logActivity } from './firestore';
 
 export interface SaveVideoProgress {
   stage: 'downloading' | 'uploading' | 'saving_metadata' | 'complete';
@@ -12,6 +12,8 @@ export interface SaveVideoProgress {
 
 export interface SaveVideoOptions {
   userId: string;
+  userEmail?: string;
+  userName?: string;
   result: GenerationResult;
   shots: ShotData[];
   quality: string;
@@ -24,7 +26,7 @@ export interface SaveVideoOptions {
  * Downloads from backend, uploads to Firebase, and creates database records
  */
 export async function saveGeneratedVideos(options: SaveVideoOptions): Promise<string[]> {
-  const { userId, result, shots, quality, model, onProgress } = options;
+  const { userId, userEmail, userName, result, shots, quality, model, onProgress } = options;
   const { sequence_id, video_ids } = result;
 
   if (!sequence_id || !video_ids || video_ids.length === 0) {
@@ -98,6 +100,20 @@ export async function saveGeneratedVideos(options: SaveVideoOptions): Promise<st
       });
 
       savedVideoIds.push(firestoreVideoId);
+
+      // Log activity for each generated video
+      if (userEmail) {
+        await logActivity({
+          action: 'video_generated',
+          userId,
+          userEmail,
+          userName,
+          resourceId: firestoreVideoId,
+          resourceName: title,
+          resourceType: 'video',
+          metadata: { model, quality, shotNumber, totalShots },
+        });
+      }
     }
 
     // Complete

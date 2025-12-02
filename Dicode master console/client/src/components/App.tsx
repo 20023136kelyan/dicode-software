@@ -4,7 +4,6 @@
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { Loader2, Menu, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import CollapsibleHero from "@/components/Layout/CollapsibleHero";
 import Modal from "@/components/Layout/Modal";
 import VideoForm, {
   type BatchProgressState,
@@ -1271,58 +1270,24 @@ export default function App() {
 
   return (
     <>
-      <div className="flex flex-col gap-6 xl:flex-row">
-        <div className="w-full xl:flex-1 min-w-0 space-y-6">
-          <CollapsibleHero showManualCollapse>
-            <section className="rounded-[32px] border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-6 shadow-xl shadow-slate-100">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Video generation</p>
-                  <h1 className="mt-3 text-3xl font-semibold leading-tight text-slate-900">
-                    Build DiCode-ready scenes with shots, assets, and prompt drafts.
-                  </h1>
-                  <p className="mt-2 text-sm text-slate-600 max-w-2xl">
-                    The same polished flow as campaign creation: structured prompts, reusable components, and quick access to
-                    every run.
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={openMobileSidebar}
-                  className="mt-1 h-10 w-10 rounded-full border-slate-200 text-slate-500 hover:bg-white hover:text-slate-900 lg:hidden"
-                  aria-label="Open generations sidebar"
-                >
-                  <Menu className="h-5 w-5" />
-                </Button>
-              </div>
-              <div className="mt-6 grid gap-4 sm:grid-cols-3">
-                <div className="rounded-2xl border border-white/70 bg-white/90 p-4 text-center shadow-sm">
-                  <p className="text-2xl font-semibold text-slate-900">
-                    {shotsEnabled ? shots.length : 1}
-                  </p>
-                  <p className="mt-1 text-xs uppercase tracking-[0.35em] text-slate-400">Shots</p>
-                  <p className="text-xs text-slate-500">in current build</p>
-                </div>
-                <div className="rounded-2xl border border-white/70 bg-white/90 p-4 text-center shadow-sm">
-                  <p className="text-2xl font-semibold text-slate-900">
-                    {activeAssets.length}
-                  </p>
-                  <p className="mt-1 text-xs uppercase tracking-[0.35em] text-slate-400">Assets</p>
-                  <p className="text-xs text-slate-500">attached to prompt</p>
-                </div>
-                <div className="rounded-2xl border border-white/70 bg-white/90 p-4 text-center shadow-sm">
-                  <p className="text-2xl font-semibold text-slate-900">
-                    {sessionItems.length}
-                  </p>
-                  <p className="mt-1 text-xs uppercase tracking-[0.35em] text-slate-400">Sessions</p>
-                  <p className="text-xs text-slate-500">waiting in queue</p>
-                </div>
-              </div>
-            </section>
-          </CollapsibleHero>
-          <VideoForm
+      <div className="flex flex-col gap-6 xl:flex-row xl:items-stretch">
+        <div className="w-full xl:flex-1 min-w-0 flex flex-col">
+          {/* Mobile sidebar toggle - only visible on mobile */}
+          <div className="xl:hidden mb-4">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={openMobileSidebar}
+              className="h-9 w-9 rounded-lg border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+              aria-label="Open generations sidebar"
+            >
+              <Menu className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex-1 flex flex-col">
+            <VideoForm
+              sessionItemsCount={sessionItems.length}
             prompt={prompt}
             onPromptChange={handlePromptChange}
             model={model}
@@ -1368,13 +1333,14 @@ export default function App() {
             onRemoveShot={removeShot}
             onDuplicateShot={duplicateShot}
             onSelectShot={selectShot}
-            draftNoticeVisible={draftNoticeVisible}
-            onDismissDraftNotice={dismissDraftNotice}
-            onClearDraft={clearDraft}
-          />
+              draftNoticeVisible={draftNoticeVisible}
+              onDismissDraftNotice={dismissDraftNotice}
+              onClearDraft={clearDraft}
+            />
+          </div>
         </div>
         <VideoSidebar
-          className="w-full xl:w-[480px] xl:flex-shrink-0"
+          className="xl:flex-shrink-0"
           items={sessionItems}
           thumbnails={thumbnailMap}
           loading={false}

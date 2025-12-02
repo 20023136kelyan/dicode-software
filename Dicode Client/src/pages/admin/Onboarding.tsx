@@ -60,20 +60,23 @@ const AdminOnboarding: React.FC = () => {
         console.log('[AdminOnboarding] Invitations created successfully');
       }
 
-      // Refresh user data to load the new organization
-      await refreshUser();
-
-      // Redirect to admin dashboard
-      navigate('/admin/overview');
+      // Don't refresh user here - let the success screen show first
     } catch (error) {
       console.error('Failed to create organization:', error);
       throw error;
     }
   };
 
+  const handleSuccess = async () => {
+    // Refresh user data to load the new organization, then navigate
+    await refreshUser();
+    navigate('/admin/overview');
+  };
+
   return (
     <OrganizationOnboarding
       onComplete={handleComplete}
+      onSuccess={handleSuccess}
       userEmail={user.email}
       userName={user.name}
     />

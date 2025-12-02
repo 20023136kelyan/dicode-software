@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { X, Upload, FileText, AlertCircle, Check, Download, Loader2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { X, Upload, FileText, AlertCircle, Check, Download, Loader2, Users } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { createInvitation, checkPendingInvitation, getOrganization } from '@/lib/firestore';
 import type { UserRole } from '@/types';
@@ -35,18 +35,23 @@ const BulkImportModal: React.FC<BulkImportModalProps> = ({
     const [importStats, setImportStats] = useState({ total: 0, success: 0, failed: 0 });
     const [error, setError] = useState<string | null>(null);
 
-    if (!isOpen) return null;
+    useEffect(() => {
+        if (!isOpen) {
+            // Reset after close animation
+            setTimeout(() => {
+                setStep('upload');
+                setParsedRows([]);
+                setImportStats({ total: 0, success: 0, failed: 0 });
+                setError(null);
+            }, 300);
+        }
+    }, [isOpen]);
 
     const resetModal = () => {
         setStep('upload');
         setParsedRows([]);
         setImportStats({ total: 0, success: 0, failed: 0 });
         setError(null);
-    };
-
-    const handleClose = () => {
-        resetModal();
-        onClose();
     };
 
     const downloadTemplate = () => {
@@ -173,8 +178,6 @@ const BulkImportModal: React.FC<BulkImportModalProps> = ({
                     console.error(`Failed to import ${row.email}:`, err);
                     failCount++;
                 }
-
-                // Update stats progressively could be added here
             }
 
             setImportStats({
@@ -192,14 +195,45 @@ const BulkImportModal: React.FC<BulkImportModalProps> = ({
         }
     };
 
+    const validCount = parsedRows.filter(r => r.isValid).length;
+
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-[#2A2A2A] border border-dark-border rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] flex flex-col">
+        <>
+            {/* Backdrop */}
+            <div
+                className={`fixed inset-0 bg-black/40 z-40 transition-opacity duration-300 ${
+                    isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                }`}
+                onClick={onClose}
+            />
+
+            {/* Slide-over Panel */}
+            <div
+                className={`fixed right-0 top-0 bottom-0 w-full max-w-xl bg-dark-card border-l border-dark-border shadow-2xl z-50 flex flex-col transform transition-transform duration-300 ease-out ${
+                    isOpen ? 'translate-x-0' : 'translate-x-full'
+                }`}
+            >
                 {/* Header */}
-                <div className="flex items-center justify-between p-6 border-b border-dark-border">
-                    <h2 className="text-xl font-semibold text-dark-text">Bulk Import Employees</h2>
-                    <button onClick={handleClose} className="p-2 hover:bg-dark-bg rounded-lg transition-colors">
-                        <X size={20} className="text-dark-text-muted" />
+                <div className="sticky top-0 bg-dark-card border-b border-dark-border px-6 py-4 flex items-center justify-between z-10">
+                    <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+                            <Upload className="h-5 w-5 text-primary" />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-semibold text-dark-text">Bulk Import</h2>
+                            <p className="text-sm text-dark-text-muted">
+                                {step === 'upload' && 'Upload a CSV file'}
+                                {step === 'preview' && `${validCount} valid rows ready`}
+                                {step === 'importing' && 'Processing...'}
+                                {step === 'complete' && 'Import complete'}
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={onClose}
+                        className="p-2 rounded-lg hover:bg-dark-bg transition"
+                    >
+                        <X className="h-5 w-5 text-dark-text-muted" />
                     </button>
                 </div>
 
@@ -208,14 +242,14 @@ const BulkImportModal: React.FC<BulkImportModalProps> = ({
                     {step === 'upload' && (
                         <div className="space-y-6">
                             <div
-                                className="border-2 border-dashed border-dark-border rounded-xl p-12 flex flex-col items-center justify-center text-center hover:border-primary/50 hover:bg-dark-bg/50 transition-colors cursor-pointer"
+                                className="border-2 border-dashed border-dark-border rounded-xl p-10 flex flex-col items-center justify-center text-center hover:border-primary/50 hover:bg-dark-bg/50 transition-colors cursor-pointer"
                                 onClick={() => fileInputRef.current?.click()}
                             >
-                                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                                    <Upload size={32} className="text-primary" />
+                                <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                                    <Upload size={28} className="text-primary" />
                                 </div>
-                                <h3 className="text-lg font-medium text-dark-text mb-2">Click to upload CSV</h3>
-                                <p className="text-dark-text-muted mb-6">or drag and drop file here</p>
+                                <h3 className="text-base font-medium text-dark-text mb-2">Click to upload CSV</h3>
+                                <p className="text-sm text-dark-text-muted">or drag and drop file here</p>
                                 <input
                                     ref={fileInputRef}
                                     type="file"
@@ -225,23 +259,27 @@ const BulkImportModal: React.FC<BulkImportModalProps> = ({
                                 />
                             </div>
 
-                            <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+                            <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
                                 <div className="flex items-start gap-3">
-                                    <FileText className="text-blue-400 mt-1" size={20} />
+                                    <FileText className="text-primary mt-0.5 flex-shrink-0" size={20} />
                                     <div>
-                                        <h4 className="font-medium text-blue-400 mb-1">CSV Format Guide</h4>
+                                        <h4 className="font-medium text-dark-text mb-2">CSV Format Guide</h4>
                                         <p className="text-sm text-dark-text-muted mb-3">
-                                            Your CSV should include the following columns:
-                                            <code className="bg-black/20 px-1 py-0.5 rounded mx-1">email</code>
-                                            (required),
-                                            <code className="bg-black/20 px-1 py-0.5 rounded mx-1">name</code>,
-                                            <code className="bg-black/20 px-1 py-0.5 rounded mx-1">role</code>,
-                                            <code className="bg-black/20 px-1 py-0.5 rounded mx-1">department</code>,
-                                            <code className="bg-black/20 px-1 py-0.5 rounded mx-1">cohort</code>
+                                            Required columns:
                                         </p>
+                                        <div className="flex flex-wrap gap-2 mb-3">
+                                            <code className="bg-dark-bg px-2 py-1 rounded text-xs text-primary">email *</code>
+                                            <code className="bg-dark-bg px-2 py-1 rounded text-xs text-dark-text-muted">name</code>
+                                            <code className="bg-dark-bg px-2 py-1 rounded text-xs text-dark-text-muted">role</code>
+                                            <code className="bg-dark-bg px-2 py-1 rounded text-xs text-dark-text-muted">department</code>
+                                            <code className="bg-dark-bg px-2 py-1 rounded text-xs text-dark-text-muted">cohort</code>
+                                        </div>
                                         <button
-                                            onClick={downloadTemplate}
-                                            className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1 font-medium"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                downloadTemplate();
+                                            }}
+                                            className="text-sm text-primary hover:text-primary/80 flex items-center gap-1.5 font-medium"
                                         >
                                             <Download size={14} /> Download Template
                                         </button>
@@ -251,7 +289,7 @@ const BulkImportModal: React.FC<BulkImportModalProps> = ({
 
                             {error && (
                                 <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm flex items-center gap-2">
-                                    <AlertCircle size={16} />
+                                    <AlertCircle size={16} className="flex-shrink-0" />
                                     {error}
                                 </div>
                             )}
@@ -261,99 +299,119 @@ const BulkImportModal: React.FC<BulkImportModalProps> = ({
                     {step === 'preview' && (
                         <div className="space-y-4">
                             <div className="flex items-center justify-between">
-                                <h3 className="font-medium text-dark-text">
-                                    Preview ({parsedRows.filter(r => r.isValid).length} valid rows)
-                                </h3>
+                                <div className="flex items-center gap-3">
+                                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10">
+                                        <Users size={16} className="text-emerald-500" />
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-medium text-dark-text">{validCount} valid rows</p>
+                                        <p className="text-xs text-dark-text-muted">
+                                            {parsedRows.length - validCount} with errors
+                                        </p>
+                                    </div>
+                                </div>
                                 <button
                                     onClick={resetModal}
-                                    className="text-sm text-dark-text-muted hover:text-dark-text"
+                                    className="text-sm text-primary hover:text-primary/80"
                                 >
                                     Upload different file
                                 </button>
                             </div>
 
-                            <div className="border border-dark-border rounded-lg overflow-hidden">
-                                <table className="w-full text-sm text-left">
-                                    <thead className="bg-dark-bg text-dark-text-muted uppercase text-xs">
-                                        <tr>
-                                            <th className="px-4 py-3">Status</th>
-                                            <th className="px-4 py-3">Email</th>
-                                            <th className="px-4 py-3">Name</th>
-                                            <th className="px-4 py-3">Role</th>
-                                            <th className="px-4 py-3">Dept</th>
-                                            <th className="px-4 py-3">Cohort</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-dark-border">
-                                        {parsedRows.map((row, idx) => (
-                                            <tr key={idx} className={row.isValid ? 'bg-transparent' : 'bg-red-500/5'}>
-                                                <td className="px-4 py-3">
-                                                    {row.isValid ? (
-                                                        <Check size={16} className="text-green-500" />
-                                                    ) : (
-                                                        <div className="group relative">
-                                                            <AlertCircle size={16} className="text-red-500 cursor-help" />
-                                                            <div className="absolute left-6 top-0 bg-dark-card border border-dark-border p-2 rounded shadow-lg z-10 w-48 hidden group-hover:block">
-                                                                {row.errors.map((e, i) => <div key={i} className="text-xs text-red-400">{e}</div>)}
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3 text-dark-text">{row.email}</td>
-                                                <td className="px-4 py-3 text-dark-text-muted">{row.name || '-'}</td>
-                                                <td className="px-4 py-3 text-dark-text-muted capitalize">{row.role}</td>
-                                                <td className="px-4 py-3 text-dark-text-muted">{row.department || '-'}</td>
-                                                <td className="px-4 py-3 text-dark-text-muted">{row.cohort || '-'}</td>
+                            <div className="rounded-xl border border-dark-border overflow-hidden">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="bg-dark-bg text-dark-text-muted uppercase text-xs">
+                                            <tr>
+                                                <th className="px-3 py-2.5 w-10"></th>
+                                                <th className="px-3 py-2.5">Email</th>
+                                                <th className="px-3 py-2.5">Name</th>
+                                                <th className="px-3 py-2.5">Role</th>
+                                                <th className="px-3 py-2.5">Dept</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                        </thead>
+                                        <tbody className="divide-y divide-dark-border">
+                                            {parsedRows.map((row, idx) => (
+                                                <tr key={idx} className={row.isValid ? '' : 'bg-red-500/5'}>
+                                                    <td className="px-3 py-2.5">
+                                                        {row.isValid ? (
+                                                            <Check size={14} className="text-emerald-500" />
+                                                        ) : (
+                                                            <div className="group relative">
+                                                                <AlertCircle size={14} className="text-red-500 cursor-help" />
+                                                                <div className="absolute left-5 top-0 bg-dark-card border border-dark-border p-2 rounded-lg shadow-lg z-10 w-40 hidden group-hover:block">
+                                                                    {row.errors.map((e, i) => (
+                                                                        <div key={i} className="text-xs text-red-400">{e}</div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-3 py-2.5 text-dark-text text-xs">{row.email}</td>
+                                                    <td className="px-3 py-2.5 text-dark-text-muted text-xs">{row.name || '-'}</td>
+                                                    <td className="px-3 py-2.5 text-dark-text-muted text-xs capitalize">{row.role}</td>
+                                                    <td className="px-3 py-2.5 text-dark-text-muted text-xs">{row.department || '-'}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
                     )}
 
                     {step === 'importing' && (
-                        <div className="flex flex-col items-center justify-center py-12">
+                        <div className="flex flex-col items-center justify-center py-16">
                             <Loader2 size={48} className="text-primary animate-spin mb-4" />
                             <h3 className="text-lg font-medium text-dark-text">Importing Employees...</h3>
-                            <p className="text-dark-text-muted">Please wait while we create invitations.</p>
+                            <p className="text-dark-text-muted text-sm">Please wait while we create invitations.</p>
                         </div>
                     )}
 
                     {step === 'complete' && (
-                        <div className="text-center py-8">
-                            <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center mx-auto mb-4">
-                                <Check size={32} className="text-green-500" />
+                        <div className="text-center py-12">
+                            <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-4">
+                                <Check size={32} className="text-emerald-500" />
                             </div>
                             <h3 className="text-xl font-semibold text-dark-text mb-2">Import Complete</h3>
                             <p className="text-dark-text-muted mb-6">
-                                Successfully invited {importStats.success} employees.
-                                {importStats.failed > 0 && ` Failed to invite ${importStats.failed} employees.`}
+                                Successfully invited <span className="text-primary font-medium">{importStats.success}</span> employees.
+                                {importStats.failed > 0 && (
+                                    <span className="text-red-400"> Failed to invite {importStats.failed}.</span>
+                                )}
                             </p>
-                            <div className="flex justify-center gap-4">
-                                <button onClick={handleClose} className="btn-primary px-8">
-                                    Done
-                                </button>
-                            </div>
                         </div>
                     )}
                 </div>
 
                 {/* Footer */}
-                {step === 'preview' && (
-                    <div className="p-6 border-t border-dark-border flex justify-end gap-3">
-                        <button onClick={handleClose} className="btn-secondary">Cancel</button>
-                        <button
-                            onClick={processImports}
-                            disabled={parsedRows.filter(r => r.isValid).length === 0}
-                            className="btn-primary"
-                        >
-                            Import {parsedRows.filter(r => r.isValid).length} Employees
+                <div className="border-t border-dark-border px-6 py-4 flex justify-end gap-3">
+                    {step === 'upload' && (
+                        <button onClick={onClose} className="btn-secondary">
+                            Cancel
                         </button>
-                    </div>
-                )}
+                    )}
+                    {step === 'preview' && (
+                        <>
+                            <button onClick={onClose} className="btn-secondary">Cancel</button>
+                            <button
+                                onClick={processImports}
+                                disabled={validCount === 0}
+                                className="btn-primary flex items-center gap-2"
+                            >
+                                <Upload size={16} />
+                                Import {validCount} Employees
+                            </button>
+                        </>
+                    )}
+                    {step === 'complete' && (
+                        <button onClick={onClose} className="btn-primary">
+                            Done
+                        </button>
+                    )}
+                </div>
             </div>
-        </div>
+        </>
     );
 };
 

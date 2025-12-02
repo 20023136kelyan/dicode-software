@@ -276,10 +276,10 @@ const VideoCard = ({
   const isPromptFallback = !storedPrompt && Boolean(promptText);
 
   return (
-    <Card className="group relative w-full max-w-2xl overflow-hidden rounded-xl border border-border/60 bg-card/80 transition-colors hover:bg-card">
+    <Card className="group relative w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all hover:shadow-lg hover:border-slate-300">
       <CardContent className="p-0">
         <div className="grid gap-0 md:min-h-[300px] md:grid-cols-[200px_1fr]">
-          <div className="relative h-[300px] overflow-hidden border-b border-border/60 bg-muted/60 md:h-full md:border-b-0 md:border-r">
+          <div className="relative h-[300px] overflow-hidden border-b border-slate-100 bg-slate-100 md:h-full md:border-b-0 md:border-r">
             {thumbnailUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -288,7 +288,7 @@ const VideoCard = ({
                 className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
               />
             ) : (
-              <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-muted/70 via-muted/60 to-muted/70 text-muted-foreground" />
+              <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-100 via-slate-50 to-slate-100 text-slate-400" />
             )}
             <div
               className={cn(

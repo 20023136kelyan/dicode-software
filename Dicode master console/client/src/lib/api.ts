@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { auth } from './firebase';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api-6easthj3va-uc.a.run.app';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://api-x76kgbqadq-uc.a.run.app';
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -61,7 +61,7 @@ export async function generateVideo(data: FormData) {
   const token = await user.getIdToken();
 
   // Use fetch API which properly handles FormData
-  const response = await fetch(`${API_BASE_URL}/generate-video`, {
+  const response = await fetch(`${API_BASE_URL}/api/generate-video`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,

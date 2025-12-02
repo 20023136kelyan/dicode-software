@@ -1,4 +1,5 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
+import { getAnalytics, type Analytics } from 'firebase/analytics';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
@@ -11,6 +12,7 @@ type FirebaseConfig = {
   storageBucket?: string;
   messagingSenderId?: string;
   appId?: string;
+  measurementId?: string;
 };
 
 const firebaseConfig: FirebaseConfig = {
@@ -20,6 +22,7 @@ const firebaseConfig: FirebaseConfig = {
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
 const requiredKeys: (keyof FirebaseConfig)[] = [
@@ -56,6 +59,10 @@ function createFirebaseApp(): FirebaseApp {
 }
 
 const app = createFirebaseApp();
+const analytics: Analytics | undefined =
+  typeof window !== 'undefined' && firebaseConfig.measurementId
+    ? getAnalytics(app)
+    : undefined;
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
@@ -67,5 +74,5 @@ if (import.meta.env.DEV && import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true'
   console.info('[firebase] Connected to Functions emulator');
 }
 
-export { app, auth, db, storage, functions, firebaseConfig };
+export { app, analytics, auth, db, storage, functions, firebaseConfig };
 

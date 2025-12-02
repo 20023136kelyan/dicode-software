@@ -12,7 +12,8 @@ import { validateQuestionSet } from '@/lib/questionValidation';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { getCampaignsByUser } from '@/lib/firestore';
-import { COMPETENCIES, buildTagList, type CompetencyDefinition } from '@/lib/competencies';
+import { buildTagList, type CompetencyDefinition } from '@/lib/competencies';
+import { useCompetencies } from '@/hooks/useCompetencies';
 import { createDefaultQuestionSet, normalizeQuestionSet } from '@/lib/questionDefaults';
 import { generateQuestion, validateQuestion, type GenerateQuestionResponse, type ValidateQuestionResponse } from '@/lib/questionTools';
 import type { QuestionAssistantState } from '@/types/questionAssist';
@@ -48,6 +49,7 @@ export function SaveToLibraryModal({
   saving,
 }: SaveToLibraryModalProps) {
   const { user } = useAuth();
+  const { competencies } = useCompetencies();
   const [activeTabIndex, setActiveTabIndex] = useState(0);
   const [videoMetadata, setVideoMetadata] = useState<Record<string, VideoMetadataState>>({});
   const [titleError, setTitleError] = useState('');
@@ -148,7 +150,7 @@ export function SaveToLibraryModal({
     [currentQuestionSelections],
   );
 
-  const questionCompetencyOptions = COMPETENCIES;
+  const questionCompetencyOptions = competencies;
 
   const clearQuestionAssistantState = useCallback((videoId: string, indices?: number[]) => {
     setQuestionAssistants((prev) => {
@@ -371,7 +373,7 @@ export function SaveToLibraryModal({
       };
     }
 
-    const competency = COMPETENCIES.find((entry) => entry.id === question.competencyId);
+    const competency = competencies.find((entry) => entry.id === question.competencyId);
     const skill = competency?.skills.find((entry) => entry.id === question.skillId);
 
     return {
@@ -531,250 +533,259 @@ export function SaveToLibraryModal({
     [clearQuestionAssistantState, questionAssistants, updateQuestionStatement],
   );
 
-  if (!isOpen || !currentVideo || !currentMetadata) return null;
-
   // Extract quality as a typed variable
-  const qualityValue = typeof currentVideo.quality === 'string' ? currentVideo.quality : null;
+  const qualityValue = currentVideo && typeof currentVideo.quality === 'string' ? currentVideo.quality : null;
   const allComplete = videos.every((video) => videoMetadata[video.id]?.isComplete);
+  const completedCount = videos.filter((v) => videoMetadata[v.id]?.isComplete).length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={handleCancel} />
-
-      <div className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-          <div>
-            <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Library save</p>
-            <h2 className="text-xl font-semibold text-slate-900">
-              Save {videos.length} video{videos.length > 1 ? 's' : ''} to library
-            </h2>
-          </div>
-          <button
-            type="button"
-            onClick={handleCancel}
-            disabled={saving}
-            className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:border-slate-300 hover:text-slate-700 disabled:opacity-50"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        {videos.length > 1 && (
-          <div className="border-b border-slate-100 bg-slate-50 px-4 py-3">
-            <div className="flex min-h-[44px] items-center gap-2">
-              {videos.map((video, index) => {
-                const meta = videoMetadata[video.id];
-                const isComplete = meta?.isComplete || false;
-                const isActive = index === activeTabIndex;
-
-                return (
-                  <button
-                    key={video.id}
-                    onClick={() => handleTabClick(index)}
-                    disabled={saving}
-                    className={cn(
-                      'flex h-11 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition',
-                      isActive
-                        ? 'bg-white text-slate-900 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-700',
-                      saving && 'cursor-not-allowed opacity-50',
-                    )}
-                  >
-                    {isComplete ? (
-                      <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                    ) : (
-                      <Circle className="h-4 w-4 text-slate-300" />
-                    )}
-                    <span>Video {index + 1}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
-          {/* Video Preview Info */}
-          <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Video reference</p>
-            <p className="font-mono text-xs text-slate-600">{currentVideo.id}</p>
-            {qualityValue && (
-              <p className="mt-1 text-xs text-slate-500">
-                Quality preset: <span className="font-medium text-slate-800">{qualityValue}</span>
-              </p>
-            )}
-            {currentMetadata.isComplete && (
-              <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-600">
-                <CheckCircle2 className="h-4 w-4" />
-                Ready to save
+    <>
+      {/* Backdrop */}
+      <div 
+        className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-300 ${
+          isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}
+        onClick={handleCancel}
+      />
+      
+      {/* Side Panel */}
+      <div 
+        className={`fixed right-0 top-0 bottom-0 w-full max-w-xl bg-white shadow-xl z-50 flex flex-col transform transition-transform duration-300 ease-out ${
+          isOpen ? 'translate-x-0' : 'translate-x-full'
+        }`}
+      >
+        {isOpen && currentVideo && currentMetadata && (
+          <>
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 shrink-0">
+              <div className="flex items-center gap-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-900">
+                    Save to Library
+                  </h2>
+                  <p className="text-sm text-slate-500">
+                    {videos.length} video{videos.length > 1 ? 's' : ''} generated
+                  </p>
+                </div>
               </div>
-            )}
-          </div>
-
-          {/* Title & Description Combined */}
-          <div className="rounded-[32px] border border-slate-200 bg-white shadow-sm overflow-hidden">
-            <div className="border-b border-slate-100 px-5 py-4">
-              <input
-              id="video-title"
-              value={currentMetadata.title}
-              onChange={(e) => updateCurrentMetadata({ title: e.target.value })}
-                placeholder="Title (required)"
-              disabled={saving || currentMetadata.isComplete}
-              maxLength={200}
-                className="w-full border-none bg-transparent text-lg font-medium text-slate-900 outline-none placeholder:text-slate-400 disabled:text-slate-400"
-            />
-            {titleError && <FieldError>{titleError}</FieldError>}
-              <p className="mt-2 text-xs text-slate-400">
-                {currentMetadata.title.length}/200 characters
-              </p>
-            </div>
-            <div className="px-5 py-4">
-            <textarea
-              id="video-description"
-              value={currentMetadata.description}
-              onChange={(e) => updateCurrentMetadata({ description: e.target.value })}
-                placeholder="Description (optional)"
-              disabled={saving || currentMetadata.isComplete}
-              maxLength={1000}
-              rows={4}
-                className="w-full border-none bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400 disabled:text-slate-400"
-            />
-              <p className="mt-2 text-xs text-slate-400">
-                {currentMetadata.description.length}/1000 characters
-              </p>
-            </div>
+              <button 
+                onClick={handleCancel}
+                disabled={saving}
+                className="p-2 rounded-lg hover:bg-slate-100 transition disabled:opacity-50"
+              >
+                <X className="h-5 w-5 text-slate-500" />
+              </button>
             </div>
 
-          {selectedTags.length > 0 && (
-            <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
-              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                Auto-generated tags
-              </p>
-              <p className="text-sm text-slate-500">
-                Based on the competencies and skills you apply to each question.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                  {selectedTags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="inline-flex items-center rounded-full bg-slate-900/5 px-3 py-1 text-xs font-medium text-slate-700"
-                    >
-                      {tag}
-                    </span>
-                  ))}
+            {/* Video Tabs (for multiple videos) */}
+            {videos.length > 1 && (
+              <div className="border-b border-slate-200 bg-slate-50 px-4 py-3 shrink-0">
+                <div className="flex items-center gap-2 overflow-x-auto">
+                  {videos.map((video, index) => {
+                    const meta = videoMetadata[video.id];
+                    const isComplete = meta?.isComplete || false;
+                    const isActive = index === activeTabIndex;
+
+                    return (
+                      <button
+                        key={video.id}
+                        onClick={() => handleTabClick(index)}
+                        disabled={saving}
+                        className={cn(
+                          'flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition whitespace-nowrap',
+                          isActive
+                            ? 'bg-white text-slate-900 shadow-sm border border-slate-200'
+                            : 'text-slate-500 hover:text-slate-700 hover:bg-white/50',
+                          saving && 'cursor-not-allowed opacity-50',
+                        )}
+                      >
+                        {isComplete ? (
+                          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                        ) : (
+                          <Circle className="h-4 w-4 text-slate-300" />
+                        )}
+                        <span>Video {index + 1}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
 
-          {/* Questions */}
-          <div className="space-y-3">
-              <div>
-              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Assessment questions</p>
-              <p className="text-sm text-slate-500">
-                Each saved video ships with the three DI Code prompts (perception, intent, qualitative).
-                </p>
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* Video Reference Info */}
+              <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Video Reference</p>
+                  <p className="font-mono text-xs text-slate-600 mt-1">{currentVideo.id}</p>
+                  {qualityValue && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      Quality: <span className="font-medium text-slate-700">{qualityValue}</span>
+                    </p>
+                  )}
+                </div>
+                {currentMetadata.isComplete && (
+                  <div className="flex items-center gap-1.5 rounded-md bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    Ready
+                  </div>
+                )}
               </div>
+
+              {/* Title */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-slate-700">
+                  Title <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={currentMetadata.title}
+                  onChange={(e) => updateCurrentMetadata({ title: e.target.value })}
+                  placeholder="Enter a descriptive title"
+                  disabled={saving || currentMetadata.isComplete}
+                  maxLength={200}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-100 disabled:opacity-50 disabled:bg-slate-50"
+                />
+                {titleError && <p className="text-xs text-rose-600">{titleError}</p>}
+                <p className="text-xs text-slate-400">{currentMetadata.title.length}/200 characters</p>
+              </div>
+
+              {/* Description */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-slate-700">Description</label>
+                <textarea
+                  value={currentMetadata.description}
+                  onChange={(e) => updateCurrentMetadata({ description: e.target.value })}
+                  placeholder="Describe the scenario or context (optional)"
+                  disabled={saving || currentMetadata.isComplete}
+                  maxLength={1000}
+                  rows={3}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-100 disabled:opacity-50 disabled:bg-slate-50"
+                />
+                <p className="text-xs text-slate-400">{currentMetadata.description.length}/1000 characters</p>
+              </div>
+
+              {/* Auto-generated Tags */}
+              {selectedTags.length > 0 && (
+                <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-2">Auto-generated tags</p>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedTags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex items-center rounded-md bg-white px-2.5 py-1 text-xs font-medium text-slate-700 border border-slate-200"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Questions Section */}
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-medium text-slate-900">Assessment Questions</h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Each video includes the three DI Code prompts (perception, intent, qualitative).
+                  </p>
+                </div>
                 <QuestionBuilder
                   questions={currentMetadata.questions}
                   onChange={(questions: QuestionFormData[]) => updateCurrentMetadata({ questions })}
-              disabled={saving || currentMetadata.isComplete}
-              competencyOptions={questionCompetencyOptions}
+                  disabled={saving || currentMetadata.isComplete}
+                  competencyOptions={questionCompetencyOptions}
                   questionAssist={{
                     state: questionAssistants[currentVideo.id] || {},
                     onGenerate: (index) => handleGenerateQuestion(currentVideo.id, index),
                     onValidate: (index) => handleValidateQuestion(currentVideo.id, index),
                     onApplySuggestion: (index) => handleApplySuggestion(currentVideo.id, index),
                   }}
-            />
-          </div>
-
-          {/* Campaign Selection - Now optional for all videos */}
-          <Field>
-            <Label htmlFor="campaign-select" className="text-slate-700">
-              Campaign (optional)
-            </Label>
-            <p className="mb-2 text-xs text-slate-400">
-              Add to a campaign when you want this video tied to assessments or launch dashboards.
-            </p>
-            {loadingCampaigns ? (
-              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-500">
-                Loading campaigns…
+                />
               </div>
-            ) : campaigns.length === 0 ? (
-              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-600">
-                No campaigns yet. Videos can still be saved—create a campaign later for reporting.
-                <a
-                  href="/campaigns/new"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-3 inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-1.5 text-xs font-semibold text-white"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Launch campaign builder
-                </a>
-              </div>
-            ) : (
-              <select
-                id="campaign-select"
-                value={selectedCampaignId}
-                onChange={(e) => setSelectedCampaignId(e.target.value)}
-                disabled={saving}
-                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm focus:border-slate-900 focus:ring-2 focus:ring-slate-100 disabled:opacity-50"
-              >
-                <option value="">Select a campaign…</option>
-                {campaigns.map((campaign) => (
-                  <option key={campaign.id} value={campaign.id}>
-                    {campaign.title} ({campaign.items.length} videos)
-                  </option>
-                ))}
-              </select>
-            )}
-          </Field>
-        </div>
 
-        <div className="border-t border-slate-100 px-6 py-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-500">
-              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-              {videos.filter((v) => videoMetadata[v.id]?.isComplete).length} of {videos.length} ready
+              {/* Campaign Selection */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-slate-700">
+                  Add to Campaign <span className="text-slate-400 font-normal">(optional)</span>
+                </label>
+                <p className="text-xs text-slate-500">
+                  Assign this video to an existing campaign for assessments.
+                </p>
+                {loadingCampaigns ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+                    Loading campaigns…
+                  </div>
+                ) : campaigns.length === 0 ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+                    No campaigns yet. You can add videos to a campaign later.
+                  </div>
+                ) : (
+                  <select
+                    value={selectedCampaignId}
+                    onChange={(e) => setSelectedCampaignId(e.target.value)}
+                    disabled={saving}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-100 disabled:opacity-50"
+                  >
+                    <option value="">Select a campaign…</option>
+                    {campaigns.map((campaign) => (
+                      <option key={campaign.id} value={campaign.id}>
+                        {campaign.title} ({campaign.items.length} videos)
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={handleCancel}
-                disabled={saving}
-                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => updateCurrentMetadata({ isComplete: false })}
-                disabled={saving || !currentMetadata.isComplete}
-                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50"
-              >
-                Edit video
-              </button>
-              <button
-                type="button"
-                onClick={handleMarkComplete}
-                disabled={saving || !currentMetadata.title.trim() || currentMetadata.isComplete}
-                className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-200 disabled:opacity-50"
-              >
-                Mark complete
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveAll}
-                disabled={saving || !allComplete}
-                className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-[0_10px_30px_rgba(15,23,42,0.25)] transition hover:brightness-110 disabled:opacity-50"
-              >
-                {saving ? 'Saving…' : `Save all (${videos.length})`}
-              </button>
+
+            {/* Footer */}
+            <div className="border-t border-slate-200 px-6 py-4 shrink-0 bg-slate-50">
+              <div className="flex items-center justify-between gap-3">
+                {/* Progress indicator */}
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  <span>{completedCount} of {videos.length} ready</span>
+                </div>
+                
+                {/* Actions */}
+                <div className="flex items-center gap-2">
+                  {currentMetadata.isComplete ? (
+                    <button
+                      type="button"
+                      onClick={() => updateCurrentMetadata({ isComplete: false })}
+                      disabled={saving}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Edit
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleMarkComplete}
+                      disabled={saving || !currentMetadata.title.trim()}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Mark Complete
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleSaveAll}
+                    disabled={saving || !allComplete}
+                    className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    {saving ? 'Saving…' : `Save All (${videos.length})`}
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
-    </div>
+    </>
   );
 }

@@ -5,7 +5,7 @@ import { CampaignItem, Video, QuestionFormData, Question, QuestionRole, Question
 import QuestionBuilder from '../Questions/QuestionBuilder';
 import Modal from '../Layout/Modal';
 import { validateQuestionSet } from '@/lib/questionValidation';
-import { COMPETENCIES } from '@/lib/competencies';
+import { useCompetencies } from '@/hooks/useCompetencies';
 import { normalizeQuestionSet } from '@/lib/questionDefaults';
 
 interface CampaignItemEditorProps {
@@ -37,6 +37,7 @@ export default function CampaignItemEditor({
   itemNumber,
   onSelectVideo,
 }: CampaignItemEditorProps) {
+  const { competencies } = useCompetencies();
   const [showQuestionEditor, setShowQuestionEditor] = useState(false);
   const [draftQuestions, setDraftQuestions] = useState<QuestionFormData[]>([]);
 
@@ -171,7 +172,7 @@ export default function CampaignItemEditor({
           <QuestionBuilder
             questions={draftQuestions}
             onChange={setDraftQuestions}
-            competencyOptions={COMPETENCIES}
+            competencyOptions={competencies}
           />
 
           <div className="flex gap-3 pt-4 border-t border-white/10">

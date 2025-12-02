@@ -1,7 +1,7 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { LogIn, UserCheck, Users, CheckCircle } from 'lucide-react';
+import { Eye, EyeOff, UserCheck, Users, CheckCircle } from 'lucide-react';
 import type { UserRole } from '@/types';
 
 const roleOptions: { label: string; value: UserRole; icon: React.ReactNode }[] = [
@@ -42,18 +42,18 @@ const LoginPage: React.FC = () => {
   const location = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
+  const [selectedRole, setSelectedRole] = useState<UserRole | null>('admin');
+  const [rememberMe, setRememberMe] = useState(true);
   const [roleError, setRoleError] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const { login, loginWithGoogle } = useAuth();
 
   useEffect(() => {
-    // Check for success message from password reset
     if (location.state?.message) {
       setSuccessMessage(location.state.message);
-      // Clear the message after 5 seconds
       const timer = setTimeout(() => setSuccessMessage(null), 5000);
       return () => clearTimeout(timer);
     }
@@ -69,7 +69,7 @@ const LoginPage: React.FC = () => {
     setLoginError(null);
     setIsLoading(true);
     try {
-      await login(email, password, selectedRole);
+      await login(email, password, selectedRole, rememberMe);
     } catch (error: any) {
       console.error('Login failed:', error);
       setLoginError(error.message || 'Failed to sign in. Please check your credentials.');
@@ -88,7 +88,7 @@ const LoginPage: React.FC = () => {
     setLoginError(null);
     setIsLoading(true);
     try {
-      await loginWithGoogle(selectedRole);
+      await loginWithGoogle(selectedRole, rememberMe);
     } catch (error: any) {
       if (error.code === 'auth/popup-closed-by-user') return;
       console.error('Google login failed:', error);
@@ -98,46 +98,48 @@ const LoginPage: React.FC = () => {
     }
   };
 
-  const greeting = useMemo(() => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 18) return 'Good afternoon';
-    return 'Good evening';
-  }, []);
-
   return (
-    <div className="min-h-screen bg-[#04060A] text-white relative overflow-hidden">
-      <div className="absolute -top-1/3 -left-1/4 w-[60vw] h-[60vw] bg-primary/10 blur-3xl rounded-full" />
-      <div className="absolute bottom-0 right-0 w-[45vw] h-[45vw] bg-purple-500/5 blur-3xl rounded-full" />
-      <div className="relative z-10 flex items-center justify-center px-6 py-16">
-        <div className="w-full max-w-3xl flex flex-col items-center gap-10 text-center">
-          <div className="space-y-4">
+    <div className="flex min-h-screen bg-[#04060A]">
+      {/* Left Panel - Login Form */}
+      <div className="flex w-full flex-col justify-between px-8 py-10 lg:w-1/2 lg:px-16 xl:px-24">
+        {/* Logo */}
+        <div className="flex items-center gap-4">
             <img
               src="/dicode_logo.png"
-              alt="DI Code logo"
-              className="h-12 w-auto mx-auto drop-shadow-[0_10px_30px_rgba(0,0,0,0.4)]"
+            alt="DiCode logo"
+            className="h-14 w-14 object-contain"
             />
-            <p className="text-sm uppercase tracking-[0.3em] text-white/60">Behavioral Coaching</p>
-            <h1 className="text-3xl sm:text-4xl font-semibold text-white">{greeting}</h1>
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-semibold text-white">DiCode</span>
+            <span className="text-xl font-light text-white/50">Client</span>
+          </div>
           </div>
 
-          <div className="w-full max-w-md bg-[#0C0F17]/90 border border-white/5 rounded-3xl p-8 shadow-[0_20px_60px_rgba(3,6,16,0.6)] backdrop-blur-xl text-left">
-            <div className="space-y-6">
-              <div className="space-y-2 text-center">
-                <p className="text-xs uppercase tracking-[0.3em] text-white/50">Choose access</p>
-                <h2 className="text-2xl font-semibold text-white">Sign in to DiCode</h2>
+        {/* Form Section */}
+        <div className="mx-auto w-full max-w-md">
+          <div className="mb-8">
+            <h1 className="text-3xl font-semibold text-white">Welcome Back</h1>
+            <p className="mt-2 text-white/60">
+              Enter your credentials to access your coaching platform.
+            </p>
               </div>
 
               {successMessage && (
-                <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg flex items-start gap-3">
+            <div className="mb-6 rounded-xl border border-green-500/20 bg-green-500/10 p-4 flex items-start gap-3">
                   <CheckCircle size={18} className="text-green-400 flex-shrink-0 mt-0.5" />
-                  <p className="text-green-400 text-sm">{successMessage}</p>
+              <p className="text-sm text-green-400">{successMessage}</p>
+            </div>
+          )}
+
+          {loginError && (
+            <div className="mb-6 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">
+              {loginError}
                 </div>
               )}
 
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium mb-2 text-white/80">Workspace</label>
+          {/* Role Selection */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-white/80 mb-2">Workspace</label>
                   <div className="grid grid-cols-2 gap-2 bg-white/5 p-1 rounded-full border border-white/10">
                     {roleOptions.map((option) => (
                       <button
@@ -147,10 +149,10 @@ const LoginPage: React.FC = () => {
                           setSelectedRole(option.value);
                           setRoleError(null);
                         }}
-                        className={`flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-all ${
+                  className={`flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition-all ${
                           selectedRole === option.value
                             ? 'bg-white text-[#04060A] shadow-[0_10px_30px_rgba(255,255,255,0.2)]'
-                            : 'text-white/70'
+                      : 'text-white/70 hover:text-white'
                         }`}
                       >
                         <span>{option.icon}</span>
@@ -159,15 +161,11 @@ const LoginPage: React.FC = () => {
                     ))}
                   </div>
                   {roleError && <p className="text-xs text-red-400 mt-2">{roleError}</p>}
-                  {loginError && (
-                    <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-3 mt-4">
-                      <p className="text-red-400 text-sm">{loginError}</p>
-                    </div>
-                  )}
                 </div>
 
-                <div>
-                  <label htmlFor="email" className="block text-sm font-medium mb-2 text-white/80">
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="space-y-1.5">
+              <label htmlFor="email" className="block text-sm font-medium text-white/80">
                     Email
                   </label>
                   <input
@@ -175,64 +173,139 @@ const LoginPage: React.FC = () => {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="input w-full bg-white/[0.04] border-white/10 focus:border-primary focus:ring-primary/30"
+                required
+                className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder:text-white/40 transition-colors focus:border-[#F7B500] focus:ring-2 focus:ring-[#F7B500]/30 focus:outline-none"
                     placeholder="you@company.com"
-                    required
                   />
                 </div>
 
-                <div>
-                  <label htmlFor="password" className="block text-sm font-medium mb-2 text-white/80">
+            <div className="space-y-1.5">
+              <label htmlFor="password" className="block text-sm font-medium text-white/80">
                     Password
                   </label>
+              <div className="relative">
                   <input
                     id="password"
-                    type="password"
+                  type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="input w-full bg-white/[0.04] border-white/10 focus:border-primary focus:ring-primary/30"
+                  required
+                  minLength={6}
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 pr-12 text-white placeholder:text-white/40 transition-colors focus:border-[#F7B500] focus:ring-2 focus:ring-[#F7B500]/30 focus:outline-none"
                     placeholder="••••••••"
-                    required
-                  />
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/60"
+                >
+                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="h-4 w-4 rounded border-white/20 bg-white/5 text-[#F7B500] focus:ring-[#F7B500]/50"
+                />
+                <span className="text-sm text-white/60">Remember Me</span>
+              </label>
+              <button type="button" className="text-sm font-medium text-white/60 hover:text-white">
+                Forgot Your Password?
+              </button>
                 </div>
 
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="btn-primary w-full flex items-center justify-center gap-2 text-base py-3 rounded-2xl shadow-[0_15px_45px_rgba(245,188,29,0.35)]"
+              className="w-full rounded-full bg-[#F7B500] py-3.5 text-base font-semibold text-[#04060A] transition-all hover:bg-[#E5A500] disabled:cursor-not-allowed disabled:opacity-70 shadow-[0_15px_45px_rgba(247,181,0,0.25)]"
                 >
-                  <LogIn size={20} />
-                  {isLoading ? 'Signing in...' : 'Sign In'}
+              {isLoading ? 'Please wait...' : 'Log In'}
                 </button>
               </form>
 
               {loginWithGoogle && selectedRole === 'admin' && (
                 <>
-                  <div className="relative my-6">
-                    <div className="absolute inset-0 flex items-center">
-                      <div className="w-full border-t border-white/10"></div>
+              <div className="my-6 flex items-center gap-3">
+                <span className="h-px flex-1 bg-white/10" />
+                <span className="text-sm text-white/40">Or Login With</span>
+                <span className="h-px flex-1 bg-white/10" />
                     </div>
-                    <div className="relative flex justify-center text-sm">
-                      <span className="px-2 bg-[#0C0F17] text-white/50">OR</span>
-                    </div>
-                  </div>
+
                   <button
-                    type="button"
                     onClick={handleGoogleLogin}
                     disabled={isLoading}
-                    className="w-full flex items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white text-[#202124] py-3 font-medium hover:bg-white/95 transition-colors"
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white px-4 py-3 font-medium text-[#202124] transition-colors hover:bg-white/95 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <GoogleGlyph />
-                    <span>Continue with Google</span>
+                <span>Google</span>
                   </button>
                 </>
               )}
 
-              {selectedRole === 'employee' && (
-                <p className="text-sm text-white/50 text-center mt-4">
-                  Don't have an account? Contact your organization's IT or admin to get invited.
-                </p>
-              )}
+          <p className="mt-8 text-center text-sm text-white/50">
+            Don't Have An Account?{' '}
+            <span className="font-medium text-white/80">
+              Contact Your Organization Admin
+            </span>
+          </p>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between text-sm text-white/40">
+          <span>Copyright © 2025 DiCode Software GmbH.</span>
+          <button className="hover:text-white/60">Privacy Policy</button>
+        </div>
+      </div>
+
+      {/* Right Panel - Hero Section */}
+      <div className="relative hidden w-1/2 items-center justify-center p-8 lg:flex">
+        {/* Rounded container with gradient background */}
+        <div className="relative h-full w-full overflow-hidden rounded-[32px] p-12 flex flex-col justify-center">
+          {/* Gradient background matching the original */}
+          <div className="absolute inset-0 bg-[#04060A]" />
+          <div className="absolute -top-1/3 -left-1/4 w-[80%] h-[80%] bg-[#F7B500]/10 blur-[120px] rounded-full" />
+          <div className="absolute bottom-0 right-0 w-[60%] h-[60%] bg-purple-500/10 blur-[100px] rounded-full" />
+          <div className="absolute inset-0 border border-white/5 rounded-[32px]" />
+
+          {/* Content */}
+          <div className="relative z-10 max-w-xl">
+            <h2 className="text-4xl font-semibold leading-tight text-white xl:text-5xl">
+              Your behavioral coaching platform.
+            </h2>
+            <p className="mt-4 text-lg text-white/60">
+              Track progress, complete assessments, and develop your leadership skills. All in one place.
+            </p>
+          </div>
+
+          {/* Illustration */}
+          <div className="relative z-10 mt-8 flex items-center justify-center">
+            <img 
+              src="/assets/illustration_login.png" 
+              alt="Person working on laptop" 
+              className="h-auto w-full max-w-xs object-contain animate-float-subtle"
+            />
+          </div>
+
+          {/* Bottom features */}
+          <div className="relative z-10 mt-12 flex items-center gap-6">
+            <div>
+              <p className="text-xl font-semibold text-white">Assessments</p>
+              <p className="text-sm text-white/40">Track progress</p>
+            </div>
+            <div className="h-10 w-px bg-white/10" />
+            <div>
+              <p className="text-xl font-semibold text-white">Coaching</p>
+              <p className="text-sm text-white/40">AI-powered</p>
+            </div>
+            <div className="h-10 w-px bg-white/10" />
+            <div>
+              <p className="text-xl font-semibold text-white">Reports</p>
+              <p className="text-sm text-white/40">Detailed insights</p>
             </div>
           </div>
         </div>

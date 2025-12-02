@@ -53,7 +53,7 @@ export default function AuthButton() {
 
   return (
     <button
-      onClick={signInWithGoogle}
+      onClick={() => signInWithGoogle()}
       className="w-full btn-primary px-4 py-3 rounded-xl flex items-center gap-3 text-white font-medium text-sm shadow-lg hover:shadow-xl transition-all duration-200"
     >
       <svg className="w-5 h-5" viewBox="0 0 24 24">

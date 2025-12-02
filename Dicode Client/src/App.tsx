@@ -12,6 +12,7 @@ import Account from '@/pages/admin/Account';
 import AssetLibrary from '@/pages/admin/AssetLibrary';
 import CampaignManagement from '@/pages/admin/CampaignManagement';
 import EmployeeManagement from '@/pages/admin/EmployeeManagement';
+import EmployeeDetail from '@/pages/admin/EmployeeDetail';
 import Company from '@/pages/admin/Company';
 import AdminOnboarding from '@/pages/admin/Onboarding';
 import EmployeeOnboarding from '@/pages/employee/Onboarding';
@@ -141,6 +142,7 @@ function AppRoutes() {
         <Route path="analytics/:tab" element={<AnalyticsTrend />} />
         <Route path="campaigns" element={<CampaignManagement />} />
         <Route path="employees" element={<EmployeeManagement />} />
+        <Route path="employees/:employeeId" element={<EmployeeDetail />} />
         <Route path="assets" element={<AssetLibrary />} />
         <Route path="company" element={<Company />} />
         <Route path="account" element={<Account />} />

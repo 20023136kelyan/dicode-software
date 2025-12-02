@@ -232,35 +232,30 @@ const Company: React.FC = () => {
     );
   }
 
-  const panelClass = 'rounded-2xl border border-dark-border/70 bg-dark-card/80 p-6';
+  const panelClass = 'card';
 
   return (
-    <div className="p-8">
-      {/* Header */}
-      <div className="mb-10 border-b border-dark-border/70 pb-8">
-        <div className="flex flex-wrap items-start justify-between gap-8">
+    <div className="max-w-6xl mx-auto space-y-6">
+      {/* Action Bar */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-6 text-sm">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.4em] text-dark-text-muted">Organization Profile</p>
-            <h1 className="mt-3 text-4xl font-semibold text-dark-text">Company Settings</h1>
-            <p className="mt-2 max-w-2xl text-sm text-dark-text-muted">
-              Fine-tune your company branding, departments, and visual system used across the DiCode suite.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-4 text-xs text-dark-text-muted">
-              <span>
-                <span className="text-dark-text font-semibold">{employeeCount}</span> employees
-              </span>
-              <span>
-                <span className="text-dark-text font-semibold">{departments.length}</span> departments
-              </span>
-              <span>
-                <span className="text-dark-text font-semibold">{organization.size || '—'}</span> org size
-              </span>
-            </div>
+            <span className="text-dark-text font-semibold">{employeeCount}</span>
+            <span className="text-dark-text-muted ml-1">employees</span>
           </div>
-          <div className="text-right max-w-sm text-xs text-dark-text-muted">
-            Updates here power the employee and campaign experiences automatically. Review colors and logos before saving.
+          <div>
+            <span className="text-dark-text font-semibold">{departments.length}</span>
+            <span className="text-dark-text-muted ml-1">departments</span>
+          </div>
+          <div>
+            <span className="text-dark-text font-semibold">{organization.size || '—'}</span>
+            <span className="text-dark-text-muted ml-1">org size</span>
           </div>
         </div>
+        <button onClick={handleSave} className="btn-primary flex items-center gap-2">
+          <Save size={16} />
+          Save Changes
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -647,13 +642,6 @@ const Company: React.FC = () => {
             </div>
           </div>
 
-          {/* Save Button */}
-          <div className="flex justify-end">
-            <button onClick={handleSave} className="btn-primary flex items-center gap-2">
-              <Save size={18} />
-              Save Changes
-            </button>
-          </div>
         </div>
 
         {/* Sidebar - Brand Preview */}

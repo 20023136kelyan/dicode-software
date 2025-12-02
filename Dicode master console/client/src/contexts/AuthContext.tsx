@@ -1,14 +1,14 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { User, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut as firebaseSignOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { User, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut as firebaseSignOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, browserLocalPersistence, browserSessionPersistence, setPersistence } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  signInWithGoogle: () => Promise<void>;
-  signInWithEmail: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: (rememberMe?: boolean) => Promise<void>;
+  signInWithEmail: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   signUpWithEmail: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   getAuthToken: () => Promise<string | null>;
@@ -44,13 +44,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, []);
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = async (rememberMe: boolean = true) => {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({
       prompt: 'select_account'
     });
     
     try {
+      // Set persistence based on rememberMe
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+      
       const result = await signInWithPopup(auth, provider);
       if (!result.user.email?.endsWith('@di-code.de')) {
         await firebaseSignOut(auth);
@@ -65,11 +68,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signInWithEmail = async (email: string, password: string) => {
+  const signInWithEmail = async (email: string, password: string, rememberMe: boolean = true) => {
     if (!email.endsWith('@di-code.de')) {
       throw new Error('Access restricted to @di-code.de accounts.');
     }
     try {
+      // Set persistence based on rememberMe
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+      
       await signInWithEmailAndPassword(auth, email, password);
     } catch (error) {
       console.error('Error signing in with email:', error);

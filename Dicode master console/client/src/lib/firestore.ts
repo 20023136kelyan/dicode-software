@@ -16,6 +16,8 @@ import {
   documentId,
   increment,
   arrayUnion,
+  onSnapshot,
+  Unsubscribe,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import {
@@ -30,7 +32,10 @@ import {
   CampaignEnrollment,
   CampaignProgress,
   CampaignResponse,
+  Activity,
+  AppNotification,
 } from './types';
+import { CompetencyDefinition, SkillDefinition } from './competencies';
 
 // Collections
 const CAMPAIGNS_COLLECTION = 'campaigns';
@@ -40,6 +45,9 @@ const CAMPAIGN_PROGRESS_COLLECTION = 'campaignProgress';
 const CAMPAIGN_RESPONSES_COLLECTION = 'campaignResponses';
 const VIDEOS_COLLECTION = 'videos';
 const ASSETS_COLLECTION = 'assets';
+const ACTIVITIES_COLLECTION = 'activities';
+const NOTIFICATIONS_COLLECTION = 'notifications';
+const COMPETENCIES_COLLECTION = 'competencies';
 
 // Logging helper
 function logFirestoreOperation(operation: string, collection: string, details?: any) {
@@ -1177,4 +1185,468 @@ export async function getUserCampaignResponses(
       answeredAt: timestampToDate(data.answeredAt),
     } as CampaignResponse;
   });
+}
+
+// Activity Tracking Operations
+
+// Map activity actions to notification details
+function getNotificationDetailsFromActivity(activity: Omit<Activity, 'id' | 'createdAt'>): {
+  type: AppNotification['type'];
+  title: string;
+  message: string;
+  actionUrl?: string;
+} | null {
+  const actorName = activity.userName || activity.userEmail.split('@')[0];
+  
+  switch (activity.action) {
+    case 'campaign_created':
+      return {
+        type: 'team_activity',
+        title: 'New campaign created',
+        message: `${actorName} created "${activity.resourceName}"`,
+        actionUrl: '/campaigns',
+      };
+    case 'campaign_published':
+      return {
+        type: 'campaign_published',
+        title: 'Campaign published',
+        message: `${actorName} published "${activity.resourceName}"`,
+        actionUrl: '/campaigns',
+      };
+    case 'campaign_updated':
+      return {
+        type: 'team_activity',
+        title: 'Campaign updated',
+        message: `${actorName} updated "${activity.resourceName}"`,
+        actionUrl: '/campaigns',
+      };
+    case 'campaign_deleted':
+      return {
+        type: 'team_activity',
+        title: 'Campaign deleted',
+        message: `${actorName} deleted "${activity.resourceName}"`,
+      };
+    case 'video_generated':
+      return {
+        type: 'video_generation_complete',
+        title: 'Video generated',
+        message: `${actorName} generated a new video: "${activity.resourceName}"`,
+        actionUrl: '/videos',
+      };
+    case 'video_uploaded':
+      return {
+        type: 'team_activity',
+        title: 'Video uploaded',
+        message: `${actorName} uploaded "${activity.resourceName}"`,
+        actionUrl: '/videos',
+      };
+    case 'video_deleted':
+      return {
+        type: 'team_activity',
+        title: 'Video deleted',
+        message: `${actorName} deleted "${activity.resourceName}"`,
+      };
+    case 'asset_created':
+      return {
+        type: 'team_activity',
+        title: 'Asset created',
+        message: `${actorName} created "${activity.resourceName}"`,
+        actionUrl: '/assets',
+      };
+    case 'asset_updated':
+      return {
+        type: 'team_activity',
+        title: 'Asset updated',
+        message: `${actorName} updated "${activity.resourceName}"`,
+        actionUrl: '/assets',
+      };
+    case 'asset_deleted':
+      return {
+        type: 'team_activity',
+        title: 'Asset deleted',
+        message: `${actorName} deleted "${activity.resourceName}"`,
+      };
+    case 'access_updated':
+      return {
+        type: 'team_activity',
+        title: 'Access updated',
+        message: `${actorName} updated access settings`,
+        actionUrl: '/access',
+      };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Log an activity to the activities collection
+ * Used to track user actions across the platform
+ * Also creates notifications for the user who performed the action
+ */
+export async function logActivity(
+  activity: Omit<Activity, 'id' | 'createdAt'>
+): Promise<void> {
+  try {
+    // Log the activity
+    await addDoc(collection(db, ACTIVITIES_COLLECTION), {
+      ...activity,
+      createdAt: Timestamp.now(),
+    });
+
+    // Create a notification for the user
+    const notificationDetails = getNotificationDetailsFromActivity(activity);
+    if (notificationDetails) {
+      await addDoc(collection(db, NOTIFICATIONS_COLLECTION), {
+        userId: activity.userId,
+        type: notificationDetails.type,
+        title: notificationDetails.title,
+        message: notificationDetails.message,
+        priority: 'normal',
+        read: false,
+        actorId: activity.userId,
+        actorName: activity.userName || activity.userEmail.split('@')[0],
+        actorEmail: activity.userEmail,
+        resourceId: activity.resourceId,
+        resourceType: activity.resourceType,
+        resourceName: activity.resourceName,
+        actionUrl: notificationDetails.actionUrl,
+        createdAt: Timestamp.now(),
+      });
+    }
+  } catch (error) {
+    // Don't throw - activity logging should not break the main operation
+    console.error('Failed to log activity:', error);
+  }
+}
+
+/**
+ * Get recent activities for display on the home page
+ * Returns activities sorted by creation time, most recent first
+ */
+export async function getRecentActivities(limitCount: number = 5): Promise<Activity[]> {
+  const q = query(
+    collection(db, ACTIVITIES_COLLECTION),
+    orderBy('createdAt', 'desc'),
+    limit(limitCount)
+  );
+
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      ...data,
+      createdAt: timestampToDate(data.createdAt),
+    } as Activity;
+  });
+}
+
+// Notification Operations
+
+/**
+ * Create a new notification
+ */
+export async function createNotification(
+  notification: Omit<AppNotification, 'id' | 'createdAt' | 'read'>
+): Promise<string> {
+  const docRef = await addDoc(collection(db, NOTIFICATIONS_COLLECTION), {
+    ...notification,
+    read: false,
+    createdAt: Timestamp.now(),
+  });
+  return docRef.id;
+}
+
+/**
+ * Get notifications for a specific user
+ */
+export async function getUserNotifications(
+  userId: string,
+  limitCount: number = 20
+): Promise<AppNotification[]> {
+  const q = query(
+    collection(db, NOTIFICATIONS_COLLECTION),
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc'),
+    limit(limitCount)
+  );
+
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      ...data,
+      createdAt: timestampToDate(data.createdAt),
+      expiresAt: data.expiresAt ? timestampToDate(data.expiresAt) : undefined,
+    } as AppNotification;
+  });
+}
+
+/**
+ * Subscribe to real-time notification updates for a user
+ */
+export function subscribeToNotifications(
+  userId: string,
+  callback: (notifications: AppNotification[]) => void
+): Unsubscribe {
+  const q = query(
+    collection(db, NOTIFICATIONS_COLLECTION),
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc'),
+    limit(50)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const notifications = snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        createdAt: timestampToDate(data.createdAt),
+        expiresAt: data.expiresAt ? timestampToDate(data.expiresAt) : undefined,
+      } as AppNotification;
+    });
+    callback(notifications);
+  });
+}
+
+/**
+ * Mark a notification as read
+ */
+export async function markNotificationRead(notificationId: string): Promise<void> {
+  const docRef = doc(db, NOTIFICATIONS_COLLECTION, notificationId);
+  await updateDoc(docRef, { read: true });
+}
+
+/**
+ * Mark all notifications as read for a user
+ */
+export async function markAllNotificationsRead(userId: string): Promise<void> {
+  const q = query(
+    collection(db, NOTIFICATIONS_COLLECTION),
+    where('userId', '==', userId),
+    where('read', '==', false)
+  );
+
+  const snapshot = await getDocs(q);
+  const batch = writeBatch(db);
+  
+  snapshot.docs.forEach(docSnap => {
+    batch.update(docSnap.ref, { read: true });
+  });
+
+  await batch.commit();
+}
+
+/**
+ * Delete a notification
+ */
+export async function deleteNotification(notificationId: string): Promise<void> {
+  const docRef = doc(db, NOTIFICATIONS_COLLECTION, notificationId);
+  await deleteDoc(docRef);
+}
+
+/**
+ * Delete old notifications (cleanup)
+ */
+export async function cleanupOldNotifications(userId: string, daysOld: number = 30): Promise<void> {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+  
+  const q = query(
+    collection(db, NOTIFICATIONS_COLLECTION),
+    where('userId', '==', userId),
+    where('createdAt', '<', Timestamp.fromDate(cutoffDate))
+  );
+
+  const snapshot = await getDocs(q);
+  const batch = writeBatch(db);
+  
+  snapshot.docs.forEach(docSnap => {
+    batch.delete(docSnap.ref);
+  });
+
+  await batch.commit();
+}
+
+// Competencies CRUD Operations
+
+/**
+ * Get all competencies from Firestore
+ */
+export async function getCompetencies(): Promise<CompetencyDefinition[]> {
+  const q = query(
+    collection(db, COMPETENCIES_COLLECTION),
+    orderBy('order', 'asc')
+  );
+
+  try {
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(docSnap => {
+      const data = docSnap.data();
+      return {
+        id: docSnap.id,
+        name: data.name,
+        description: data.description,
+        skills: data.skills || [],
+      } as CompetencyDefinition;
+    });
+  } catch (error) {
+    console.error('Failed to fetch competencies:', error);
+    return [];
+  }
+}
+
+/**
+ * Get a single competency by ID
+ */
+export async function getCompetency(competencyId: string): Promise<CompetencyDefinition | null> {
+  const docRef = doc(db, COMPETENCIES_COLLECTION, competencyId);
+  const docSnap = await getDoc(docRef);
+
+  if (!docSnap.exists()) {
+    return null;
+  }
+
+  const data = docSnap.data();
+  return {
+    id: docSnap.id,
+    name: data.name,
+    description: data.description,
+    skills: data.skills || [],
+  };
+}
+
+/**
+ * Create a new competency
+ */
+export async function createCompetency(
+  data: {
+    name: string;
+    description: string;
+    skills?: SkillDefinition[];
+  }
+): Promise<string> {
+  // Get current count for ordering
+  const existing = await getCompetencies();
+  const order = existing.length;
+
+  const docRef = await addDoc(collection(db, COMPETENCIES_COLLECTION), {
+    name: data.name,
+    description: data.description,
+    skills: data.skills || [],
+    order,
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  });
+
+  console.log('✅ Competency created:', docRef.id);
+  return docRef.id;
+}
+
+/**
+ * Update an existing competency
+ */
+export async function updateCompetency(
+  competencyId: string,
+  data: Partial<{
+    name: string;
+    description: string;
+    skills: SkillDefinition[];
+  }>
+): Promise<void> {
+  const docRef = doc(db, COMPETENCIES_COLLECTION, competencyId);
+  await updateDoc(docRef, {
+    ...data,
+    updatedAt: Timestamp.now(),
+  });
+
+  console.log('✅ Competency updated:', competencyId);
+}
+
+/**
+ * Delete a competency
+ */
+export async function deleteCompetency(competencyId: string): Promise<void> {
+  const docRef = doc(db, COMPETENCIES_COLLECTION, competencyId);
+  await deleteDoc(docRef);
+
+  console.log('✅ Competency deleted:', competencyId);
+}
+
+/**
+ * Reorder competencies
+ */
+export async function reorderCompetencies(orderedIds: string[]): Promise<void> {
+  const batch = writeBatch(db);
+
+  orderedIds.forEach((id, index) => {
+    const docRef = doc(db, COMPETENCIES_COLLECTION, id);
+    batch.update(docRef, {
+      order: index,
+      updatedAt: Timestamp.now(),
+    });
+  });
+
+  await batch.commit();
+  console.log('✅ Competencies reordered');
+}
+
+/**
+ * Subscribe to real-time competencies updates
+ */
+export function subscribeToCompetencies(
+  callback: (competencies: CompetencyDefinition[]) => void
+): Unsubscribe {
+  const q = query(
+    collection(db, COMPETENCIES_COLLECTION),
+    orderBy('order', 'asc')
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const competencies = snapshot.docs.map(docSnap => {
+      const data = docSnap.data();
+      return {
+        id: docSnap.id,
+        name: data.name,
+        description: data.description,
+        skills: data.skills || [],
+      } as CompetencyDefinition;
+    });
+    callback(competencies);
+  });
+}
+
+/**
+ * Initialize competencies collection with default data
+ * Only runs if the collection is empty
+ */
+export async function initializeCompetencies(
+  defaultCompetencies: CompetencyDefinition[]
+): Promise<boolean> {
+  const existing = await getCompetencies();
+  
+  if (existing.length > 0) {
+    console.log('ℹ️ Competencies already initialized');
+    return false;
+  }
+
+  const batch = writeBatch(db);
+
+  defaultCompetencies.forEach((competency, index) => {
+    const docRef = doc(db, COMPETENCIES_COLLECTION, competency.id);
+    batch.set(docRef, {
+      name: competency.name,
+      description: competency.description,
+      skills: competency.skills,
+      order: index,
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+  });
+
+  await batch.commit();
+  console.log('✅ Competencies initialized with', defaultCompetencies.length, 'items');
+  return true;
 }

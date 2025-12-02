@@ -15,7 +15,8 @@ import {
   getVideo,
   setCampaignPublishState
 } from '@/lib/firestore';
-import { COMPETENCIES, type CompetencyDefinition, type SkillDefinition } from '@/lib/competencies';
+import { type CompetencyDefinition, type SkillDefinition } from '@/lib/competencies';
+import { useCompetencies } from '@/hooks/useCompetencies';
 import {
   ArrowLeft,
   ArrowRight,
@@ -36,8 +37,6 @@ import type { Organization, Video, Campaign } from '@/lib/types';
 
 type Skill = SkillDefinition;
 type Competency = CompetencyDefinition;
-
-const competencies: Competency[] = COMPETENCIES;
 
 const wizardSteps = [
   { id: 1, label: 'Campaign Setup', description: 'Goals, competencies, and skills' },
@@ -74,6 +73,9 @@ export default function EditCampaignPage() {
   const searchParams = useSearchParams();
   const campaignId = searchParams.get('id');
   const { user } = useAuth();
+  
+  // Fetch competencies from Firestore
+  const { competencies } = useCompetencies();
 
   const [wizardStep, setWizardStep] = useState(1);
   const [form, setForm] = useState(defaultForm);

@@ -1,11 +1,10 @@
 ## Shared Firebase Setup
 
-The Next.js reference app in `/Users/kelyan/Documents/Video_Gen copy` already connects to Firebase.  
-We are reusing that exact backend so both apps share Auth, Firestore documents, and Storage files.
+Both the Dicode Client (Vite) and the Dicode Master Console (Next.js) now point to the **`dicode-software`** Firebase project so they can share Auth, Firestore documents, and Storage files.
 
-- **Project ID:** `dicode-workspace` (see `.firebaserc`)
-- **Services in use:** Firebase Auth, Cloud Firestore, Cloud Storage
-- **Reference client config:** `client/src/lib/firebase.ts` in the Video_Gen copy project
+- **Project ID:** `dicode-software` (see `.firebaserc`)
+- **Services in use:** Firebase Auth, Cloud Firestore, Cloud Storage, Analytics
+- **Reference client config:** `client/src/lib/firebase.ts` in the master console
   - Uses env keys named `NEXT_PUBLIC_FIREBASE_*`
   - Copy these values or grab them from Firebase Console → Project Settings → General → *Web app config*
 
@@ -16,10 +15,11 @@ Create a `.env` (or `.env.local`) in this repo using the same values as the Next
 ```
 VITE_FIREBASE_API_KEY=
 VITE_FIREBASE_AUTH_DOMAIN=
-VITE_FIREBASE_PROJECT_ID=dicode-workspace
+VITE_FIREBASE_PROJECT_ID=dicode-software
 VITE_FIREBASE_STORAGE_BUCKET=
 VITE_FIREBASE_MESSAGING_SENDER_ID=
 VITE_FIREBASE_APP_ID=
+VITE_FIREBASE_MEASUREMENT_ID=
 ```
 
 ### Firestore Collections

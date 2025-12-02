@@ -6,8 +6,9 @@ import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import MainLayout from '@/components/Layout/MainLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { db } from '@/lib/firebase';
-import { createCampaign, setCampaignPublishState, getAllVideos, createCampaignItem } from '@/lib/firestore';
-import { COMPETENCIES, type CompetencyDefinition, type SkillDefinition } from '@/lib/competencies';
+import { createCampaign, setCampaignPublishState, getAllVideos, createCampaignItem, logActivity } from '@/lib/firestore';
+import { type CompetencyDefinition, type SkillDefinition } from '@/lib/competencies';
+import { useCompetencies } from '@/hooks/useCompetencies';
 import {
   ArrowLeft,
   ArrowRight,
@@ -41,8 +42,6 @@ type Employee = {
   region: string;
 };
 
-const competencies: Competency[] = COMPETENCIES;
-
 const availableEmployees: Employee[] = [
   { id: 'emp-1', name: 'Sarah Johnson', email: 'sarah.johnson@dicode.com', department: 'Marketing', role: 'Manager', region: 'North America' },
   { id: 'emp-2', name: 'Mike Chen', email: 'mike.chen@dicode.com', department: 'Product', role: 'Director', region: 'Asia Pacific' },
@@ -58,7 +57,7 @@ const campaignTemplates = [
     name: 'Leadership Check-In',
     duration: '4 weeks',
     description: 'Pulse on leadership behaviors to reinforce trust and alignment.',
-    competencies: ['Psychological Safety', 'Collaboration & Allyship'],
+    competencies: ['Foster Psychological Safety', 'Encourage Collaboration', 'Establish Prosocial Norms'],
     accent: 'bg-sky-50 text-sky-700 border-sky-100',
   },
   {
@@ -66,7 +65,7 @@ const campaignTemplates = [
     name: 'Culture & Equity Pulse',
     duration: '3 weeks',
     description: 'Track inclusion, bias, and belonging across teams.',
-    competencies: ['Equity & Inclusion', 'Collaboration & Allyship'],
+    competencies: ['Establish Prosocial Norms', 'Encourage Collaboration', 'Foster Psychological Safety'],
     accent: 'bg-amber-50 text-amber-700 border-amber-100',
   },
   {
@@ -74,13 +73,13 @@ const campaignTemplates = [
     name: 'Future Skills Sprint',
     duration: '5 weeks',
     description: 'Upskill leaders on adaptability, innovation, and resilience.',
-    competencies: ['Growth & Adaptability'],
+    competencies: ['Prioritize Growth', 'Encourage Collaboration', 'Foster Psychological Safety'],
     accent: 'bg-indigo-50 text-indigo-700 border-indigo-100',
   },
 ];
 
 const wizardSteps = [
-  { id: 1, label: 'Campaign Setup', description: 'Goals, competencies, and skills' },
+  { id: 1, label: 'Setup', description: 'Goals, competencies, and skills' },
   { id: 2, label: 'Audience', description: 'Select cohorts and guardrails' },
   { id: 3, label: 'Schedule', description: 'Timing + automation' },
 ];
@@ -112,7 +111,11 @@ const defaultForm = {
 export default function NewCampaignPage() {
   const router = useRouter();
   const { user } = useAuth();
+  
+  // Fetch competencies from Firestore
+  const { competencies, loading: competenciesLoading } = useCompetencies();
 
+  const [showTemplates, setShowTemplates] = useState(true);
   const [wizardStep, setWizardStep] = useState(1);
   const [form, setForm] = useState(defaultForm);
   const [activeTemplate, setActiveTemplate] = useState<string | null>(null);
@@ -194,6 +197,12 @@ export default function NewCampaignPage() {
         return acc;
       }, {}),
     });
+    setShowTemplates(false);
+    setWizardStep(1);
+  };
+
+  const handleStartFromScratch = () => {
+    setShowTemplates(false);
     setWizardStep(1);
   };
 
@@ -504,6 +513,19 @@ export default function NewCampaignPage() {
           ),
         );
       }
+
+      // Log activity
+      await logActivity({
+        action: publish ? 'campaign_published' : 'campaign_created',
+        userId: user.uid,
+        userEmail: user.email || '',
+        userName: user.displayName || undefined,
+        resourceId: newCampaignId,
+        resourceName: form.name,
+        resourceType: 'campaign',
+        metadata: { videosCount: selectedVideos.length },
+      });
+
       router.push(`/campaign?id=${newCampaignId}`);
     } catch (err: any) {
       setError(err?.message || 'Unable to save campaign right now.');
@@ -512,87 +534,183 @@ export default function NewCampaignPage() {
     }
   };
 
+  // Template Selection Screen
+  if (showTemplates) {
   return (
     <MainLayout>
-      <div className="space-y-8 text-slate-900">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Campaign creation</p>
-            <h1 className="mt-3 text-3xl font-semibold text-slate-900">Launch a new DiCode campaign</h1>
-            <p className="mt-2 text-slate-500 max-w-2xl">
-              Match the DiCode 2 launch flow—move from strategy and competencies to audiences and automation in a single guided experience.
-            </p>
+        <div className="min-h-[80vh] flex flex-col text-slate-900">
+          {/* Centered Content */}
+          <div className="flex-1 flex flex-col items-center justify-center py-12">
+            {/* Header */}
+            <div className="text-center mb-12">
+              <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600 mb-6">
+                <Sparkles className="h-4 w-4" />
+                New Campaign
           </div>
-          <button
-            onClick={() => router.push('/campaigns')}
-            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-600 shadow-sm hover:bg-slate-50"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to campaigns
-          </button>
+              <h1 className="text-4xl font-semibold text-slate-900 mb-3">How would you like to start?</h1>
+              <p className="text-lg text-slate-500">Choose a template to get started quickly, or build from scratch</p>
         </div>
 
-        <section className="grid gap-4 md:grid-cols-3">
-          {campaignTemplates.map((template) => (
+            {/* Options */}
+            <div className="w-full max-w-5xl px-6">
+              {/* Templates Row */}
+              <div className="grid gap-5 sm:grid-cols-3 mb-6">
+                {campaignTemplates.map((template, idx) => {
+                  const gradients = [
+                    'from-sky-500 to-blue-600',
+                    'from-amber-500 to-orange-600',
+                    'from-violet-500 to-purple-600',
+                  ];
+                  return (
             <button
               key={template.id}
               onClick={() => handleTemplateSelect(template.id)}
-              className={`flex flex-col rounded-3xl border px-5 py-4 text-left transition-all ${activeTemplate === template.id ? 'border-sky-400 shadow-lg' : 'border-slate-200 hover:border-sky-200'
-                }`}
+                      className="group relative flex flex-col overflow-hidden rounded-2xl bg-white border border-slate-200 text-left transition-all hover:shadow-xl hover:scale-[1.02] hover:border-slate-300"
             >
-              <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${template.accent}`}>
-                <Sparkles className="h-3.5 w-3.5" />
-                Template
+                      {/* Gradient Header */}
+                      <div className={`h-28 bg-gradient-to-br ${gradients[idx]} p-5 flex items-end shrink-0`}>
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 backdrop-blur">
+                            <Sparkles className="h-4 w-4 text-white" />
               </div>
-              <h3 className="mt-3 text-lg font-semibold">{template.name}</h3>
-              <p className="mt-1 text-sm text-slate-500">{template.description}</p>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+                          <span className="text-sm font-medium text-white/90">{template.duration}</span>
+                        </div>
+                      </div>
+                      
+                      {/* Content */}
+                      <div className="p-5 flex-1 flex flex-col">
+                        <h3 className="text-lg font-semibold text-slate-900 mb-2">{template.name}</h3>
+                        <p className="text-sm text-slate-500 mb-4 flex-1">{template.description}</p>
+                        <div className="flex flex-wrap gap-1.5">
                 {template.competencies.map((tag) => (
-                  <span key={tag} className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-600">
+                            <span key={tag} className="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
                     {tag}
                   </span>
                 ))}
               </div>
-              <p className="mt-4 text-xs font-medium uppercase tracking-[0.25em] text-slate-400">{template.duration}</p>
-            </button>
-          ))}
-        </section>
+                      </div>
 
-        <div className="rounded-[32px] border border-slate-200 bg-white p-8 shadow-xl shadow-slate-100">
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-6">
-            {wizardSteps.map((step) => (
-              <div key={step.id} className="flex items-center gap-3">
-                <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${wizardStep >= step.id ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-400'
-                    }`}
-                >
-                  {wizardStep > step.id ? <Check className="h-4 w-4" /> : step.id}
+                      {/* Hover Arrow */}
+                      <div className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-white/20 backdrop-blur opacity-0 transition group-hover:opacity-100">
+                        <ArrowRight className="h-4 w-4 text-white" />
+                      </div>
+            </button>
+                  );
+                })}
+              </div>
+
+              {/* Divider */}
+              <div className="flex items-center gap-4 my-8">
+                <div className="flex-1 h-px bg-slate-200" />
+                <span className="text-sm text-slate-400 font-medium">or</span>
+                <div className="flex-1 h-px bg-slate-200" />
+              </div>
+
+              {/* Start from Scratch */}
+              <button
+                onClick={handleStartFromScratch}
+                className="group w-full flex items-center justify-between rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/50 p-6 transition hover:border-slate-400 hover:bg-slate-100/50"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-200 text-slate-500 transition group-hover:bg-slate-300 group-hover:text-slate-700">
+                    <Play className="h-5 w-5" />
                 </div>
+                  <div className="text-left">
+                    <h3 className="text-base font-semibold text-slate-800">Start from Scratch</h3>
+                    <p className="text-sm text-slate-500">Build a fully custom campaign with your own settings</p>
+                  </div>
+                </div>
+                <ArrowRight className="h-5 w-5 text-slate-400 transition group-hover:text-slate-600 group-hover:translate-x-1" />
+              </button>
+            </div>
+
+            {/* Back Link */}
+            <button
+              onClick={() => router.push('/campaigns')}
+              className="mt-10 inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700 transition"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to Campaigns
+            </button>
+          </div>
+        </div>
+      </MainLayout>
+    );
+  }
+
+  return (
+    <MainLayout>
+      <div className="min-h-screen text-slate-900">
+        {/* Compact Header */}
+        <div className="mb-8 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setShowTemplates(true)}
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
                 <div>
-                  <p className={`text-sm font-semibold ${wizardStep >= step.id ? 'text-slate-900' : 'text-slate-400'}`}>{step.label}</p>
-                  <p className="text-xs text-slate-400">{step.description}</p>
+              <h1 className="text-xl font-semibold text-slate-900">
+                {activeTemplate ? campaignTemplates.find(t => t.id === activeTemplate)?.name : 'New Campaign'}
+              </h1>
+              <p className="text-sm text-slate-500">Step {wizardStep} of {wizardSteps.length}</p>
                 </div>
               </div>
+
+          {/* Progress Steps - Horizontal Pills */}
+          <div className="hidden items-center gap-2 lg:flex">
+            {wizardSteps.map((step) => (
+              <button
+                key={step.id}
+                onClick={() => {
+                  if (step.id < wizardStep) setWizardStep(step.id);
+                }}
+                className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition ${
+                  wizardStep === step.id
+                    ? 'bg-slate-900 text-white'
+                    : wizardStep > step.id
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-slate-100 text-slate-400'
+                }`}
+              >
+                {wizardStep > step.id ? (
+                  <Check className="h-4 w-4" />
+                ) : (
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/20 text-xs">{step.id}</span>
+                )}
+                {step.label}
+              </button>
             ))}
           </div>
+          </div>
 
+        {/* Main Content Area */}
+        <div className="grid gap-8 lg:grid-cols-[1fr,340px]">
+          {/* Left Column - Main Form */}
+          <div className="space-y-6">
           {validationMessage && (
-            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                <Info className="h-4 w-4 flex-shrink-0" />
               {validationMessage}
             </div>
           )}
 
           {error && (
-            <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+              <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                <X className="h-4 w-4 flex-shrink-0" />
               {error}
             </div>
           )}
 
           {wizardStep === 1 && (
-            <div className="mt-8 space-y-8">
-              <div className="space-y-6">
-                <div className="space-y-3">
-                  <label className="text-sm font-medium text-slate-700">Campaign name</label>
+              <>
+                {/* Campaign Details Card */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                  <h2 className="text-base font-semibold text-slate-900 mb-5">Campaign Details</h2>
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <label className="mb-2 block text-sm font-medium text-slate-700">Campaign Name</label>
                   <input
                     type="text"
                     value={form.name}
@@ -604,17 +722,15 @@ export default function NewCampaignPage() {
                         setFieldErrors(newErrors);
                       }
                     }}
-                    className={`w-full rounded-2xl border px-4 py-3 text-sm text-slate-900 shadow-sm focus:ring-0 ${fieldErrors.has('name')
-                        ? 'border-red-400 focus:border-red-500'
-                        : 'border-slate-200 focus:border-sky-400'
+                        className={`w-full rounded-xl border bg-slate-50 px-4 py-3 text-sm text-slate-900 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 ${
+                          fieldErrors.has('name') ? 'border-red-400' : 'border-slate-200'
                       }`}
-                    placeholder="e.g., Q2 Leadership Pulse"
+                        placeholder="e.g., Q2 Leadership Development"
                   />
                 </div>
-                <div className="space-y-3">
-                  <label className="text-sm font-medium text-slate-700">Program summary</label>
-                  <input
-                    type="text"
+                    <div className="sm:col-span-2">
+                      <label className="mb-2 block text-sm font-medium text-slate-700">Description</label>
+                      <textarea
                     value={form.description}
                     onChange={(e) => {
                       setForm({ ...form, description: e.target.value });
@@ -624,28 +740,33 @@ export default function NewCampaignPage() {
                         setFieldErrors(newErrors);
                       }
                     }}
-                    className={`w-full rounded-2xl border px-4 py-3 text-sm text-slate-900 shadow-sm focus:ring-0 ${fieldErrors.has('description')
-                        ? 'border-red-400 focus:border-red-500'
-                        : 'border-slate-200 focus:border-sky-400'
+                        rows={3}
+                        className={`w-full rounded-xl border bg-slate-50 px-4 py-3 text-sm text-slate-900 transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 ${
+                          fieldErrors.has('description') ? 'border-red-400' : 'border-slate-200'
                       }`}
-                    placeholder="Why are we running this campaign?"
+                        placeholder="Brief description of the campaign goals and objectives..."
                   />
+                    </div>
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
+                {/* Competencies Card */}
+                <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                  <div className="mb-5 flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-semibold text-slate-800">Target competencies (pick 3-5)</p>
-                    <p className="text-xs text-slate-500">Match the DiCode 2 approach by pairing each competency with skills.</p>
+                      <h2 className="text-base font-semibold text-slate-900">Target Competencies</h2>
+                      <p className="text-sm text-slate-500">Select 3-5 competencies to focus on</p>
                   </div>
-                  <div className="flex items-center gap-2 rounded-full bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-500">
-                    <Info className="h-3.5 w-3.5" />
-                    Required for wizard progression
-                  </div>
+                    <span className={`rounded-full px-3 py-1 text-xs font-medium ${
+                      form.targetCompetencies.length >= 3 && form.targetCompetencies.length <= 5
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-slate-100 text-slate-500'
+                    }`}>
+                      {form.targetCompetencies.length}/5 selected
+                    </span>
                 </div>
 
-                <div className="flex flex-wrap gap-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
                   {competencies.map((comp) => {
                     const isSelected = form.targetCompetencies.includes(comp.name);
                     const hasError = fieldErrors.has('targetCompetencies') || fieldErrors.has('selectedSkills');
@@ -655,47 +776,60 @@ export default function NewCampaignPage() {
                         key={comp.id}
                         onClick={() => toggleCompetency(comp)}
                         type="button"
-                        className={`rounded-2xl border px-4 py-3 text-left transition ${hasError && (missingSkills || !isSelected)
-                            ? 'border-red-400 bg-red-50 text-red-700'
+                          className={`group relative flex items-start gap-3 rounded-xl border p-4 text-left transition ${
+                            hasError && (missingSkills || !isSelected)
+                              ? 'border-red-300 bg-red-50'
                             : isSelected
-                              ? 'border-sky-400 bg-sky-50 text-sky-700 shadow-sm'
-                              : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                                ? 'border-slate-900 bg-slate-900 text-white'
+                                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
                           }`}
-                      >
-                        <p className="text-sm font-semibold">{comp.name}</p>
-                        <p className="text-xs text-slate-500">{comp.description}</p>
+                        >
+                          <div className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border ${
+                            isSelected ? 'border-white/30 bg-white/20' : 'border-slate-300'
+                          }`}>
+                            {isSelected && <Check className="h-3 w-3" />}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className={`text-sm font-medium ${isSelected ? 'text-white' : 'text-slate-900'}`}>{comp.name}</p>
+                            <p className={`mt-0.5 text-xs ${isSelected ? 'text-white/70' : 'text-slate-500'}`}>{comp.description}</p>
+                          </div>
                       </button>
                     );
                   })}
                 </div>
               </div>
 
+                {/* Skills Selection - Only show if competencies selected */}
               {form.targetCompetencies.length > 0 && (
-                <div className="space-y-6 rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
-                  <p className="text-sm font-semibold text-slate-700">Skills & behaviors</p>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                    <h2 className="text-base font-semibold text-slate-900 mb-5">Skills & Behaviors</h2>
+                    <div className="space-y-4">
                   {competencies
                     .filter((comp) => form.targetCompetencies.includes(comp.name))
                     .map((comp) => (
-                      <div key={comp.id} className="rounded-2xl border border-white bg-white/90 p-4 shadow-sm">
-                        <p className="text-sm font-semibold text-slate-800">{comp.name}</p>
-                        <div className="mt-3 space-y-2">
+                          <div key={comp.id} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                            <p className="text-sm font-medium text-slate-900 mb-3">{comp.name}</p>
+                            <div className="grid gap-2 sm:grid-cols-2">
                           {comp.skills.map((skill) => {
                             const isSelected = form.selectedSkills[comp.id]?.includes(skill.id);
                             return (
                               <label
                                 key={skill.id}
-                                className={`flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm transition ${isSelected ? 'border-sky-400 bg-sky-50' : 'border-slate-200 bg-white hover:border-slate-300'
+                                    className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition ${
+                                      isSelected
+                                        ? 'border-slate-900 bg-white'
+                                        : 'border-slate-200 bg-white hover:border-slate-300'
                                   }`}
                               >
                                 <input
                                   type="checkbox"
                                   checked={isSelected}
                                   onChange={() => toggleSkill(comp, skill)}
-                                  className="mt-1 rounded border-slate-300 text-sky-500 focus:ring-sky-400"
+                                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
                                 />
-                                <div>
-                                  <p className="font-medium text-slate-800">{skill.name}</p>
-                                  <p className="text-xs text-slate-500">{skill.description}</p>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-sm font-medium text-slate-800">{skill.name}</p>
+                                      <p className="text-xs text-slate-500 line-clamp-2">{skill.description}</p>
                                 </div>
                               </label>
                             );
@@ -703,133 +837,60 @@ export default function NewCampaignPage() {
                         </div>
                       </div>
                     ))}
+                    </div>
                 </div>
               )}
 
-              <div className={`space-y-6 rounded-3xl border bg-white p-6 ${fieldErrors.has('videos') ? 'border-red-400 bg-red-50/30' : 'border-slate-200'
-                }`}>
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                {/* Video Selection Card */}
+                <div className={`rounded-2xl border bg-white p-6 ${fieldErrors.has('videos') ? 'border-red-300' : 'border-slate-200'}`}>
+                  <div className="mb-5 flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-semibold text-slate-800">Attach video modules</p>
-                    <p className="text-xs text-slate-500">
-                      Choose from your saved library. Selection order sets the learner sequence.
-                    </p>
+                      <h2 className="text-base font-semibold text-slate-900">Video Modules</h2>
+                      <p className="text-sm text-slate-500">Select videos to include in this campaign</p>
                   </div>
-                  <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-                    <div className="relative flex-1">
+                    <div className="flex items-center gap-2">
+                      <div className="relative">
                       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                       <input
                         type="text"
                         value={videoSearch}
                         onChange={(e) => setVideoSearch(e.target.value)}
-                        placeholder="Search videos..."
-                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm text-slate-900 focus:border-sky-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-100"
+                          placeholder="Search..."
+                          className="w-40 rounded-lg border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
                       />
                     </div>
                     <select
                       value={videoFilter}
                       onChange={(e) => setVideoFilter(e.target.value as 'all' | Video['source'])}
-                      className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 shadow-sm focus:border-sky-400 focus:outline-none"
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10"
                     >
-                      <option value="all">All sources</option>
-                      <option value="generated">AI generated</option>
+                        <option value="all">All</option>
+                        <option value="generated">AI</option>
                       <option value="uploaded">Uploaded</option>
                     </select>
                   </div>
                 </div>
 
                 {videoError && (
-                  <div className="flex items-center justify-between rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    <div className="mb-4 flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                     <span>{videoError}</span>
-                    <button
-                      type="button"
-                      onClick={loadVideos}
-                      className="text-xs font-semibold text-rose-900 underline"
-                    >
-                      Retry
-                    </button>
-                  </div>
-                )}
-
-                {selectedVideos.length > 0 && (
-                  <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                    <div className="mb-3 flex items-center justify-between">
-                      <p className="text-sm font-semibold text-slate-800">
-                        Selected videos ({selectedVideos.length})
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedVideos([])}
-                        className="text-xs font-semibold text-slate-500 hover:text-slate-800"
-                      >
-                        Clear all
-                      </button>
-                    </div>
-                    <div className="space-y-3">
-                      {selectedVideos.map((video, index) => (
-                        <div
-                          key={video.id}
-                          className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3"
-                        >
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-sm font-semibold text-white">
-                            {index + 1}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="line-clamp-1 text-sm font-semibold text-slate-900">
-                              {video.title}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              {formatVideoDuration(video.duration)} •{' '}
-                              {video.metadata.createdAt
-                                ? new Date(video.metadata.createdAt).toLocaleDateString()
-                                : '—'}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              disabled={index === 0}
-                              onClick={() => handleMoveVideo(video.id, 'up')}
-                              className="rounded-full border border-slate-200 p-1 text-slate-500 hover:text-slate-900 disabled:opacity-40"
-                            >
-                              <MoveUp className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              disabled={index === selectedVideos.length - 1}
-                              onClick={() => handleMoveVideo(video.id, 'down')}
-                              className="rounded-full border border-slate-200 p-1 text-slate-500 hover:text-slate-900 disabled:opacity-40"
-                            >
-                              <MoveDown className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleVideoToggle(video)}
-                              className="rounded-full border border-slate-200 p-1 text-slate-500 hover:text-rose-600"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                      <button type="button" onClick={loadVideos} className="text-xs font-semibold underline">Retry</button>
                   </div>
                 )}
 
                 {videosLoading ? (
-                  <div className="flex items-center justify-center py-16">
+                    <div className="flex items-center justify-center py-12">
                     <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
                   </div>
                 ) : filteredVideos.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-200 py-12 text-center">
+                    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 py-12 text-center">
+                      <Play className="mb-3 h-8 w-8 text-slate-300" />
                     <p className="text-sm text-slate-500">
-                      {availableVideos.length === 0
-                        ? 'No saved videos yet. Save videos from the library to link them here.'
-                        : 'No videos match your search or filter.'}
+                        {availableVideos.length === 0 ? 'No videos in your library yet' : 'No matching videos'}
                     </p>
                   </div>
                 ) : (
-                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     {filteredVideos.map((video) => {
                       const isSelected = selectedVideoIds.has(video.id);
                       return (
@@ -837,43 +898,39 @@ export default function NewCampaignPage() {
                           key={video.id}
                           type="button"
                           onClick={() => handleVideoToggle(video)}
-                          className={`flex gap-4 rounded-2xl border px-4 py-4 text-left transition ${isSelected
-                              ? 'border-slate-900 bg-slate-900/5 shadow-md'
-                              : 'border-slate-200 bg-white hover:border-slate-300'
+                            className={`group relative flex flex-col overflow-hidden rounded-xl border transition ${
+                              isSelected
+                                ? 'border-slate-900 ring-2 ring-slate-900'
+                                : 'border-slate-200 hover:border-slate-300'
                             }`}
                         >
-                          <div className="h-20 w-28 flex-shrink-0 overflow-hidden rounded-xl bg-slate-100">
+                            <div className="relative aspect-video bg-slate-100">
                             {video.thumbnailUrl ? (
                               // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={video.thumbnailUrl}
-                                alt={video.title}
-                                className="h-full w-full object-cover"
-                              />
+                                <img src={video.thumbnailUrl} alt={video.title} className="h-full w-full object-cover" />
                             ) : (
-                              <div className="flex h-full w-full items-center justify-center text-slate-400">
-                                <Play className="h-6 w-6" />
+                                <div className="flex h-full w-full items-center justify-center">
+                                  <Play className="h-8 w-8 text-slate-300" />
                               </div>
                             )}
+                              {isSelected && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-slate-900/60">
+                                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white">
+                                    <Check className="h-4 w-4 text-slate-900" />
                           </div>
-                          <div className="flex-1">
-                            <p className="line-clamp-1 text-base font-semibold text-slate-900">
-                              {video.title}
-                            </p>
-                            {video.description && (
-                              <p className="text-sm text-slate-500 line-clamp-2">{video.description}</p>
-                            )}
-                            <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
-                              <span className="rounded-full border border-slate-200 px-2 py-0.5">
-                                {video.source === 'generated' ? 'AI Generated' : 'Uploaded'}
+                                </div>
+                              )}
+                              <span className={`absolute right-2 top-2 rounded-md px-2 py-0.5 text-[10px] font-medium ${
+                                video.source === 'generated' ? 'bg-violet-500 text-white' : 'bg-slate-900 text-white'
+                              }`}>
+                                {video.source === 'generated' ? 'AI' : 'Upload'}
                               </span>
-                              {video.duration !== undefined && (
-                                <span>{formatVideoDuration(video.duration)}</span>
-                              )}
-                              {video.metadata.createdAt && (
-                                <span>{new Date(video.metadata.createdAt).toLocaleDateString()}</span>
-                              )}
                             </div>
+                            <div className="p-3">
+                              <p className="line-clamp-1 text-sm font-medium text-slate-900">{video.title}</p>
+                              <p className="text-xs text-slate-500">
+                                {formatVideoDuration(video.duration)}
+                              </p>
                           </div>
                         </button>
                       );
@@ -881,29 +938,29 @@ export default function NewCampaignPage() {
                   </div>
                 )}
               </div>
-            </div>
+              </>
           )}
 
           {wizardStep === 2 && (
-            <div className="mt-8 space-y-8">
-              <div className="rounded-3xl border border-slate-200 bg-white p-6">
+            <>
+              {/* Organization Access Card */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-6">
                 <div className="mb-5">
-                  <p className="text-sm font-semibold text-slate-800">Organization Access</p>
-                  <p className="text-xs text-slate-500">Select which organizations can participate in this campaign.</p>
+                  <h2 className="text-base font-semibold text-slate-900">Organization Access</h2>
+                  <p className="text-sm text-slate-500">Select which organizations can participate in this campaign</p>
                 </div>
 
-                {/* Organization Checkboxes */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {organizationsLoading ? (
-                    <div className="col-span-full rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                      Loading organizations…
+                    <div className="col-span-full flex items-center justify-center py-8">
+                      <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
                     </div>
                   ) : organizationError ? (
-                    <div className="col-span-full rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                    <div className="col-span-full rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
                       {organizationError}
                     </div>
                   ) : availableOrganizations.length === 0 ? (
-                    <div className="col-span-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                    <div className="col-span-full rounded-lg border border-dashed border-slate-200 p-4 text-center text-sm text-slate-500">
                       No organizations found yet. Add a custom organization below to proceed.
                     </div>
                   ) : (
@@ -972,41 +1029,45 @@ export default function NewCampaignPage() {
                   </button>
                 </div>
 
-                {/* Anonymous responses toggle */}
-                <div className="mt-5 flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
+              </div>
+
+              {/* Privacy Settings Card */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                <h2 className="text-base font-semibold text-slate-900 mb-5">Privacy Settings</h2>
+                <label className="flex cursor-pointer items-center justify-between rounded-xl border border-slate-200 p-4 transition hover:bg-slate-50">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100">
+                      <Users className="h-5 w-5 text-slate-600" />
+                    </div>
                   <div>
-                    <p className="text-sm font-semibold text-slate-800">Anonymous responses</p>
-                    <p className="text-xs text-slate-500">Hide identity data in reporting, mirroring DiCode 2 defaults.</p>
+                      <p className="text-sm font-medium text-slate-900">Anonymous Responses</p>
+                      <p className="text-xs text-slate-500">Hide participant identity in reports</p>
                   </div>
-                  <label className="inline-flex cursor-pointer items-center">
+                  </div>
+                  <div className="relative">
                     <input
                       type="checkbox"
                       checked={form.anonymousResponses}
                       onChange={(e) => setForm({ ...form, anonymousResponses: e.target.checked })}
                       className="sr-only"
                     />
-                    <span
-                      className={`relative h-6 w-11 rounded-full border transition ${form.anonymousResponses ? 'border-sky-400 bg-sky-500' : 'border-slate-200 bg-slate-200'
-                        }`}
-                    >
-                      <span
-                        className={`absolute top-[2px] h-5 w-5 rounded-full bg-white shadow transition ${form.anonymousResponses ? 'left-[20px]' : 'left-[2px]'
-                          }`}
-                      />
-                    </span>
-                  </label>
+                    <div className={`h-6 w-11 rounded-full transition ${form.anonymousResponses ? 'bg-slate-900' : 'bg-slate-200'}`}>
+                      <div className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${form.anonymousResponses ? 'left-[22px]' : 'left-0.5'}`} />
                 </div>
               </div>
+                </label>
             </div>
+            </>
           )}
 
           {wizardStep === 3 && (
-            <div className="mt-8 space-y-8">
-              <div className="grid gap-6 md:grid-cols-2">
-                <div className="space-y-3">
-                  <label className="text-sm font-medium text-slate-700">
-                    Start date <span className="text-red-500">*</span>
-                  </label>
+            <>
+              {/* Schedule Card */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                <h2 className="text-base font-semibold text-slate-900 mb-5">Campaign Schedule</h2>
+                <div className="grid gap-5 sm:grid-cols-3">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">Start Date</label>
                   <input
                     type="date"
                     value={form.startDate}
@@ -1015,24 +1076,19 @@ export default function NewCampaignPage() {
                       if (fieldErrors.has('startDate')) {
                         const newErrors = new Set(fieldErrors);
                         newErrors.delete('startDate');
-                        // Also clear endDate error if dates are now valid
                         if (form.endDate && new Date(e.target.value) <= new Date(form.endDate)) {
                           newErrors.delete('endDate');
                         }
                         setFieldErrors(newErrors);
                       }
                     }}
-                    className={`ml-4 rounded-2xl border px-4 py-3 text-sm text-slate-900 shadow-sm focus:ring-0 ${fieldErrors.has('startDate')
-                        ? 'border-red-400 focus:border-red-500'
-                        : 'border-slate-200 focus:border-sky-400'
+                      className={`w-full rounded-xl border bg-slate-50 px-4 py-3 text-sm transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 ${
+                        fieldErrors.has('startDate') ? 'border-red-400' : 'border-slate-200'
                       }`}
-                    required
                   />
                 </div>
-                <div className="space-y-3">
-                  <label className="text-sm font-medium text-slate-700">
-                    End date <span className="text-red-500">*</span>
-                  </label>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">End Date</label>
                   <input
                     type="date"
                     value={form.endDate}
@@ -1041,29 +1097,23 @@ export default function NewCampaignPage() {
                       if (fieldErrors.has('endDate')) {
                         const newErrors = new Set(fieldErrors);
                         newErrors.delete('endDate');
-                        // Also clear startDate error if dates are now valid
                         if (form.startDate && new Date(form.startDate) <= new Date(e.target.value)) {
                           newErrors.delete('startDate');
                         }
                         setFieldErrors(newErrors);
                       }
                     }}
-                    className={`ml-4 rounded-2xl border px-4 py-3 text-sm text-slate-900 shadow-sm focus:ring-0 ${fieldErrors.has('endDate')
-                        ? 'border-red-400 focus:border-red-500'
-                        : 'border-slate-200 focus:border-sky-400'
+                      className={`w-full rounded-xl border bg-slate-50 px-4 py-3 text-sm transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 ${
+                        fieldErrors.has('endDate') ? 'border-red-400' : 'border-slate-200'
                       }`}
-                    required
                   />
                 </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="space-y-3">
-                  <label className="text-sm font-medium text-slate-700">Cadence</label>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">Frequency</label>
                   <select
                     value={form.frequency}
                     onChange={(e) => setForm({ ...form, frequency: e.target.value as (typeof frequencyOptions)[number] })}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-800 shadow-sm focus:border-sky-400 focus:ring-0"
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm transition focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
                   >
                     {frequencyOptions.map((option) => (
                       <option key={option} value={option}>
@@ -1072,137 +1122,157 @@ export default function NewCampaignPage() {
                     ))}
                   </select>
                 </div>
-                <div className="space-y-3">
-                  <label className="text-sm font-medium text-slate-700">Auto-send invites</label>
-                  <div className="flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3">
-                    <div className="flex items-center gap-2 text-sm text-slate-600">
-                      <Mail className="h-4 w-4 text-sky-500" />
-                      Email reminders
                     </div>
-                    <label className="inline-flex cursor-pointer items-center">
-                      <input
-                        type="checkbox"
-                        checked={form.autoSendInvites}
-                        onChange={(e) => setForm({ ...form, autoSendInvites: e.target.checked })}
-                        className="sr-only"
-                      />
-                      <span
-                        className={`relative h-6 w-11 rounded-full border transition ${form.autoSendInvites ? 'border-sky-400 bg-sky-500' : 'border-slate-200 bg-slate-200'
-                          }`}
-                      >
-                        <span
-                          className={`absolute top-[2px] h-5 w-5 rounded-full bg-white shadow transition ${form.autoSendInvites ? 'left-[20px]' : 'left-[2px]'
-                            }`}
-                        />
-                      </span>
-                    </label>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <label className="text-sm font-medium text-slate-700">Reminders</label>
-                  <div className="flex items-center justify-between rounded-2xl border border-slate-200 px-4 py-3">
-                    <div className="flex items-center gap-2 text-sm text-slate-600">
-                      <Bell className="h-4 w-4 text-sky-500" />
-                      Nudges
-                    </div>
-                    <label className="inline-flex cursor-pointer items-center">
-                      <input
-                        type="checkbox"
-                        checked={form.sendReminders}
-                        onChange={(e) => setForm({ ...form, sendReminders: e.target.checked })}
-                        className="sr-only"
-                      />
-                      <span
-                        className={`relative h-6 w-11 rounded-full border transition ${form.sendReminders ? 'border-sky-400 bg-sky-500' : 'border-slate-200 bg-slate-200'
-                          }`}
-                      >
-                        <span
-                          className={`absolute top-[2px] h-5 w-5 rounded-full bg-white shadow transition ${form.sendReminders ? 'left-[20px]' : 'left-[2px]'
-                            }`}
-                        />
-                      </span>
-                    </label>
-                  </div>
-                </div>
               </div>
 
-              <div className="rounded-3xl border border-slate-100 bg-slate-50 p-5">
-                <div className="flex flex-wrap items-start gap-4">
-                  <Calendar className="h-10 w-10 text-slate-400" />
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold text-slate-800">Automations & confirmations</p>
-                    <p className="text-xs text-slate-500">
-                      DiCode 2 sends confirmation emails upon completion. Keep that behavior aligned here.
-                    </p>
+              {/* Automation Card */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                <h2 className="text-base font-semibold text-slate-900 mb-5">Automation Settings</h2>
+                <div className="space-y-3">
+                  {[
+                    { key: 'autoSendInvites', icon: Mail, label: 'Auto-send Invitations', desc: 'Automatically email participants when campaign starts' },
+                    { key: 'sendReminders', icon: Bell, label: 'Send Reminders', desc: 'Nudge participants who haven\'t completed' },
+                    { key: 'sendConfirmations', icon: CheckCircle2, label: 'Send Confirmations', desc: 'Email confirmation upon completion' },
+                  ].map(({ key, icon: Icon, label, desc }) => (
+                    <label
+                      key={key}
+                      className="flex cursor-pointer items-center justify-between rounded-xl border border-slate-200 p-4 transition hover:bg-slate-50"
+                      >
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100">
+                          <Icon className="h-5 w-5 text-slate-600" />
                   </div>
-                  <label className="inline-flex cursor-pointer items-center">
-                    <input
-                      type="checkbox"
-                      checked={form.sendConfirmations}
-                      onChange={(e) => setForm({ ...form, sendConfirmations: e.target.checked })}
-                      className="sr-only"
-                    />
-                    <span
-                      className={`relative h-6 w-11 rounded-full border transition ${form.sendConfirmations ? 'border-sky-400 bg-sky-500' : 'border-slate-200 bg-slate-200'
-                        }`}
-                    >
-                      <span
-                        className={`absolute top-[2px] h-5 w-5 rounded-full bg-white shadow transition ${form.sendConfirmations ? 'left-[20px]' : 'left-[2px]'
-                          }`}
-                      />
-                    </span>
-                  </label>
+                        <div>
+                          <p className="text-sm font-medium text-slate-900">{label}</p>
+                          <p className="text-xs text-slate-500">{desc}</p>
                 </div>
+                    </div>
+                      <div className="relative">
+                      <input
+                        type="checkbox"
+                          checked={form[key as keyof typeof form] as boolean}
+                          onChange={(e) => setForm({ ...form, [key]: e.target.checked })}
+                        className="sr-only"
+                      />
+                        <div className={`h-6 w-11 rounded-full transition ${form[key as keyof typeof form] ? 'bg-slate-900' : 'bg-slate-200'}`}>
+                          <div className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${form[key as keyof typeof form] ? 'left-[22px]' : 'left-0.5'}`} />
+                  </div>
+                </div>
+                    </label>
+                  ))}
+              </div>
+              </div>
+            </>
+          )}
+
+                  </div>
+
+          {/* Right Column - Summary Sidebar */}
+          <div className="space-y-6">
+            {/* Selected Videos Summary */}
+            {selectedVideos.length > 0 && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-slate-900">Selected Videos</h3>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedVideos([])}
+                    className="text-xs text-slate-500 hover:text-slate-900"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {selectedVideos.map((video, index) => (
+                    <div key={video.id} className="flex items-center gap-3 rounded-lg bg-slate-50 p-2">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-slate-900 text-xs font-medium text-white">
+                        {index + 1}
+                    </span>
+                      <span className="flex-1 truncate text-sm text-slate-700">{video.title}</span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={index === 0}
+                          onClick={() => handleMoveVideo(video.id, 'up')}
+                          className="p-1 text-slate-400 hover:text-slate-600 disabled:opacity-30"
+                        >
+                          <MoveUp className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={index === selectedVideos.length - 1}
+                          onClick={() => handleMoveVideo(video.id, 'down')}
+                          className="p-1 text-slate-400 hover:text-slate-600 disabled:opacity-30"
+                        >
+                          <MoveDown className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleVideoToggle(video)}
+                          className="p-1 text-slate-400 hover:text-red-500"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                </div>
+                    </div>
+                  ))}
               </div>
             </div>
           )}
 
-          <div className="mt-10 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-6">
-            <div className="text-sm text-slate-500">
-              Step {wizardStep} of {wizardSteps.length}
-            </div>
-
-            <div className="flex flex-wrap gap-3">
+            {/* Action Buttons - Sticky */}
+            <div className="sticky bottom-6 space-y-3">
+              <div className="flex gap-2">
               {wizardStep > 1 && (
                 <button
                   onClick={handlePrevStep}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-600 shadow-sm hover:bg-slate-50"
+                    className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50"
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  Back
                 </button>
               )}
 
-              {wizardStep < 3 && (
+                {wizardStep < 3 ? (
                 <button
                   onClick={handleNextStep}
-                  className="btn-primary inline-flex items-center gap-2 rounded-2xl px-6 py-2.5 text-sm font-semibold text-white"
+                    className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
                 >
-                  Next step
+                    Continue
                   <ArrowRight className="h-4 w-4" />
                 </button>
-              )}
-
-              {wizardStep === 3 && (
-                <>
+                ) : (
+                  <div className="flex flex-1 gap-2">
                   <button
                     onClick={() => persistCampaign(false)}
                     disabled={loading}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-600 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
                   >
                     <Save className="h-4 w-4" />
-                    {loading ? 'Saving…' : 'Save as draft'}
+                      {loading ? 'Saving…' : 'Draft'}
                   </button>
                   <button
                     onClick={() => persistCampaign(true)}
                     disabled={loading}
-                    className="btn-primary inline-flex items-center gap-2 rounded-2xl px-6 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                      className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
                   >
-                    <Play className="h-4 w-4" />
-                    {loading ? 'Launching…' : 'Launch campaign'}
+                      <Sparkles className="h-4 w-4" />
+                      {loading ? 'Launching…' : 'Launch'}
                   </button>
-                </>
+                  </div>
               )}
+              </div>
+
+              {/* Mobile Step Indicator */}
+              <div className="flex items-center justify-center gap-2 lg:hidden">
+                {wizardSteps.map((step) => (
+                  <div
+                    key={step.id}
+                    className={`h-2 w-2 rounded-full transition ${
+                      wizardStep >= step.id ? 'bg-slate-900' : 'bg-slate-200'
+                    }`}
+                  />
+                ))}
+              </div>
             </div>
           </div>
         </div>

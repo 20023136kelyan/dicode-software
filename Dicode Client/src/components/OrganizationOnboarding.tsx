@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { MapPin, Briefcase, UserPlus, Mail, X, User, Users } from 'lucide-react';
+import { Check, X, Plus, ArrowRight, Pencil } from 'lucide-react';
 
 interface OrganizationOnboardingProps {
   onComplete: (data: OrganizationData) => Promise<void>;
+  onSuccess?: () => void;
   userEmail: string;
   userName: string;
 }
@@ -54,30 +55,21 @@ const COMPANY_SIZES = [
 ];
 
 const STEPS = [
-  {
-    id: 1,
-    title: 'Organization',
-    description: 'Identity & admin profile',
-  },
-  {
-    id: 2,
-    title: 'Departments',
-    description: 'Map the teams that matter',
-  },
-  {
-    id: 3,
-    title: 'Team members',
-    description: 'Invite collaborators (optional)',
-  },
+  { id: 1, title: 'Organization', description: 'Company details' },
+  { id: 2, title: 'Departments', description: 'Team structure' },
+  { id: 3, title: 'Team', description: 'Invite members' },
+  { id: 4, title: 'Review', description: 'Confirm details' },
 ];
 
 const OrganizationOnboarding: React.FC<OrganizationOnboardingProps> = ({
   onComplete,
+  onSuccess,
   userEmail,
   userName,
 }) => {
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState<OrganizationData>({
@@ -101,7 +93,6 @@ const OrganizationOnboarding: React.FC<OrganizationOnboardingProps> = ({
     role: 'employee',
   });
 
-  // Auto-generate slug from organization name
   const handleOrganizationNameChange = (name: string) => {
     setFormData({
       ...formData,
@@ -123,20 +114,23 @@ const OrganizationOnboarding: React.FC<OrganizationOnboardingProps> = ({
   const handleRemoveDepartment = (dept: string) => {
     setFormData({
       ...formData,
-      departments: formData.departments.filter(d => d !== dept),
+      departments: formData.departments.filter((d) => d !== dept),
     });
   };
 
   const handleAddEmployee = () => {
-    if (newEmployee.email.trim() && !formData.employees.some(e => e.email === newEmployee.email.trim())) {
+    if (newEmployee.email.trim() && !formData.employees.some((e) => e.email === newEmployee.email.trim())) {
       setFormData({
         ...formData,
-        employees: [...formData.employees, {
+        employees: [
+          ...formData.employees,
+          {
           email: newEmployee.email.trim(),
           name: newEmployee.name.trim() || newEmployee.email.split('@')[0],
           department: newEmployee.department,
           role: newEmployee.role || 'employee',
-        }],
+          },
+        ],
       });
       setNewEmployee({ email: '', name: '', department: undefined, role: 'employee' });
     }
@@ -145,16 +139,21 @@ const OrganizationOnboarding: React.FC<OrganizationOnboardingProps> = ({
   const handleRemoveEmployee = (email: string) => {
     setFormData({
       ...formData,
-      employees: formData.employees.filter(e => e.email !== email),
+      employees: formData.employees.filter((e) => e.email !== email),
     });
   };
 
   const handleSubmit = async () => {
     setError(null);
     setIsSubmitting(true);
-
     try {
       await onComplete(formData);
+      setIsSubmitting(false);
+      setIsSuccess(true);
+      // Wait for success animation, then trigger navigation
+      setTimeout(() => {
+        onSuccess?.();
+      }, 2500);
     } catch (err) {
       setError((err as Error).message || 'Failed to create organization');
       setIsSubmitting(false);
@@ -168,60 +167,262 @@ const OrganizationOnboarding: React.FC<OrganizationOnboardingProps> = ({
     formData.adminGender !== '' &&
     formData.adminDateOfBirth.trim().length > 0;
   const canProceedToStep3 = canProceedToStep2 && formData.departments.length > 0;
-  const canSubmit = canProceedToStep3; // Employees are optional
-  const mainColumnClass = step === 1 ? 'xl:col-span-12' : 'xl:col-span-8';
+  const canSubmit = canProceedToStep3;
 
-  const renderStepContent = () => {
-    if (step === 1) {
   return (
-        <div className="space-y-10">
-          <div className="flex flex-wrap items-start justify-between gap-6 border-b border-dark-border/60 pb-6">
+    <div className="flex min-h-screen">
+      {/* Left Sidebar */}
+      <aside className="fixed left-0 top-0 flex h-screen w-80 flex-col bg-[#0a0a0b] px-8 py-10">
+        {/* Logo */}
+        <div className="mb-16">
+          <div className="flex items-center gap-3">
+            <img src="/dicode_logo.png" alt="DiCode" className="h-9 w-auto" />
               <div>
-              <p className="text-xs uppercase tracking-[0.4em] text-dark-text-muted">
-                Step 01 • Organization Profile
-              </p>
-              <h2 className="mt-3 text-3xl font-semibold text-dark-text">
-                Set the tone for your workspace
-              </h2>
-              <p className="mt-2 max-w-2xl text-sm text-dark-text-muted">
-                Name your organization, secure its slug, and share the context we use to
-                personalize analytics across the DiCode suite.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-dark-border/70 bg-dark-bg/70 px-5 py-4 text-right">
-              <p className="text-[10px] uppercase tracking-[0.4em] text-dark-text-muted">
-                Slug preview
-              </p>
-              <p className="mt-1 max-w-[180px] truncate text-sm font-semibold text-dark-text">
-                dicode.com/{formData.slug || 'your-org'}
-              </p>
+              <div className="text-xl font-semibold text-white">DiCode</div>
+              <div className="mt-0.5 text-sm text-white/40">Onboarding</div>
             </div>
           </div>
+        </div>
+
+        {/* Progress Steps */}
+        <nav className="flex-1">
+          <div className="relative">
+            {/* Vertical line */}
+            <div className="absolute left-3 top-6 bottom-6 w-px bg-gradient-to-b from-white/20 via-white/10 to-transparent" />
+            
+            <ul className="relative space-y-1">
+              {STEPS.map((s) => {
+                const isActive = step === s.id;
+                const isComplete = step > s.id;
+                const isPending = step < s.id;
+
+                return (
+                  <li key={s.id}>
+                    <button
+                      onClick={() => {
+                        if (isComplete || isActive) setStep(s.id);
+                      }}
+                      disabled={isPending}
+                      className={`group flex w-full items-start gap-5 rounded-xl px-0 py-4 text-left transition-all ${
+                        isPending ? 'cursor-not-allowed' : 'cursor-pointer'
+                      }`}
+                    >
+                      {/* Dot */}
+                      <div className="relative z-10 flex h-6 w-6 items-center justify-center flex-shrink-0">
+                        <div className="absolute inset-0 rounded-full bg-[#0a0a0b]" />
+                        
+                        {isComplete ? (
+                          <div className="relative flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 shadow-lg shadow-emerald-500/30">
+                            <Check size={12} strokeWidth={3} className="text-white" />
+                          </div>
+                        ) : isActive ? (
+                          <div className="relative flex h-6 w-6 items-center justify-center">
+                            <div className="absolute inset-0 rounded-full bg-[#0a0a0b]" />
+                            <div className="absolute inset-0 rounded-full border-2 border-primary/40" />
+                            <div 
+                              className="absolute inset-0 rounded-full border-2 border-transparent border-t-primary animate-spin"
+                              style={{ animationDuration: '1.2s' }}
+                            />
+                            <div className="relative h-2.5 w-2.5 rounded-full bg-primary shadow-lg shadow-primary/50" />
+                          </div>
+                        ) : (
+                          <div className="relative h-3 w-3 rounded-full border-2 border-white/20 bg-[#0a0a0b]" />
+                        )}
+                      </div>
+
+                      {/* Label */}
+                      <div className="pt-0.5">
+                        <div
+                          className={`transition-all ${
+                            isActive
+                              ? 'text-lg font-semibold text-white'
+                              : isComplete
+                                ? 'text-sm font-medium text-white/80'
+                                : 'text-sm font-medium text-white/30'
+                          }`}
+                        >
+                          {s.title}
+                        </div>
+                        <div className={`mt-0.5 text-xs ${isActive ? 'text-white/50' : 'text-white/20'}`}>
+                          {s.description}
+            </div>
+            </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </nav>
+
+        {/* User Info */}
+        <div className="border-t border-white/10 pt-6">
+          <div className="text-xs text-white/40">Signed in as</div>
+          <div className="mt-1 truncate text-sm font-medium text-white/80">{userEmail}</div>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="ml-80 flex-1 bg-dark-bg">
+        {/* Decorative gradient */}
+        <div className="pointer-events-none fixed right-0 top-0 h-[600px] w-[600px] opacity-30">
+          <div className="absolute inset-0 bg-gradient-to-bl from-primary/20 via-transparent to-transparent blur-3xl" />
+        </div>
+
+        {/* Success Screen */}
+        {isSuccess && (
+          <div className="relative flex min-h-screen items-center justify-center px-16 py-16">
+            <div className="text-center">
+              {/* Animated checkmark circle */}
+              <div className="relative mx-auto mb-8 h-32 w-32">
+                {/* Outer ring animation */}
+                <svg className="absolute inset-0 h-32 w-32 animate-[spin_3s_linear_infinite]" viewBox="0 0 128 128">
+                  <circle
+                    cx="64"
+                    cy="64"
+                    r="60"
+                    fill="none"
+                    stroke="url(#gradient)"
+                    strokeWidth="2"
+                    strokeDasharray="80 300"
+                    strokeLinecap="round"
+                  />
+                  <defs>
+                    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#10b981" stopOpacity="0.1" />
+                      <stop offset="50%" stopColor="#10b981" stopOpacity="1" />
+                      <stop offset="100%" stopColor="#10b981" stopOpacity="0.1" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+                
+                {/* Success circle */}
+                <div 
+                  className="absolute inset-4 flex items-center justify-center rounded-full bg-emerald-500 shadow-2xl shadow-emerald-500/30"
+                  style={{
+                    animation: 'scaleIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
+                  }}
+                >
+                  {/* Checkmark */}
+                  <svg 
+                    className="h-12 w-12 text-white" 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    strokeWidth="3" 
+                    strokeLinecap="round" 
+                    strokeLinejoin="round"
+                    style={{
+                      strokeDasharray: 30,
+                      strokeDashoffset: 30,
+                      animation: 'drawCheck 0.5s ease-out 0.3s forwards',
+                    }}
+                  >
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </div>
+              </div>
+
+              <h1 
+                className="text-3xl font-semibold text-dark-text"
+                style={{
+                  opacity: 0,
+                  animation: 'fadeInUp 0.5s ease-out 0.5s forwards',
+                }}
+              >
+                Workspace created!
+              </h1>
+              <p 
+                className="mt-3 text-lg text-dark-text-muted"
+                style={{
+                  opacity: 0,
+                  animation: 'fadeInUp 0.5s ease-out 0.7s forwards',
+                }}
+              >
+                Welcome to {formData.organizationName}
+              </p>
+              <p 
+                className="mt-6 text-sm text-dark-text-muted/60"
+                style={{
+                  opacity: 0,
+                  animation: 'fadeInUp 0.5s ease-out 0.9s forwards',
+                }}
+              >
+                Redirecting to your dashboard...
+              </p>
+
+              {/* Custom keyframes */}
+              <style>{`
+                @keyframes scaleIn {
+                  0% { transform: scale(0); opacity: 0; }
+                  100% { transform: scale(1); opacity: 1; }
+                }
+                @keyframes drawCheck {
+                  to { stroke-dashoffset: 0; }
+                }
+                @keyframes fadeInUp {
+                  0% { opacity: 0; transform: translateY(10px); }
+                  100% { opacity: 1; transform: translateY(0); }
+                }
+              `}</style>
+            </div>
+          </div>
+        )}
+
+        {!isSuccess && (
+        <div className="relative min-h-screen px-16 py-16">
+          <div className="mx-auto max-w-2xl">
+            {error && (
+              <div className="mb-8 flex items-center gap-3 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3">
+                <div className="h-2 w-2 rounded-full bg-red-500" />
+                <span className="text-sm text-red-400">{error}</span>
+              </div>
+            )}
+
+            {/* Step 1: Organization */}
+            {step === 1 && (
+              <div className="animate-in fade-in slide-in-from-right-4 duration-500">
+                <div className="mb-12">
+                  <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                    Step 1 of 4
+                  </div>
+                  <h1 className="mt-4 text-4xl font-semibold tracking-tight text-dark-text">
+                    Organization details
+                  </h1>
+                  <p className="mt-3 text-lg text-dark-text-muted">
+                    Set up your workspace identity and profile.
+                  </p>
+                </div>
+
+                <div className="space-y-14">
+                  {/* Company Section */}
+                  <section>
+                    <h2 className="mb-8 text-sm font-semibold uppercase tracking-widest text-dark-text-muted">
+                      Company
+                    </h2>
 
           <div className="space-y-8">
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-              <div className="max-w-xl">
-                <label className="text-sm font-semibold text-dark-text">
-                  Organization Name *
+                      <div className="grid grid-cols-2 gap-8">
+                        <div className="group">
+                          <label className="mb-2 block text-sm font-medium text-dark-text">
+                            Organization Name <span className="text-primary">*</span>
                 </label>
-                <div className="mt-2 rounded-2xl border border-dark-border/70 bg-dark-bg/60 px-4 py-3">
                 <input
                   type="text"
                   value={formData.organizationName}
                   onChange={(e) => handleOrganizationNameChange(e.target.value)}
                   placeholder="Acme Corporation"
-                    className="w-full bg-transparent text-dark-text placeholder:text-dark-text-muted focus:outline-none"
+                            className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-dark-text placeholder:text-dark-text-muted/40 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all"
                   autoFocus
                 />
                 </div>
-              </div>
-
-              <div className="max-w-xl">
-                <label className="text-sm font-semibold text-dark-text">
-                  Organization URL
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-dark-text">
+                            Workspace URL
                 </label>
-                <div className="mt-2 flex items-center gap-2 rounded-2xl border border-dark-border/70 bg-dark-bg/60 px-4 py-3">
-                  <span className="text-sm text-dark-text-muted">dicode.com/</span>
+                          <div className="flex items-center rounded-lg border border-white/10 bg-white/5 px-4 py-3">
+                            <span className="text-dark-text-muted/60">dicode.com/</span>
                   <input
                     type="text"
                     value={formData.slug}
@@ -231,70 +432,46 @@ const OrganizationOnboarding: React.FC<OrganizationOnboardingProps> = ({
                         slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''),
                       })
                     }
-                    placeholder="acme-corp"
-                    className="w-full bg-transparent text-dark-text placeholder:text-dark-text-muted focus:outline-none"
+                              placeholder="acme"
+                              className="flex-1 bg-transparent text-dark-text placeholder:text-dark-text-muted/40 focus:outline-none"
                   />
                 </div>
-                <p className="mt-2 text-xs text-dark-text-muted">
-                  The slug keeps your workspace URL consistent across every DiCode surface.
-                </p>
               </div>
               </div>
 
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-              <div className="max-w-sm">
-                <label className="text-sm font-semibold text-dark-text">
-                    <div className="flex items-center gap-2">
-                      <Briefcase size={16} />
-                      Industry
-                    </div>
-                  </label>
+                      <div className="grid grid-cols-3 gap-6">
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-dark-text">Industry</label>
                   <select
                     value={formData.industry || ''}
                   onChange={(e) =>
                     setFormData({ ...formData, industry: e.target.value || undefined })
                   }
-                  className="input mt-2 w-full"
+                            className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-dark-text focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all cursor-pointer"
                   >
-                    <option value="">Select industry</option>
+                            <option value="">Select</option>
                     {INDUSTRIES.map((industry) => (
-                    <option key={industry} value={industry}>
-                      {industry}
-                    </option>
+                              <option key={industry} value={industry}>{industry}</option>
                     ))}
                   </select>
                 </div>
-
-              <div className="max-w-sm">
-                <label className="text-sm font-semibold text-dark-text">
-                    <div className="flex items-center gap-2">
-                      <MapPin size={16} />
-                      Region
-                    </div>
-                  </label>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-dark-text">Region</label>
                   <select
                     value={formData.region || ''}
                   onChange={(e) =>
                     setFormData({ ...formData, region: e.target.value || undefined })
                   }
-                  className="input mt-2 w-full"
+                            className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-dark-text focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all cursor-pointer"
                   >
-                    <option value="">Select region</option>
+                            <option value="">Select</option>
                     {REGIONS.map((region) => (
-                    <option key={region} value={region}>
-                      {region}
-                    </option>
+                              <option key={region} value={region}>{region}</option>
                     ))}
                   </select>
               </div>
-
-              <div className="max-w-sm">
-                <label className="text-sm font-semibold text-dark-text">
-                  <div className="flex items-center gap-2">
-                    <Users size={16} />
-                    Company Size
-                  </div>
-                </label>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-dark-text">Size</label>
                 <select
                   value={formData.size || ''}
                   onChange={(e) =>
@@ -303,52 +480,41 @@ const OrganizationOnboarding: React.FC<OrganizationOnboardingProps> = ({
                       size: (e.target.value as OrganizationData['size']) || undefined,
                     })
                   }
-                  className="input mt-2 w-full"
+                            className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-dark-text focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all cursor-pointer"
                 >
-                  <option value="">Select company size</option>
+                            <option value="">Select</option>
                   {COMPANY_SIZES.map((size) => (
-                    <option key={size.value} value={size.value}>
-                      {size.label}
-                    </option>
+                              <option key={size.value} value={size.value}>{size.label}</option>
                   ))}
                 </select>
               </div>
             </div>
-
-            <div className="border-t border-dark-border/60 pt-6">
-              <div className="flex items-center gap-3">
-                <div className="rounded-full bg-primary/10 p-3 text-primary">
-                  <User size={18} />
                 </div>
+                  </section>
+
+                  {/* Admin Profile Section */}
+                  <section>
+                    <h2 className="mb-8 text-sm font-semibold uppercase tracking-widest text-dark-text-muted">
+                      Administrator Profile
+                    </h2>
+                    
+                    <div className="grid grid-cols-3 gap-6">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.3em] text-dark-text-muted">
-                    Admin profile
-                  </p>
-                  <p className="text-base font-semibold text-dark-text">Tell us about you</p>
-                </div>
-              </div>
-
-              <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-                <div className="max-w-sm">
-                  <label className="text-sm font-semibold text-dark-text">
-                        Full Name *
+                        <label className="mb-2 block text-sm font-medium text-dark-text">
+                          Full Name <span className="text-primary">*</span>
                     </label>
-                  <div className="mt-2 rounded-2xl border border-dark-border/70 bg-dark-bg/60 px-4 py-3">
                     <input
                       type="text"
                       value={formData.adminName}
                       onChange={(e) => setFormData({ ...formData, adminName: e.target.value })}
                       placeholder="John Doe"
-                      className="w-full bg-transparent text-dark-text placeholder:text-dark-text-muted focus:outline-none"
+                          className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-dark-text placeholder:text-dark-text-muted/40 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all"
                     />
                   </div>
-                  </div>
-
-                <div className="max-w-sm">
-                  <label className="text-sm font-semibold text-dark-text">
-                          Gender *
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-dark-text">
+                          Gender <span className="text-primary">*</span>
                       </label>
-                  <div className="mt-2 rounded-2xl border border-dark-border/70 bg-dark-bg/60 px-4 py-3">
                       <select
                         value={formData.adminGender}
                       onChange={(e) =>
@@ -362,146 +528,184 @@ const OrganizationOnboarding: React.FC<OrganizationOnboardingProps> = ({
                             | '',
                         })
                       }
-                      className="w-full bg-transparent text-dark-text focus:outline-none"
+                          className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-dark-text focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all cursor-pointer"
                       >
-                        <option value="">Select gender</option>
+                          <option value="">Select</option>
                         <option value="male">Male</option>
                         <option value="female">Female</option>
                         <option value="other">Other</option>
                         <option value="prefer-not-to-say">Prefer not to say</option>
                       </select>
                   </div>
-                    </div>
-
-                <div className="max-w-sm">
-                  <label className="text-sm font-semibold text-dark-text">
-                          Date of Birth *
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-dark-text">
+                          Date of Birth <span className="text-primary">*</span>
                       </label>
-                  <div className="mt-2 rounded-2xl border border-dark-border/70 bg-dark-bg/60 px-4 py-3">
                       <input
                         type="date"
                         value={formData.adminDateOfBirth}
                       onChange={(e) =>
                         setFormData({ ...formData, adminDateOfBirth: e.target.value })
                       }
-                      className="w-full bg-transparent text-dark-text focus:outline-none"
+                          className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-dark-text focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all cursor-pointer"
                         max={new Date().toISOString().split('T')[0]}
                       />
                   </div>
                     </div>
-                  </div>
-                </div>
+                  </section>
               </div>
 
-          <div className="flex justify-end border-t border-dark-border/70 pt-6">
+                <div className="mt-12 flex justify-end">
                 <button
                   type="button"
                   onClick={() => setStep(2)}
                   disabled={!canProceedToStep2}
-              className="btn-primary px-8 py-3 text-sm font-semibold uppercase tracking-[0.3em]"
+                    className="group flex items-center gap-3 rounded-lg bg-primary px-6 py-3.5 text-sm font-semibold text-white transition-all hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-              Continue to departments
+                    Continue
+                    <ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5" />
                 </button>
               </div>
             </div>
-      );
-    }
+            )}
 
-    if (step === 2) {
-      return (
-        <div className="space-y-10">
-          <div className="border-b border-dark-border/60 pb-6">
-            <p className="text-xs uppercase tracking-[0.4em] text-dark-text-muted">
-              Step 02 • Departments
-            </p>
-            <h2 className="mt-3 text-3xl font-semibold text-dark-text">
-              Map the teams that drive your programs
-            </h2>
-            <p className="mt-2 max-w-3xl text-sm text-dark-text-muted">
-              Add the departments you report on today. You can always extend or reorder them later—we
-              just need at least one to anchor dashboards.
+            {/* Step 2: Departments */}
+            {step === 2 && (
+              <div className="animate-in fade-in slide-in-from-right-4 duration-500">
+                <div className="mb-12">
+                  <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                    Step 2 of 4
+                  </div>
+                  <h1 className="mt-4 text-4xl font-semibold tracking-tight text-dark-text">
+                    Define departments
+                  </h1>
+                  <p className="mt-3 text-lg text-dark-text-muted">
+                    Add the teams within your organization. At least one required.
             </p>
           </div>
 
-          <div className="space-y-4 rounded-2xl border border-dark-border/70 bg-dark-bg/60 p-6">
-            <label className="text-sm font-semibold text-dark-text">Add Departments *</label>
-            <p className="text-xs text-dark-text-muted">
-              Keep names short and clear. Press enter to add multiple in a row.
-                </p>
-            <div className="flex gap-3">
+                <section>
+                  <div className="flex gap-4">
                   <input
                     type="text"
                     value={departmentInput}
                     onChange={(e) => setDepartmentInput(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleAddDepartment()}
-                placeholder="e.g., Growth Marketing, Sales Enablement"
-                    className="input flex-1"
-                  />
-              <button type="button" onClick={handleAddDepartment} className="btn-secondary px-5">
+                      placeholder="Enter department name"
+                      className="flex-1 rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-dark-text placeholder:text-dark-text-muted/40 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddDepartment}
+                      disabled={!departmentInput.trim()}
+                      className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-5 py-3 text-sm font-medium text-primary transition-all hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <Plus size={16} />
                     Add
                   </button>
                 </div>
-              </div>
 
-          <div className="flex items-center justify-between border-t border-dark-border/70 pt-6">
+                  {formData.departments.length > 0 ? (
+                    <div className="mt-8 space-y-2">
+                      {formData.departments.map((dept, index) => (
+                        <div
+                          key={dept}
+                          className="group flex items-center justify-between rounded-lg border border-white/5 bg-white/[0.02] px-5 py-4 transition-all hover:border-white/10"
+                        >
+                          <div className="flex items-center gap-4">
+                            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-white/5 text-xs font-medium text-dark-text-muted">
+                              {String(index + 1).padStart(2, '0')}
+                            </span>
+                            <span className="font-medium text-dark-text">{dept}</span>
+              </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveDepartment(dept)}
+                            className="rounded-md p-2 text-dark-text-muted opacity-0 transition-all hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-8 flex flex-col items-center justify-center rounded-xl border border-dashed border-white/10 py-16 text-center">
+                      <div className="mb-3 rounded-full bg-white/5 p-4">
+                        <Plus size={24} className="text-dark-text-muted" />
+                      </div>
+                      <p className="text-dark-text-muted">No departments added yet</p>
+                      <p className="mt-1 text-sm text-dark-text-muted/60">Add your first department above</p>
+              </div>
+                  )}
+                </section>
+
+                <div className="mt-12 flex items-center justify-between">
                 <button
                   type="button"
                   onClick={() => setStep(1)}
-              className="btn-secondary px-6"
-                  disabled={isSubmitting}
+                    className="rounded-lg px-5 py-3 text-sm font-medium text-dark-text-muted transition-colors hover:text-dark-text"
                 >
-              Back to organization
+                    Back
                 </button>
                 <button
                   type="button"
                   onClick={() => setStep(3)}
                   disabled={!canProceedToStep3}
-              className="btn-primary px-8 py-3 text-sm font-semibold uppercase tracking-[0.3em]"
+                    className="group flex items-center gap-3 rounded-lg bg-primary px-6 py-3.5 text-sm font-semibold text-white transition-all hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-              Continue to team
+                    Continue
+                    <ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5" />
                 </button>
               </div>
             </div>
-      );
-    }
+            )}
 
-    return (
-      <div className="space-y-10">
-        <div className="border-b border-dark-border/60 pb-6">
-          <p className="text-xs uppercase tracking-[0.4em] text-dark-text-muted">
-            Step 03 • Team Members
-          </p>
-          <h2 className="mt-3 text-3xl font-semibold text-dark-text">Draft optional invites</h2>
-          <p className="mt-2 max-w-3xl text-sm text-dark-text-muted">
-            Invite your core collaborators now or skip this step for later. We'll stage the invites so
-            you can send them once organization setup completes.
+            {/* Step 3: Team */}
+            {step === 3 && (
+              <div className="animate-in fade-in slide-in-from-right-4 duration-500">
+                <div className="mb-12">
+                  <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                    Step 3 of 4
+                  </div>
+                  <h1 className="mt-4 text-4xl font-semibold tracking-tight text-dark-text">
+                    Invite team members
+                  </h1>
+                  <p className="mt-3 text-lg text-dark-text-muted">
+                    Add collaborators to your workspace. This step is optional.
           </p>
         </div>
 
-        <div className="space-y-4 rounded-2xl border border-dark-border/70 bg-dark-bg/60 p-6">
-          <label className="text-sm font-semibold text-dark-text">
-                    Add Team Members (Optional)
-                </label>
-          <p className="text-xs text-dark-text-muted">
-            Include at least an email. We'll prefill missing names from the address automatically.
-                </p>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <section>
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-2 gap-6">
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-dark-text">Email Address</label>
                       <input
                         type="email"
                         value={newEmployee.email}
                         onChange={(e) => setNewEmployee({ ...newEmployee, email: e.target.value })}
-                        placeholder="email@company.com"
-                        className="input w-full"
+                          placeholder="colleague@company.com"
+                          className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-dark-text placeholder:text-dark-text-muted/40 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all"
+                          autoFocus
                       />
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-dark-text">Full Name</label>
                       <input
                         type="text"
                         value={newEmployee.name}
                         onChange={(e) => setNewEmployee({ ...newEmployee, name: e.target.value })}
-              placeholder="Full name (optional)"
-                        className="input w-full"
+                          placeholder="Optional"
+                          className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-dark-text placeholder:text-dark-text-muted/40 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all"
                       />
                     </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    </div>
+                    <div className="grid grid-cols-2 gap-6">
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-dark-text">Role</label>
                     <select
                       value={newEmployee.role || 'employee'}
               onChange={(e) =>
@@ -510,214 +714,311 @@ const OrganizationOnboarding: React.FC<OrganizationOnboardingProps> = ({
                   role: e.target.value as 'employee' | 'admin',
                 })
               }
-                      className="input w-full"
+                          className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-dark-text focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all cursor-pointer"
                     >
                       <option value="employee">Employee</option>
                       <option value="admin">Admin</option>
                     </select>
+                      </div>
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-dark-text">Department</label>
                     <select
                       value={newEmployee.department || ''}
               onChange={(e) =>
                 setNewEmployee({ ...newEmployee, department: e.target.value || undefined })
               }
-                      className="input w-full"
+                          className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-dark-text focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/20 transition-all cursor-pointer"
                     >
-                      <option value="">Select department (optional)</option>
+                          <option value="">Select</option>
                       {formData.departments.map((dept) => (
-                <option key={dept} value={dept}>
-                  {dept}
-                </option>
+                            <option key={dept} value={dept}>{dept}</option>
                       ))}
                     </select>
                   </div>
-                  <div className="flex justify-end">
+                    </div>
+                    <div className="flex justify-end pt-2">
                     <button
                       type="button"
                       onClick={handleAddEmployee}
                       disabled={!newEmployee.email.trim()}
-              className="btn-secondary flex items-center gap-2 px-5"
+                        className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-5 py-2.5 text-sm font-medium text-primary transition-all hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      <UserPlus size={18} />
-              Add to queue
+                        <Plus size={16} />
+                        Add to list
             </button>
           </div>
         </div>
 
-        <div className="flex items-center justify-between border-t border-dark-border/70 pt-6">
-          <button
-            type="button"
-            onClick={() => setStep(2)}
-            className="btn-secondary px-6"
-            disabled={isSubmitting}
-          >
-            Back to departments
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={!canSubmit || isSubmitting}
-            className="btn-primary px-8 py-3 text-sm font-semibold uppercase tracking-[0.3em]"
-          >
-            {isSubmitting ? 'Creating...' : 'Complete setup'}
-                    </button>
-                  </div>
-      </div>
-    );
-  };
-
-  return (
-    <div className="relative min-h-screen overflow-hidden bg-dark-bg">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-32 right-0 h-[420px] w-[420px] rounded-full bg-primary/10 blur-[180px]" />
-        <div className="absolute top-40 -left-10 h-[360px] w-[360px] rounded-full bg-blue-primary/10 blur-[200px]" />
-      </div>
-
-      <div className="relative z-10 mx-auto max-w-6xl px-8 py-12">
-        <header className="rounded-[32px] p-10">
-          <div className="flex flex-wrap items-start justify-between gap-6">
-            <div>
-              <p className="text-xs uppercase tracking-[0.4em] text-dark-text-muted">
-                DiCode Control Room
-              </p>
-              <h1 className="mt-4 text-4xl font-semibold text-dark-text">
-                Launch your organization workspace
-              </h1>
-              <p className="mt-3 max-w-3xl text-sm text-dark-text-muted">
-                Follow the guided flow to set up DiCode for your company. Everything here is optimized
-                for desktop so you can work with as much screen real estate as you need.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-8 flex flex-col gap-3">
-            <div className="flex items-center gap-4">
-              {STEPS.map((stepMeta, index) => (
-                <div key={stepMeta.id} className="flex-1">
-                  <div
-                    className={`h-1.5 rounded-full ${
-                      index + 1 <= step ? 'bg-primary' : 'bg-dark-border/60'
-                    }`}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-        </header>
-
-        {error && (
-          <div className="mt-8 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
-            {error}
-          </div>
-        )}
-
-        <div className="mt-12 grid gap-8 xl:grid-cols-12">
-          <section className={mainColumnClass}>
-            <div className="rounded-[28px] border border-dark-border/70 bg-dark-card/80 p-8 shadow-[0_15px_60px_rgba(0,0,0,0.35)]">
-              {renderStepContent()}
-              </div>
-          </section>
-
-          {step > 1 && (
-            <aside className="xl:col-span-4">
-              <div className="space-y-6 rounded-3xl border border-dark-border/70 bg-dark-card/70 p-6">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs uppercase tracking-[0.4em] text-dark-text-muted">
-                      Departments added
-                    </p>
-                    <span className="text-xs text-dark-text-muted">
-                      {formData.departments.length} total
-                    </span>
-                  </div>
-                  {formData.departments.length > 0 ? (
-                    <div className="mt-4 space-y-2">
-                      {formData.departments.map((dept, index) => (
-                        <div
-                          key={dept}
-                          className="flex items-center gap-3 rounded-2xl border border-dark-border/60 bg-dark-bg/40 px-4 py-3"
-                        >
-                          <span className="text-[11px] font-semibold text-dark-text-muted">
-                            {String(index + 1).padStart(2, '0')}
-                          </span>
-                          <span className="truncate text-sm font-semibold text-dark-text flex-1">
-                            {dept}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveDepartment(dept)}
-                            className="rounded-full p-1 text-dark-text-muted transition-colors hover:bg-red-500/10 hover:text-red-400"
-                          >
-                            <X size={14} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-3 text-xs text-dark-text-muted">
-                      Add departments to populate this list.
-                    </p>
-                  )}
-                </div>
-
-                <div className="border-t border-dark-border/60 pt-6">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs uppercase tracking-[0.4em] text-dark-text-muted">
-                      Team members
-                    </p>
-                    <span className="text-xs text-dark-text-muted">
-                      {formData.employees.length} queued
-                    </span>
-                  </div>
-                  {formData.employees.length > 0 ? (
-                    <div className="custom-scrollbar mt-4 max-h-60 space-y-3 overflow-y-auto pr-1">
+                  {formData.employees.length > 0 && (
+                    <div className="mt-10 border-t border-white/10 pt-10">
+                      <h3 className="mb-4 text-sm font-semibold uppercase tracking-widest text-dark-text-muted">
+                        Pending Invitations ({formData.employees.length})
+                      </h3>
+                      <div className="space-y-2">
                     {formData.employees.map((employee) => (
                       <div
                         key={employee.email}
-                          className="flex items-center gap-3 rounded-2xl border border-dark-border/60 bg-dark-bg/40 px-3 py-3"
-                      >
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-                            <Mail size={14} />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-semibold text-dark-text">{employee.name}</p>
-                            <p className="truncate text-xs text-dark-text-muted">{employee.email}</p>
-                          </div>
-                          <span
-                            className={`rounded-full px-2.5 py-0.5 text-[10px] uppercase tracking-[0.3em] ${
-                              employee.role === 'admin'
-                                ? 'bg-purple-500/20 text-purple-200'
-                                : 'bg-blue-500/20 text-blue-200'
-                            }`}
+                            className="group flex items-center justify-between rounded-lg border border-white/5 bg-white/[0.02] px-5 py-4 transition-all hover:border-white/10"
                           >
-                            {employee.role || 'employee'}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-3">
+                                <span className="font-medium text-dark-text">{employee.name}</span>
+                                <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                                  employee.role === 'admin' 
+                                    ? 'bg-purple-500/10 text-purple-400' 
+                                    : 'bg-blue-500/10 text-blue-400'
+                                }`}>
+                                  {employee.role === 'admin' ? 'Admin' : 'Employee'}
                           </span>
+                              </div>
+                              <div className="mt-1 text-sm text-dark-text-muted">{employee.email}</div>
+                            </div>
                         <button
                           type="button"
                           onClick={() => handleRemoveEmployee(employee.email)}
-                            className="ml-2 rounded-full p-1.5 text-dark-text-muted transition-colors hover:bg-red-500/10 hover:text-red-400"
+                              className="rounded-md p-2 text-dark-text-muted opacity-0 transition-all hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
                         >
-                            <X size={14} />
+                              <X size={16} />
                         </button>
                       </div>
                     ))}
                   </div>
-                  ) : (
-                    <p className="mt-3 text-xs text-dark-text-muted">
-                      Invite your collaborators to see them here.
-                    </p>
+                    </div>
                   )}
+                </section>
+
+                <div className="mt-12 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => setStep(2)}
+                    className="rounded-lg px-5 py-3 text-sm font-medium text-dark-text-muted transition-colors hover:text-dark-text"
+          >
+                    Back
+          </button>
+          <button
+            type="button"
+                    onClick={() => setStep(4)}
+                    disabled={!canSubmit}
+                    className="group flex items-center gap-3 rounded-lg bg-primary px-6 py-3.5 text-sm font-semibold text-white transition-all hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Continue
+                    <ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5" />
+                    </button>
+                  </div>
+      </div>
+            )}
+
+            {/* Step 4: Review */}
+            {step === 4 && (
+              <div className="animate-in fade-in slide-in-from-right-4 duration-500">
+                <div className="mb-12">
+                  <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                    Step 4 of 4
+      </div>
+                  <h1 className="mt-4 text-4xl font-semibold tracking-tight text-dark-text">
+                    Review & confirm
+              </h1>
+                  <p className="mt-3 text-lg text-dark-text-muted">
+                    Please verify all details before creating your workspace.
+              </p>
+          </div>
+
+                <div className="space-y-8">
+                  {/* Organization Section */}
+                  <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-6">
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-sm font-semibold uppercase tracking-widest text-dark-text-muted">
+                        Organization
+                      </h2>
+                      <button
+                        type="button"
+                        onClick={() => setStep(1)}
+                        className="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                      >
+                        <Pencil size={12} />
+                        Edit
+                      </button>
+                </div>
+                    <div className="grid grid-cols-2 gap-6">
+                      <div>
+                        <div className="text-xs text-dark-text-muted mb-1">Organization Name</div>
+                        <div className="text-dark-text font-medium">{formData.organizationName}</div>
+            </div>
+                      <div>
+                        <div className="text-xs text-dark-text-muted mb-1">Workspace URL</div>
+                        <div className="text-dark-text font-medium">dicode.com/{formData.slug}</div>
+          </div>
+                      {formData.industry && (
+                        <div>
+                          <div className="text-xs text-dark-text-muted mb-1">Industry</div>
+                          <div className="text-dark-text font-medium">{formData.industry}</div>
+          </div>
+        )}
+                      {formData.region && (
+                        <div>
+                          <div className="text-xs text-dark-text-muted mb-1">Region</div>
+                          <div className="text-dark-text font-medium">{formData.region}</div>
+          </div>
+        )}
+                      {formData.size && (
+                        <div>
+                          <div className="text-xs text-dark-text-muted mb-1">Company Size</div>
+                          <div className="text-dark-text font-medium">
+                            {COMPANY_SIZES.find(s => s.value === formData.size)?.label}
+                          </div>
+                        </div>
+                      )}
+              </div>
+          </section>
+
+                  {/* Administrator Section */}
+                  <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-6">
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-sm font-semibold uppercase tracking-widest text-dark-text-muted">
+                        Administrator
+                      </h2>
+                      <button
+                        type="button"
+                        onClick={() => setStep(1)}
+                        className="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                      >
+                        <Pencil size={12} />
+                        Edit
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-6">
+                <div>
+                        <div className="text-xs text-dark-text-muted mb-1">Full Name</div>
+                        <div className="text-dark-text font-medium">{formData.adminName}</div>
+                  </div>
+                      <div>
+                        <div className="text-xs text-dark-text-muted mb-1">Gender</div>
+                        <div className="text-dark-text font-medium capitalize">
+                          {formData.adminGender === 'prefer-not-to-say' ? 'Prefer not to say' : formData.adminGender}
+                        </div>
+                      </div>
+                <div>
+                        <div className="text-xs text-dark-text-muted mb-1">Date of Birth</div>
+                        <div className="text-dark-text font-medium">
+                          {new Date(formData.adminDateOfBirth).toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* Departments Section */}
+                  <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-6">
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-sm font-semibold uppercase tracking-widest text-dark-text-muted">
+                        Departments ({formData.departments.length})
+                      </h2>
+                      <button
+                        type="button"
+                        onClick={() => setStep(2)}
+                        className="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                      >
+                        <Pencil size={12} />
+                        Edit
+                      </button>
+                  </div>
+                    <div className="flex flex-wrap gap-2">
+                      {formData.departments.map((dept) => (
+                        <span
+                          key={dept}
+                          className="rounded-full bg-white/5 px-4 py-2 text-sm font-medium text-dark-text"
+                        >
+                            {dept}
+                          </span>
+                      ))}
+                    </div>
+                  </section>
+
+                  {/* Team Members Section */}
+                  <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-6">
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-sm font-semibold uppercase tracking-widest text-dark-text-muted">
+                        Team Invitations ({formData.employees.length})
+                      </h2>
+                          <button
+                            type="button"
+                        onClick={() => setStep(3)}
+                        className="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                          >
+                        <Pencil size={12} />
+                        Edit
+                          </button>
+                  </div>
+                  {formData.employees.length > 0 ? (
+                      <div className="space-y-3">
+                    {formData.employees.map((employee) => (
+                      <div
+                        key={employee.email}
+                            className="flex items-center justify-between rounded-lg bg-white/[0.03] px-4 py-3"
+                      >
+                            <div>
+                              <div className="font-medium text-dark-text">{employee.name}</div>
+                              <div className="text-sm text-dark-text-muted">{employee.email}</div>
+                          </div>
+                            <div className="flex items-center gap-3">
+                              {employee.department && (
+                                <span className="text-xs text-dark-text-muted">{employee.department}</span>
+                              )}
+                              <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                              employee.role === 'admin'
+                                  ? 'bg-purple-500/10 text-purple-400' 
+                                  : 'bg-blue-500/10 text-blue-400'
+                              }`}>
+                                {employee.role === 'admin' ? 'Admin' : 'Employee'}
+                          </span>
+                          </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-dark-text-muted text-sm">No team members invited yet. You can invite them later.</p>
+                    )}
+                  </section>
+                  </div>
+
+                <div className="mt-12 flex items-center justify-between">
+                        <button
+                          type="button"
+                    onClick={() => setStep(3)}
+                    disabled={isSubmitting}
+                    className="rounded-lg px-5 py-3 text-sm font-medium text-dark-text-muted transition-colors hover:text-dark-text"
+                        >
+                    Back
+                        </button>
+                  <button
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={!canSubmit || isSubmitting}
+                    className="group flex items-center gap-3 rounded-lg bg-primary px-6 py-3.5 text-sm font-semibold text-white transition-all hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                        Creating workspace...
+                      </>
+                    ) : (
+                      <>
+                        Create workspace
+                        <Check size={16} />
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
-            </aside>
           )}
         </div>
-
-        <div className="mt-12 text-center text-xs text-dark-text-muted">
-          Setting up as <span className="text-dark-text font-semibold">{userName || 'Admin'}</span>
-          <span className="mx-2 text-dark-text-muted">•</span>
-          <span>{userEmail}</span>
         </div>
-      </div>
+        )}
+      </main>
     </div>
   );
 };

@@ -1132,57 +1132,62 @@ const CampaignManagement = () => {
   const renderDICodeCampaignCard = (campaign: Campaign) => {
     const enrollmentSummary = getEnrollmentSummary(campaign);
     return (
-      <div key={campaign.id} className="card hover:border-primary/50 transition-all duration-200 border-l-4 border-l-primary">
+      <div key={campaign.id} className="rounded-xl border border-dark-border bg-dark-card p-5 transition hover:border-dark-border/80 hover:shadow-lg">
         <div className="flex items-start justify-between mb-4">
           <div className="flex-1">
             <div className="flex items-center gap-3 mb-2">
-              <h3 className="text-xl font-semibold text-dark-text">{campaign.name}</h3>
-              <span className="px-2 py-1 bg-blue-500/10 text-blue-500 rounded-full text-xs font-medium flex items-center gap-1">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-2.5 py-1 text-xs font-medium text-blue-400">
                 <Megaphone size={12} />
-                DiCode Campaign
+                DiCode
               </span>
             </div>
-            <p className="text-sm text-dark-text-muted mb-2">{campaign.description}</p>
+            <h3 className="text-base font-semibold text-dark-text mb-1">{campaign.name}</h3>
+            <p className="text-sm text-dark-text-muted line-clamp-2 mb-3">{campaign.description}</p>
             {campaign.purpose && (
-              <div className="bg-dark-bg rounded-lg p-3 mb-3">
-                <p className="text-xs font-medium text-dark-text mb-1">Purpose:</p>
-                <p className="text-sm text-dark-text-muted">{campaign.purpose}</p>
+              <div className="rounded-lg border border-dark-border bg-dark-bg p-3 mb-3">
+                <p className="text-xs font-medium text-dark-text-muted uppercase tracking-wider mb-1">Purpose</p>
+                <p className="text-sm text-dark-text">{campaign.purpose}</p>
               </div>
             )}
-            <div className="flex flex-wrap gap-4 text-xs text-dark-text-muted">
-              <div className="flex items-center gap-1">
-                <Calendar size={14} />
-                Added {formatDate(campaign.createdDate)}
-              </div>
-              <div className="flex items-center gap-1">
-                <Users size={14} />
-                {enrollmentSummary}
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2 mt-3">
-              {campaign.targetCompetencies?.map((comp: string) => (
-                <span key={comp} className="px-2 py-1 bg-primary/10 text-primary rounded text-xs">
+            <div className="flex flex-wrap gap-2 mb-3">
+              {campaign.targetCompetencies?.slice(0, 3).map((comp: string) => (
+                <span key={comp} className="inline-flex items-center rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
                   {comp}
                 </span>
               ))}
+              {campaign.targetCompetencies && campaign.targetCompetencies.length > 3 && (
+                <span className="inline-flex items-center rounded-md bg-dark-bg px-2 py-1 text-xs text-dark-text-muted">
+                  +{campaign.targetCompetencies.length - 3}
+                </span>
+              )}
+              </div>
+            <div className="flex items-center gap-4 text-xs text-dark-text-muted">
+              <span className="inline-flex items-center gap-1">
+                <Calendar size={14} />
+                {formatDate(campaign.createdDate)}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Users size={14} />
+                {enrollmentSummary}
+                </span>
             </div>
           </div>
         </div>
-        <div className="flex gap-2 mt-4">
+        <div className="flex gap-2 pt-3 border-t border-dark-border">
           <button
             onClick={() => {
               setCampaignForm({ ...campaignForm, campaignType: 'leadership-checkin' });
               handleCreateCampaign();
               setWizardStep(1);
             }}
-            className="btn-primary flex items-center gap-2 flex-1"
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary/90"
           >
             <Power size={16} />
             Activate Campaign
           </button>
           <button
             onClick={() => setExpandedCampaign(expandedCampaign === campaign.id ? null : campaign.id)}
-            className="p-2 bg-dark-bg border border-dark-border rounded-lg text-dark-text hover:bg-dark-card transition-colors"
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-dark-border bg-dark-bg text-dark-text transition hover:bg-dark-card"
           >
             {expandedCampaign === campaign.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
           </button>
@@ -1235,36 +1240,37 @@ const CampaignManagement = () => {
     const enrolledCount = enrollmentCounts[campaign.id] ?? 0;
     const eligibleCount = eligibleCounts[campaign.id];
     return (
-      <div key={campaign.id} className="card hover:border-primary/50 transition-all duration-200">
+      <div key={campaign.id} className="rounded-xl border border-dark-border bg-dark-card p-5 transition hover:border-dark-border/80 hover:shadow-lg">
         <div className="flex items-start justify-between mb-4">
           <div className="flex-1">
             <div className="flex items-center gap-3 mb-2">
-              <h3 className="text-xl font-semibold text-dark-text">{campaign.name}</h3>
-              <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(campaign.status)}`}>
+              <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${getStatusColor(campaign.status)}`}>
                 {campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1)}
               </span>
+              {campaign.pinned && (
+                <span className="inline-flex items-center gap-1 text-primary">
+                  <Pin size={12} className="fill-primary" />
+                </span>
+              )}
             </div>
-            <p className="text-sm text-dark-text-muted mb-2">{campaign.description}</p>
-            <div className="flex flex-wrap gap-4 text-xs text-dark-text-muted">
-              <div className="flex items-center gap-1">
+            <h3 className="text-base font-semibold text-dark-text mb-1">{campaign.name}</h3>
+            <p className="text-sm text-dark-text-muted line-clamp-2 mb-3">{campaign.description}</p>
+            <div className="flex items-center gap-4 text-xs text-dark-text-muted">
+              <span className="inline-flex items-center gap-1">
                 <Calendar size={14} />
                 {formatDate(campaign.startDate)} - {formatDate(campaign.endDate)}
-              </div>
-              <div className="flex items-center gap-1">
+              </span>
+              <span className="inline-flex items-center gap-1">
                 <Users size={14} />
                 {enrollmentSummary}
-              </div>
-              <div className="flex items-center gap-1">
+              </span>
+              <span className="inline-flex items-center gap-1">
                 <Target size={14} />
-                {campaign.completionRate}% completion
+                {campaign.completionRate}%
+              </span>
               </div>
-              <div className="flex items-center gap-1">
-                <Repeat size={14} />
-                {campaign.frequency}
               </div>
-            </div>
-          </div>
-          <div className="flex gap-2">
+          <div className="flex gap-1">
             <button
               onClick={() => setExpandedCampaign(expandedCampaign === campaign.id ? null : campaign.id)}
               className="p-2 bg-dark-bg border border-dark-border rounded-lg text-dark-text hover:bg-dark-card transition-colors"
@@ -1532,80 +1538,738 @@ const CampaignManagement = () => {
     create: { label: 'Create Campaign', icon: Plus },
   };
 
+  // Render wizard in full-screen mode (without campaign manager UI)
+  if (activeTab === 'create' && showCreateWizard) {
   return (
-    <div className="p-8">
-      {/* Header */}
-      <div className="mb-10 border-b border-dark-border/70 pb-8">
-        <div className="flex flex-wrap items-start justify-between gap-8">
+      <div className="max-w-6xl mx-auto space-y-6">
+        {/* Wizard Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => {
+                setShowCreateWizard(false);
+                setEditingCampaignId(null);
+                setActiveTab('active');
+              }}
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-dark-border bg-dark-card text-dark-text-muted transition hover:bg-dark-bg hover:text-dark-text"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
           <div>
-            <p className="text-[11px] uppercase tracking-[0.4em] text-dark-text-muted">
-              Campaign Operations
-            </p>
-            <h1 className="mt-3 text-4xl font-semibold text-dark-text">Campaign Management</h1>
-            <p className="mt-2 max-w-2xl text-sm text-dark-text-muted">
-              Create and manage campaigns, upload participants, and schedule automated programs across
-              your organization.
+              <h2 className="text-xl font-semibold text-dark-text">
+                {editingCampaignId ? 'Edit Campaign' : 'New Campaign'}
+              </h2>
+              <p className="text-sm text-dark-text-muted">Step {wizardStep} of 4</p>
+            </div>
+          </div>
+
+          {/* Progress Steps - Horizontal Pills */}
+          <div className="hidden items-center gap-2 lg:flex">
+            {[
+              { id: 1, label: 'Setup' },
+              { id: 2, label: 'Videos' },
+              { id: 3, label: 'Audience' },
+              { id: 4, label: 'Schedule' },
+            ].map((step) => (
+              <button
+                key={step.id}
+                onClick={() => {
+                  if (step.id < wizardStep) setWizardStep(step.id);
+                }}
+                className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition ${
+                  wizardStep === step.id
+                    ? 'bg-primary text-white'
+                    : wizardStep > step.id
+                      ? 'bg-emerald-500/10 text-emerald-400'
+                      : 'bg-dark-card border border-dark-border text-dark-text-muted'
+                }`}
+              >
+                {wizardStep > step.id ? (
+                  <Check className="h-4 w-4" />
+                ) : (
+                  <span className={`flex h-5 w-5 items-center justify-center rounded-full text-xs ${wizardStep === step.id ? 'bg-white/20' : 'bg-dark-bg'}`}>{step.id}</span>
+                )}
+                {step.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Two-column layout */}
+        <div className="grid gap-6 lg:grid-cols-[1fr,320px]">
+          {/* Main Form Column */}
+          <div className="space-y-6">
+
+          {/* Step 1: Campaign Setup */}
+          {wizardStep === 1 && (
+            <div className="space-y-8">
+              <div className="rounded-2xl border border-dark-border bg-dark-card p-6">
+                <h3 className="text-lg font-semibold text-dark-text mb-6">Campaign Details</h3>
+                <div className="space-y-5">
+                  <div>
+                    <label className="text-sm font-medium text-dark-text mb-2 block">Campaign name *</label>
+                    <input
+                      type="text"
+                      className="w-full rounded-xl border border-dark-border bg-dark-bg px-4 py-3 text-sm text-dark-text placeholder:text-dark-text-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                      placeholder="e.g., Q2 Leadership Pulse"
+                      value={campaignForm.name}
+                      onChange={(e) => setCampaignForm({ ...campaignForm, name: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-dark-text mb-2 block">Program summary *</label>
+                    <textarea
+                      className="w-full rounded-xl border border-dark-border bg-dark-bg px-4 py-3 text-sm text-dark-text placeholder:text-dark-text-muted focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 min-h-[100px] resize-none"
+                      placeholder="Why are we running this campaign?"
+                      value={campaignForm.description}
+                      onChange={(e) => setCampaignForm({ ...campaignForm, description: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-dark-border bg-dark-card p-6">
+                <div className="flex items-center justify-between mb-5">
+                  <div>
+                    <h3 className="text-lg font-semibold text-dark-text">Target competencies</h3>
+                    <p className="text-sm text-dark-text-muted">Select 3-5 competencies and pair them with specific skills</p>
+                  </div>
+                  <span className={`rounded-full px-3 py-1 text-xs font-medium ${
+                    campaignForm.targetCompetencies.length >= 3 && campaignForm.targetCompetencies.length <= 5
+                      ? 'bg-emerald-500/10 text-emerald-400'
+                      : 'bg-dark-bg text-dark-text-muted'
+                  }`}>
+                    {campaignForm.targetCompetencies.length}/5 selected
+                  </span>
+                </div>
+
+                {competencyValidationError && (
+                  <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400 mb-5">
+                    {competencyValidationError}
+                  </div>
+                )}
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {competencies.map((comp) => {
+                    const isSelected = campaignForm.targetCompetencies.includes(comp.name);
+                    return (
+                      <button
+                        key={comp.id}
+                        onClick={() => {
+                          setCampaignForm({
+                            ...campaignForm,
+                            targetCompetencies: isSelected
+                              ? campaignForm.targetCompetencies.filter(c => c !== comp.name)
+                              : [...campaignForm.targetCompetencies, comp.name],
+                            selectedSkills: isSelected
+                              ? (() => {
+                                const { [comp.id]: removed, ...rest } = campaignForm.selectedSkills;
+                                return rest;
+                              })()
+                              : { ...campaignForm.selectedSkills, [comp.id]: [] },
+                          });
+                          setCompetencyValidationError('');
+                        }}
+                        type="button"
+                        className={`group relative flex items-start gap-3 rounded-xl border p-4 text-left transition ${isSelected
+                          ? 'border-primary bg-primary/10'
+                          : 'border-dark-border bg-dark-bg hover:border-dark-border/80'
+                          }`}
+                      >
+                        <div className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border ${
+                          isSelected ? 'border-primary bg-primary text-white' : 'border-dark-border'
+                        }`}>
+                          {isSelected && <Check className="h-3 w-3" />}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className={`text-sm font-medium ${isSelected ? 'text-dark-text' : 'text-dark-text'}`}>{comp.name}</p>
+                          <p className="mt-0.5 text-xs text-dark-text-muted">{comp.description}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {campaignForm.targetCompetencies.length > 0 && (
+                  <div className="mt-6 space-y-4">
+                    <h4 className="text-sm font-semibold text-dark-text">Skills & behaviors</h4>
+                    {competencies
+                      .filter(comp => campaignForm.targetCompetencies.includes(comp.name))
+                      .map((comp) => (
+                        <div key={comp.id} className="rounded-xl border border-dark-border bg-dark-bg p-4">
+                          <p className="text-sm font-semibold text-dark-text mb-3">{comp.name}</p>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {comp.skills.map((skill) => {
+                              const isSelected = campaignForm.selectedSkills[comp.id]?.includes(skill.id) ?? false;
+                              return (
+                                <label
+                                  key={skill.id}
+                                  className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 text-sm transition cursor-pointer ${isSelected ? 'border-primary bg-primary/5' : 'border-dark-border hover:border-dark-border/80'
+                                    }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={(e) => {
+                                      const currentSkills = campaignForm.selectedSkills[comp.id] || [];
+                                      setCampaignForm({
+                                        ...campaignForm,
+                                        selectedSkills: {
+                                          ...campaignForm.selectedSkills,
+                                          [comp.id]: e.target.checked
+                                            ? [...currentSkills, skill.id]
+                                            : currentSkills.filter(id => id !== skill.id),
+                                        },
+                                      });
+                                      setCompetencyValidationError('');
+                                    }}
+                                    className="mt-0.5 rounded border-dark-border text-primary focus:ring-primary"
+                                  />
+                                  <div>
+                                    <p className="font-medium text-dark-text">{skill.name}</p>
+                                    <p className="text-xs text-dark-text-muted line-clamp-2">{skill.description}</p>
+                                  </div>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Step 2: Select Videos */}
+          {wizardStep === 2 && (
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-dark-border bg-dark-card p-6">
+                <div className="flex items-center justify-between mb-5">
+                  <div>
+                    <h3 className="text-lg font-semibold text-dark-text">Video Modules</h3>
+                    <p className="text-sm text-dark-text-muted">Select videos to include in this campaign</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-dark-text-muted" />
+                      <input
+                        type="text"
+                        value={videoSearchQuery}
+                        onChange={(e) => setVideoSearchQuery(e.target.value)}
+                        placeholder="Search..."
+                        className="w-40 rounded-lg border border-dark-border bg-dark-bg py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {isLoadingVideos ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-dark-border border-t-primary" />
+                  </div>
+                ) : filteredVideos.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-dark-border py-12 text-center">
+                    <Play className="mb-3 h-8 w-8 text-dark-text-muted" />
+                    <p className="text-sm text-dark-text-muted">
+                      {availableVideos.length === 0 ? 'No videos in your library yet' : 'No matching videos'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {filteredVideos.map((video) => {
+                      const isSelected = selectedVideoIds.includes(video.id);
+                      return (
+                        <button
+                          key={video.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedVideoIds(prev =>
+                              isSelected
+                                ? prev.filter(id => id !== video.id)
+                                : [...prev, video.id]
+                            );
+                          }}
+                          className={`group relative flex flex-col overflow-hidden rounded-xl border transition ${
+                            isSelected
+                              ? 'border-primary ring-2 ring-primary'
+                              : 'border-dark-border hover:border-dark-border/80'
+                          }`}
+                        >
+                          <div className="relative aspect-video bg-dark-bg">
+                            {video.thumbnailUrl ? (
+                              <img src={video.thumbnailUrl} alt={video.title} className="h-full w-full object-cover" />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center">
+                                <Play className="h-8 w-8 text-dark-text-muted" />
+                              </div>
+                            )}
+                            {isSelected && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
+                                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
+                                  <Check className="h-4 w-4 text-white" />
+                                </div>
+                              </div>
+                            )}
+                            <span className={`absolute right-2 top-2 rounded-md px-2 py-0.5 text-[10px] font-medium ${
+                              video.source === 'generated' ? 'bg-primary text-white' : 'bg-dark-text text-dark-bg'
+                            }`}>
+                              {video.source === 'generated' ? 'AI' : 'Upload'}
+                            </span>
+                          </div>
+                          <div className="p-3 text-left">
+                            <p className="line-clamp-1 text-sm font-medium text-dark-text">{video.title}</p>
+                            <p className="text-xs text-dark-text-muted">
+                              {video.duration ? `${Math.floor(video.duration / 60)}:${(video.duration % 60).toString().padStart(2, '0')}` : '—'}
             </p>
           </div>
-          <div className="flex flex-col items-end gap-3">
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Audience Management */}
+          {wizardStep === 3 && (
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-dark-border bg-dark-card p-6">
+                <h3 className="text-lg font-semibold text-dark-text mb-5">Audience Targeting</h3>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {targetingOptions.map((option) => {
+                    const isActive = targetingMode === option.id;
+                    return (
+                      <button
+                        key={option.id}
+                        onClick={() => setTargetingMode(option.id)}
+                        className={`flex flex-col items-start rounded-xl border p-4 text-left transition ${
+                          isActive
+                            ? 'border-primary bg-primary/10'
+                            : 'border-dark-border bg-dark-bg hover:border-dark-border/80'
+                        }`}
+                      >
+                        <option.icon className={`h-5 w-5 mb-2 ${isActive ? 'text-primary' : 'text-dark-text-muted'}`} />
+                        <p className={`text-sm font-medium ${isActive ? 'text-dark-text' : 'text-dark-text'}`}>{option.label}</p>
+                        <p className="text-xs text-dark-text-muted mt-0.5">{option.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {targetingMode === 'department' && (
+                <div className="rounded-2xl border border-dark-border bg-dark-card p-6">
+                  <h4 className="text-sm font-semibold text-dark-text mb-4">Select Departments</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {uniqueDepartments.map((dept) => {
+                      const isSelected = campaignForm.allowedDepartments?.includes(dept);
+                      return (
+                        <button
+                          key={dept}
+                          onClick={() => {
+                            setCampaignForm({
+                              ...campaignForm,
+                              allowedDepartments: isSelected
+                                ? campaignForm.allowedDepartments?.filter(d => d !== dept)
+                                : [...(campaignForm.allowedDepartments || []), dept],
+                            });
+                          }}
+                          className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                            isSelected
+                              ? 'bg-primary text-white'
+                              : 'bg-dark-bg border border-dark-border text-dark-text hover:border-dark-border/80'
+                          }`}
+                        >
+                          {dept}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {targetingMode === 'cohort' && (
+                <div className="rounded-2xl border border-dark-border bg-dark-card p-6">
+                  <h4 className="text-sm font-semibold text-dark-text mb-4">Select Cohorts</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {availableCohorts.map((cohort) => {
+                      const isSelected = campaignForm.allowedCohortIds?.includes(cohort.id);
+                      return (
+                        <button
+                          key={cohort.id}
+                          onClick={() => {
+                            setCampaignForm({
+                              ...campaignForm,
+                              allowedCohortIds: isSelected
+                                ? campaignForm.allowedCohortIds?.filter(id => id !== cohort.id)
+                                : [...(campaignForm.allowedCohortIds || []), cohort.id],
+                            });
+                          }}
+                          className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                            isSelected
+                              ? 'bg-primary text-white'
+                              : 'bg-dark-bg border border-dark-border text-dark-text hover:border-dark-border/80'
+                          }`}
+                        >
+                          {cohort.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="rounded-2xl border border-dark-border bg-dark-card p-6">
+                <h4 className="text-sm font-semibold text-dark-text mb-4">Privacy Settings</h4>
+                <label className="flex cursor-pointer items-center justify-between rounded-xl border border-dark-border p-4 transition hover:bg-dark-bg">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-dark-bg">
+                      <Users className="h-5 w-5 text-dark-text-muted" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-dark-text">Anonymous Responses</p>
+                      <p className="text-xs text-dark-text-muted">Hide participant identity in reports</p>
+                    </div>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="checkbox"
+                      checked={campaignForm.anonymousResponses}
+                      onChange={(e) => setCampaignForm({ ...campaignForm, anonymousResponses: e.target.checked })}
+                      className="sr-only"
+                    />
+                    <div className={`h-6 w-11 rounded-full transition ${campaignForm.anonymousResponses ? 'bg-primary' : 'bg-dark-border'}`}>
+                      <div className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${campaignForm.anonymousResponses ? 'left-[22px]' : 'left-0.5'}`} />
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* Step 4: Scheduling & Automation */}
+          {wizardStep === 4 && (
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-dark-border bg-dark-card p-6">
+                <h3 className="text-lg font-semibold text-dark-text mb-5">Campaign Schedule</h3>
+                <div className="grid gap-5 sm:grid-cols-3">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-dark-text">Start Date *</label>
+                    <input
+                      type="date"
+                      value={campaignForm.startDate}
+                      onChange={(e) => setCampaignForm({ ...campaignForm, startDate: e.target.value })}
+                      className="w-full rounded-xl border border-dark-border bg-dark-bg px-4 py-3 text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-dark-text">End Date *</label>
+                    <input
+                      type="date"
+                      value={campaignForm.endDate}
+                      onChange={(e) => setCampaignForm({ ...campaignForm, endDate: e.target.value })}
+                      className="w-full rounded-xl border border-dark-border bg-dark-bg px-4 py-3 text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-dark-text">Frequency</label>
+                    <select
+                      value={campaignForm.frequency}
+                      onChange={(e) => setCampaignForm({ ...campaignForm, frequency: e.target.value as any })}
+                      className="w-full rounded-xl border border-dark-border bg-dark-bg px-4 py-3 text-sm transition focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    >
+                      <option value="once">Once</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                      <option value="quarterly">Quarterly</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-dark-border bg-dark-card p-6">
+                <h3 className="text-lg font-semibold text-dark-text mb-5">Automation Settings</h3>
+                <div className="space-y-3">
+                  {[
+                    { key: 'autoSendInvites', icon: Mail, label: 'Auto-send Invitations', desc: 'Automatically email participants when campaign starts' },
+                    { key: 'sendReminders', icon: Bell, label: 'Send Reminders', desc: 'Nudge participants who haven\'t completed' },
+                    { key: 'sendConfirmations', icon: CheckCircle, label: 'Send Confirmations', desc: 'Email confirmation upon completion' },
+                  ].map(({ key, icon: Icon, label, desc }) => (
+                    <label
+                      key={key}
+                      className="flex cursor-pointer items-center justify-between rounded-xl border border-dark-border p-4 transition hover:bg-dark-bg"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-dark-bg">
+                          <Icon className="h-5 w-5 text-dark-text-muted" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-dark-text">{label}</p>
+                          <p className="text-xs text-dark-text-muted">{desc}</p>
+                        </div>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          checked={campaignForm[key as keyof typeof campaignForm] as boolean}
+                          onChange={(e) => setCampaignForm({ ...campaignForm, [key]: e.target.checked })}
+                          className="sr-only"
+                        />
+                        <div className={`h-6 w-11 rounded-full transition ${campaignForm[key as keyof typeof campaignForm] ? 'bg-primary' : 'bg-dark-border'}`}>
+                          <div className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${campaignForm[key as keyof typeof campaignForm] ? 'left-[22px]' : 'left-0.5'}`} />
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          </div>
+
+          {/* Right Sidebar - Summary */}
+          <div className="space-y-6">
+            {/* Selected Videos Summary */}
+            {selectedVideoIds.length > 0 && (
+              <div className="rounded-2xl border border-dark-border bg-dark-card p-5 sticky top-6">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-dark-text">Selected Videos</h3>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedVideoIds([])}
+                    className="text-xs text-dark-text-muted hover:text-dark-text transition"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
+                  {selectedVideoIds.map((videoId, index) => {
+                    const video = availableVideos.find(v => v.id === videoId);
+                    if (!video) return null;
+                    return (
+                      <div key={video.id} className="flex items-center gap-3 rounded-lg bg-dark-bg p-2">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-xs font-medium text-white">
+                          {index + 1}
+                        </span>
+                        <span className="flex-1 truncate text-sm text-dark-text">{video.title}</span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedVideoIds(prev => prev.filter(id => id !== videoId))}
+                          className="p-1 text-dark-text-muted hover:text-red-400 transition"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Quick Summary Card */}
+            <div className="rounded-2xl border border-dark-border bg-dark-card p-5">
+              <h3 className="text-sm font-semibold text-dark-text mb-4">Campaign Summary</h3>
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-dark-text-muted">Name</span>
+                  <span className="text-dark-text font-medium truncate max-w-[150px]">
+                    {campaignForm.name || '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-dark-text-muted">Competencies</span>
+                  <span className="text-dark-text font-medium">
+                    {campaignForm.targetCompetencies.length}/5
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-dark-text-muted">Videos</span>
+                  <span className="text-dark-text font-medium">
+                    {selectedVideoIds.length}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-dark-text-muted">Targeting</span>
+                  <span className="text-dark-text font-medium capitalize">
+                    {targetingMode === 'all' ? 'Everyone' : targetingMode}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Navigation Buttons */}
+            <div className="sticky bottom-6 space-y-3">
+              <div className="flex gap-2">
+                {wizardStep > 1 && (
+                  <button
+                    onClick={handlePrevStep}
+                    className="flex h-11 w-11 items-center justify-center rounded-xl border border-dark-border bg-dark-card text-dark-text-muted transition hover:bg-dark-bg hover:text-dark-text"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                )}
+                {wizardStep < 4 ? (
+                  <button
+                    onClick={handleNextStep}
+                    className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary/90"
+                  >
+                    Continue
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <div className="flex flex-1 gap-2">
+                    <button
+                      onClick={() => handleSaveCampaign({ publish: false })}
+                      disabled={isSavingCampaign}
+                      className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl border border-dark-border bg-dark-card px-4 py-3 text-sm font-semibold text-dark-text transition hover:bg-dark-bg disabled:opacity-60"
+                    >
+                      <Save className="h-4 w-4" />
+                      {isSavingCampaign ? 'Saving…' : 'Draft'}
+                    </button>
+                    <button
+                      onClick={() => handleSaveCampaign({ publish: true })}
+                      disabled={isSavingCampaign}
+                      className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-60"
+                    >
+                      <Play className="h-4 w-4" />
+                      {isSavingCampaign ? 'Launching…' : 'Launch'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Mobile Step Indicator */}
+              <div className="flex items-center justify-center gap-2 lg:hidden">
+                {[1, 2, 3, 4].map((step) => (
+                  <div
+                    key={step}
+                    className={`h-2 w-2 rounded-full transition ${
+                      wizardStep >= step ? 'bg-primary' : 'bg-dark-border'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-6">
+      {/* Page Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-dark-text">Campaigns</h1>
+          <p className="text-sm text-dark-text-muted mt-1">
+            Manage and launch behavioral coaching campaigns
+          </p>
+        </div>
             <button
               onClick={handleCreateCampaign}
-              className="btn-primary flex items-center gap-2 px-6 py-3 text-sm tracking-[0.2em] uppercase"
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-primary/90"
             >
-              <Plus size={18} />
+          <Plus size={16} />
               New Campaign
             </button>
-            <p className="text-xs text-dark-text-muted max-w-xs text-right">
-              Tip: Pin critical campaigns to surface them at the top of this page for quick access.
-            </p>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid gap-4 sm:grid-cols-4">
+        <div className="rounded-xl border border-dark-border bg-dark-card p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-dark-bg text-dark-text-muted">
+              <Megaphone className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-2xl font-semibold text-dark-text">{campaigns.length}</p>
+              <p className="text-xs text-dark-text-muted">Total</p>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-xl border border-dark-border bg-dark-card p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
+              <PlayCircle className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-2xl font-semibold text-dark-text">{campaigns.filter(c => c.status === 'active').length}</p>
+              <p className="text-xs text-dark-text-muted">Active</p>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-xl border border-dark-border bg-dark-card p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/10 text-amber-400">
+              <FileText className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-2xl font-semibold text-dark-text">{campaigns.filter(c => c.status === 'draft').length}</p>
+              <p className="text-xs text-dark-text-muted">Drafts</p>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-xl border border-dark-border bg-dark-card p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Pin className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-2xl font-semibold text-dark-text">{pinnedCampaigns.length}</p>
+              <p className="text-xs text-dark-text-muted">Pinned</p>
+            </div>
+          </div>
           </div>
         </div>
 
         {campaignError && (
-          <div className="mt-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
-            {campaignError}
+        <div className="flex items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-400">
+          <X className="h-5 w-5 flex-shrink-0" />
+          <p className="text-sm font-medium">{campaignError}</p>
           </div>
         )}
 
         {campaignsLoading && campaigns.length === 0 && (
-          <div className="mt-6 rounded-2xl border border-dark-border/80 bg-dark-bg/70 p-4 text-sm text-dark-text-muted">
-            Loading your campaigns...
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="h-8 w-8 rounded-full border-2 border-dark-border border-t-primary animate-spin" />
+          <p className="mt-4 text-sm text-dark-text-muted">Loading campaigns...</p>
           </div>
         )}
 
         {/* Pinned Active Campaigns */}
         {activeTab !== 'create' && activeTab !== 'dicode' && pinnedCampaigns.length > 0 && (
-          <div className="mb-6">
+        <div className="rounded-xl border border-dark-border bg-dark-card p-5">
             <div className="flex items-center gap-2 mb-4">
-              <Pin size={18} className="text-primary" />
-              <h3 className="font-semibold text-dark-text">Pinned Campaigns</h3>
+            <Pin size={16} className="text-primary fill-primary" />
+            <h3 className="text-sm font-semibold text-dark-text">Pinned Campaigns</h3>
             </div>
-            <div className="flex gap-4 overflow-x-auto pb-2">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {pinnedCampaigns.map((campaign) => (
                 <div
                   key={campaign.id}
-                  className="card min-w-[320px] flex-shrink-0 border border-primary/20 bg-dark-card/80"
+                className="rounded-lg border border-primary/20 bg-dark-bg p-4 transition hover:border-primary/40"
                 >
                   <div className="flex items-start justify-between mb-2">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h4 className="font-semibold text-dark-text">{campaign.name}</h4>
-                        <Pin size={14} className="text-primary fill-primary" />
-                      </div>
-                      <p className="text-sm text-dark-text-muted line-clamp-2">{campaign.description}</p>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-semibold text-dark-text truncate">{campaign.name}</h4>
+                    <p className="text-xs text-dark-text-muted line-clamp-1 mt-0.5">{campaign.description}</p>
                     </div>
                     <button
                       onClick={() => togglePinCampaign(campaign.id, campaign.pinned || false)}
-                      className="p-1 hover:bg-dark-border/50 rounded transition-colors"
+                    className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-dark-card transition-colors ml-2"
                       title="Unpin campaign"
                     >
-                      <X size={16} className="text-dark-text-muted" />
+                    <X size={14} className="text-dark-text-muted" />
                     </button>
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-dark-text-muted mt-3">
-                    <Users size={14} />
-                    <span>{getEnrollmentSummary(campaign)}</span>
-                    <span className="mx-2">•</span>
+                <div className="flex items-center gap-3 text-[11px] text-dark-text-muted mt-3 pt-3 border-t border-dark-border">
+                  <span className="inline-flex items-center gap-1">
+                    <Users size={12} />
+                    {getEnrollmentSummary(campaign)}
+                  </span>
                     <span>{campaign.completionRate}% complete</span>
                   </div>
                 </div>
@@ -1614,32 +2278,32 @@ const CampaignManagement = () => {
           </div>
         )}
 
-        {/* Tabs */}
-        <div className="mb-6 pt-4">
-          <div className="flex flex-wrap gap-3">
+      {/* Filters & Search */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
+          {/* Status Tabs */}
+          <div className="flex items-center rounded-lg border border-dark-border bg-dark-card p-1">
             {(['active', 'draft', 'completed', 'dicode'] as const).map((tab) => {
-              const tabInfo = TAB_CONFIG[tab];
-              const Icon = tabInfo.icon;
               const count = getTabCount(tab);
               const isActive = activeTab === tab;
+              const labels: Record<string, string> = {
+                active: 'Active',
+                draft: 'Draft',
+                completed: 'Completed',
+                dicode: 'DiCode',
+              };
               return (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`group inline-flex items-center gap-3 rounded-full border px-4 py-2 text-sm font-medium capitalize transition-all ${isActive
-                    ? 'border-primary text-dark-text shadow-[0_8px_30px_rgba(0,0,0,0.35)] bg-dark-card'
-                    : 'border-dark-border/70 text-dark-text-muted hover:text-dark-text hover:border-dark-border'
-                    }`}
+                  className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                    isActive
+                      ? 'bg-dark-bg text-dark-text'
+                      : 'text-dark-text-muted hover:text-dark-text'
+                  }`}
                 >
-                  <Icon
-                    size={16}
-                    className={`${isActive ? 'text-primary' : 'text-dark-text-muted group-hover:text-primary'}`}
-                  />
-                  <span>{tabInfo.label}</span>
-                  <span
-                    className={`rounded-full border px-2 py-0.5 text-[11px] ${isActive ? 'border-primary text-primary' : 'border-dark-border/60 text-dark-text-muted'
-                      }`}
-                  >
+                  <span>{labels[tab]}</span>
+                  <span className={`text-xs ${isActive ? 'text-primary' : 'text-dark-text-muted'}`}>
                     {count}
                   </span>
                 </button>
@@ -1649,17 +2313,15 @@ const CampaignManagement = () => {
         </div>
 
         {/* Search */}
-        <div className="mb-6">
           <div className="relative">
-            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-dark-text-muted" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-dark-text-muted" />
             <input
               type="text"
-              className="input w-full pl-10"
+            className="h-9 w-64 rounded-lg border border-dark-border bg-dark-card pl-9 pr-4 text-sm text-dark-text placeholder:text-dark-text-muted transition focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
               placeholder="Search campaigns..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
-          </div>
         </div>
       </div>
 
@@ -1667,17 +2329,17 @@ const CampaignManagement = () => {
       {activeTab === 'dicode' && (
         <div>
           {filteredDICodeCampaigns.length > 0 ? (
-            <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {filteredDICodeCampaigns.map((campaign) => renderDICodeCampaignCard(campaign))}
             </div>
           ) : (
-            <div className="card text-center py-12">
-              <div className="p-4 bg-dark-bg rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
-                <Megaphone size={40} className="text-dark-text-muted" />
+            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-dark-border bg-dark-card py-20 text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-dark-bg text-dark-text-muted mb-4">
+                <Megaphone className="h-7 w-7" />
               </div>
-              <h3 className="text-xl font-semibold text-dark-text mb-2">No DICode campaigns found</h3>
-              <p className="text-dark-text-muted mb-6">
-                {searchQuery ? 'Try adjusting your search' : 'No DICode campaigns available'}
+              <h3 className="text-lg font-semibold text-dark-text">No DiCode campaigns found</h3>
+              <p className="mt-1 text-sm text-dark-text-muted max-w-sm">
+                {searchQuery ? 'Try adjusting your search' : 'No DiCode campaigns available'}
               </p>
             </div>
           )}
@@ -1687,22 +2349,27 @@ const CampaignManagement = () => {
       {activeTab !== 'create' && activeTab !== 'dicode' && (
         <div>
           {filteredCampaigns.length > 0 ? (
-            <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {filteredCampaigns.map((campaign) => renderCampaignCard(campaign))}
             </div>
           ) : (
-            <div className="card text-center py-12">
-              <div className="p-4 bg-dark-bg rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
-                <Megaphone size={40} className="text-dark-text-muted" />
+            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-dark-border bg-dark-card py-20 text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-dark-bg text-dark-text-muted mb-4">
+                <Megaphone className="h-7 w-7" />
               </div>
-              <h3 className="text-xl font-semibold text-dark-text mb-2">No campaigns found</h3>
-              <p className="text-dark-text-muted mb-6">
-                {searchQuery ? 'Try adjusting your search' : `No ${activeTab} campaigns yet`}
+              <h3 className="text-lg font-semibold text-dark-text">
+                {campaigns.length === 0 ? 'No campaigns yet' : 'No matching campaigns'}
+              </h3>
+              <p className="mt-1 text-sm text-dark-text-muted max-w-sm">
+                {searchQuery ? 'Try adjusting your search or filters' : `Create your first ${activeTab} campaign to get started.`}
               </p>
-              {!searchQuery && (
-                <button onClick={handleCreateCampaign} className="btn-primary inline-flex items-center gap-2">
-                  <Plus size={18} />
-                  Create Your First Campaign
+              {!searchQuery && campaigns.length === 0 && (
+                <button
+                  onClick={handleCreateCampaign}
+                  className="mt-6 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary/90"
+                >
+                  <Plus size={16} />
+                  Create Campaign
                 </button>
               )}
             </div>
@@ -1712,51 +2379,56 @@ const CampaignManagement = () => {
 
       {/* Template Selection View */}
       {activeTab === 'create' && !showCreateWizard && (
-        <div className="space-y-6">
-          <div className="text-center mb-8">
-            <h2 className="text-2xl font-bold text-dark-text mb-2">Choose a Campaign Template</h2>
-            <p className="text-dark-text-muted">Start with a pre-built template or create a custom campaign</p>
+        <div className="space-y-8">
+          <div className="text-center">
+            <div className="inline-flex items-center gap-2 rounded-full bg-dark-card border border-dark-border px-4 py-2 text-sm font-medium text-dark-text-muted mb-6">
+              <Plus className="h-4 w-4" />
+              New Campaign
+            </div>
+            <h2 className="text-2xl font-semibold text-dark-text mb-2">How would you like to start?</h2>
+            <p className="text-dark-text-muted">Choose a template to get started quickly, or build from scratch</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {campaignTypes.map((template) => {
               const IconComponent = template.iconComponent;
               return (
                 <button
                   key={template.id}
                   onClick={() => handleTemplateSelect(template.id)}
-                  className="card group hover:border-primary/50 hover:shadow-lg transition-all duration-200 text-left"
+                  className="group relative flex flex-col overflow-hidden rounded-2xl border border-dark-border bg-dark-card text-left transition-all hover:shadow-xl hover:border-dark-border/80"
                 >
-                  <div className="flex items-start gap-4 mb-4">
-                    <div className={`w-12 h-12 rounded-lg bg-gradient-to-br ${template.color} flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform`}>
+                  {/* Gradient Header */}
+                  <div className={`h-24 bg-gradient-to-br ${template.color} p-4 flex items-end shrink-0`}>
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 backdrop-blur">
                       {IconComponent ? (
-                        <IconComponent size={24} className="text-white" />
+                          <IconComponent className="h-4 w-4 text-white" />
                       ) : (
-                        <span className="text-2xl">{template.icon}</span>
+                          <span className="text-sm">{template.icon}</span>
                       )}
                     </div>
-                    <div className="flex-1">
-                      <h3 className="text-lg font-semibold text-dark-text mb-1 group-hover:text-primary transition-colors">
-                        {template.name}
-                      </h3>
-                      <p className="text-sm text-dark-text-muted mb-3">{template.description}</p>
+                    </div>
+                  </div>
+                  
+                  {/* Content */}
+                  <div className="p-4 flex-1 flex flex-col">
+                    <h3 className="text-sm font-semibold text-dark-text mb-1 group-hover:text-primary transition-colors">{template.name}</h3>
+                    <p className="text-xs text-dark-text-muted mb-3 flex-1 line-clamp-2">{template.description}</p>
                       {template.skills.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                          {template.skills.map((skill) => (
-                            <span
-                              key={skill.id}
-                              className="px-2 py-1 bg-dark-bg text-dark-text text-xs rounded-full"
-                            >
+                      <div className="flex flex-wrap gap-1">
+                        {template.skills.slice(0, 2).map((skill) => (
+                          <span key={skill.id} className="rounded-md bg-dark-bg px-2 py-0.5 text-[10px] font-medium text-dark-text-muted">
                               {skill.name}
                             </span>
                           ))}
                         </div>
                       )}
                     </div>
-                  </div>
-                  <div className="flex items-center justify-end text-primary text-sm font-medium group-hover:gap-2 transition-all">
-                    <span>Select Template</span>
-                    <ArrowRight size={16} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+
+                  {/* Hover Arrow */}
+                  <div className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full bg-white/20 backdrop-blur opacity-0 transition group-hover:opacity-100">
+                    <ArrowRight className="h-3.5 w-3.5 text-white" />
                   </div>
                 </button>
               );
@@ -1767,52 +2439,63 @@ const CampaignManagement = () => {
 
       {/* Create Campaign Wizard */}
       {activeTab === 'create' && showCreateWizard && (
-        <div className="rounded-[32px] border border-dark-border/70 bg-dark-card/80 p-8 shadow-xl">
+        <div className="space-y-6">
           {/* Wizard Header */}
-          <div className="flex items-center justify-between border-b border-dark-border/70 pb-6 mb-8">
-            <div>
-              <p className="text-xs uppercase tracking-[0.4em] text-dark-text-muted mb-2">Campaign Creation</p>
-              <h2 className="text-2xl font-semibold text-dark-text">
-                {editingCampaignId ? 'Edit Campaign' : 'Launch a new campaign'}
-              </h2>
-            </div>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
             <button
               onClick={() => {
                 setShowCreateWizard(false);
                 setEditingCampaignId(null);
-                setActiveTab('active');
               }}
-              className="inline-flex items-center gap-2 rounded-2xl border border-dark-border/70 bg-dark-bg px-5 py-2.5 text-sm font-semibold text-dark-text shadow-sm hover:bg-dark-border transition-colors"
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-dark-border bg-dark-card text-dark-text-muted transition hover:bg-dark-bg hover:text-dark-text"
             >
-              <X size={16} />
-              Cancel
+                <ArrowLeft className="h-4 w-4" />
             </button>
+              <div>
+                <h2 className="text-xl font-semibold text-dark-text">
+                  {editingCampaignId ? 'Edit Campaign' : 'New Campaign'}
+                </h2>
+                <p className="text-sm text-dark-text-muted">Step {wizardStep} of 4</p>
+              </div>
           </div>
 
-          {/* Progress Steps */}
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-dark-border/50 pb-6 mb-8">
-            {[
-              { id: 1, label: 'Campaign Setup', description: 'Details & competencies' },
-              { id: 2, label: 'Select Videos', description: 'Content modules' },
-              { id: 3, label: 'Audience', description: 'Cohorts & targeting' },
-              { id: 4, label: 'Schedule', description: 'Timing & automation' },
+            {/* Progress Steps - Horizontal Pills */}
+            <div className="hidden items-center gap-2 lg:flex">
+              {[
+                { id: 1, label: 'Setup' },
+                { id: 2, label: 'Videos' },
+                { id: 3, label: 'Audience' },
+                { id: 4, label: 'Schedule' },
             ].map((step) => (
-              <div key={step.id} className="flex items-center gap-3">
-                <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${wizardStep >= step.id ? 'bg-dark-text text-dark-bg' : 'bg-dark-bg text-dark-text-muted'
-                    }`}
+                <button
+                  key={step.id}
+                  onClick={() => {
+                    if (step.id < wizardStep) setWizardStep(step.id);
+                  }}
+                  className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition ${
+                    wizardStep === step.id
+                      ? 'bg-primary text-white'
+                      : wizardStep > step.id
+                        ? 'bg-emerald-500/10 text-emerald-400'
+                        : 'bg-dark-card border border-dark-border text-dark-text-muted'
+                  }`}
                 >
-                  {wizardStep > step.id ? <Check className="h-4 w-4" /> : step.id}
-                </div>
-                <div>
-                  <p className={`text-sm font-semibold ${wizardStep >= step.id ? 'text-dark-text' : 'text-dark-text-muted'}`}>
+                  {wizardStep > step.id ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    <span className={`flex h-5 w-5 items-center justify-center rounded-full text-xs ${wizardStep === step.id ? 'bg-white/20' : 'bg-dark-bg'}`}>{step.id}</span>
+                  )}
                     {step.label}
-                  </p>
-                  <p className="text-xs text-dark-text-muted">{step.description}</p>
-                </div>
-              </div>
+                </button>
             ))}
+            </div>
           </div>
+
+          {/* Two-column layout */}
+          <div className="grid gap-6 lg:grid-cols-[1fr,320px]">
+            {/* Main Form Column */}
+            <div className="space-y-6">
 
           {/* Step 1: Campaign Setup */}
           {wizardStep === 1 && (
@@ -1936,30 +2619,6 @@ const CampaignManagement = () => {
                 )}
               </div>
 
-              <div className="flex justify-between items-center gap-3 pt-6 border-t border-dark-border/50">
-                <div className="text-sm text-dark-text-muted">
-                  Step 1 of 4
-                </div>
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => {
-                      setShowCreateWizard(false);
-                      setActiveTab('active');
-                    }}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-dark-border/70 bg-dark-bg px-5 py-2.5 text-sm font-semibold text-dark-text shadow-sm hover:bg-dark-border transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleNextStep}
-                    disabled={!campaignForm.name || !campaignForm.description}
-                    className="btn-primary inline-flex items-center gap-2 rounded-2xl px-6 py-2.5 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Next step
-                    <ArrowRight className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
             </div>
           )}
 
@@ -2177,24 +2836,6 @@ const CampaignManagement = () => {
                 </div>
               )}
 
-              {/* Navigation */}
-              <div className="flex items-center justify-between pt-6 border-t border-dark-border">
-                <button
-                  onClick={handlePrevStep}
-                  className="btn-secondary flex items-center gap-2"
-                >
-                  <ArrowLeft size={18} />
-                  Back
-                </button>
-                <button
-                  onClick={handleNextStep}
-                  disabled={selectedVideoIds.length === 0}
-                  className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Next: Audience Management
-                  <ArrowRight size={18} />
-                </button>
-              </div>
             </div>
           )}
 
@@ -2528,22 +3169,6 @@ const CampaignManagement = () => {
                 </div>
               </div>
 
-              <div className="flex justify-between pt-6 border-t border-dark-border">
-                <button
-                  onClick={handlePrevStep}
-                  className="btn-secondary flex items-center gap-2"
-                >
-                  <ArrowLeft size={18} />
-                  Back
-                </button>
-                <button
-                  onClick={handleNextStep}
-                  className="btn-primary flex items-center gap-2"
-                >
-                  Next: Scheduling & Automation
-                  <ArrowRight size={18} />
-                </button>
-              </div>
             </div>
           )}
 
@@ -2693,35 +3318,135 @@ const CampaignManagement = () => {
                 </div>
               </div>
 
-              <div className="flex justify-between pt-6 border-t border-dark-border">
-                <button
-                  onClick={handlePrevStep}
-                  className="btn-secondary flex items-center gap-2"
-                >
-                  <ArrowLeft size={18} />
-                  Back
-                </button>
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => handleSaveCampaign()}
-                    disabled={isSavingCampaign}
-                    className="btn-secondary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Save size={18} />
-                    {isSavingCampaign ? 'Saving...' : 'Save as Draft'}
-                  </button>
-                  <button
-                    onClick={() => handleLaunchCampaign()}
-                    disabled={!campaignForm.startDate || !campaignForm.endDate || isSavingCampaign}
-                    className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Play size={18} />
-                    {isSavingCampaign ? 'Launching...' : 'Launch Campaign'}
-                  </button>
-                </div>
-              </div>
             </div>
           )}
+            </div>
+
+            {/* Right Sidebar - Summary */}
+            <div className="space-y-6">
+              {/* Selected Videos Summary */}
+              {selectedVideoIds.length > 0 && (
+                <div className="rounded-2xl border border-dark-border bg-dark-card p-5 sticky top-6">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-dark-text">Selected Videos</h3>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedVideoIds([])}
+                      className="text-xs text-dark-text-muted hover:text-dark-text transition"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
+                    {selectedVideoIds.map((videoId, index) => {
+                      const video = availableVideos.find(v => v.id === videoId);
+                      if (!video) return null;
+                      return (
+                        <div key={video.id} className="flex items-center gap-3 rounded-lg bg-dark-bg p-2">
+                          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-xs font-medium text-white">
+                            {index + 1}
+                          </span>
+                          <span className="flex-1 truncate text-sm text-dark-text">{video.title}</span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedVideoIds(prev => prev.filter(id => id !== videoId))}
+                            className="p-1 text-dark-text-muted hover:text-red-400 transition"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Quick Summary Card */}
+              <div className="rounded-2xl border border-dark-border bg-dark-card p-5">
+                <h3 className="text-sm font-semibold text-dark-text mb-4">Campaign Summary</h3>
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-dark-text-muted">Name</span>
+                    <span className="text-dark-text font-medium truncate max-w-[150px]">
+                      {campaignForm.name || '—'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-dark-text-muted">Competencies</span>
+                    <span className="text-dark-text font-medium">
+                      {campaignForm.targetCompetencies.length}/5
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-dark-text-muted">Videos</span>
+                    <span className="text-dark-text font-medium">
+                      {selectedVideoIds.length}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-dark-text-muted">Targeting</span>
+                    <span className="text-dark-text font-medium capitalize">
+                      {targetingMode === 'all' ? 'Everyone' : targetingMode}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Navigation Buttons */}
+              <div className="sticky bottom-6 space-y-3">
+                <div className="flex gap-2">
+                  {wizardStep > 1 && (
+                <button
+                  onClick={handlePrevStep}
+                      className="flex h-11 w-11 items-center justify-center rounded-xl border border-dark-border bg-dark-card text-dark-text-muted transition hover:bg-dark-bg hover:text-dark-text"
+                >
+                      <ArrowLeft className="h-4 w-4" />
+                </button>
+                  )}
+                  {wizardStep < 4 ? (
+                  <button
+                      onClick={handleNextStep}
+                      className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary/90"
+                    >
+                      Continue
+                      <ArrowRight className="h-4 w-4" />
+                    </button>
+                  ) : (
+                    <div className="flex flex-1 gap-2">
+                      <button
+                        onClick={() => handleSaveCampaign({ publish: false })}
+                    disabled={isSavingCampaign}
+                        className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl border border-dark-border bg-dark-card px-4 py-3 text-sm font-semibold text-dark-text transition hover:bg-dark-bg disabled:opacity-60"
+                  >
+                        <Save className="h-4 w-4" />
+                        {isSavingCampaign ? 'Saving…' : 'Draft'}
+                  </button>
+                  <button
+                        onClick={() => handleSaveCampaign({ publish: true })}
+                        disabled={isSavingCampaign}
+                        className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white transition hover:bg-primary/90 disabled:opacity-60"
+                      >
+                        <Play className="h-4 w-4" />
+                        {isSavingCampaign ? 'Launching…' : 'Launch'}
+                  </button>
+                </div>
+                  )}
+              </div>
+
+                {/* Mobile Step Indicator */}
+                <div className="flex items-center justify-center gap-2 lg:hidden">
+                  {[1, 2, 3, 4].map((step) => (
+                    <div
+                      key={step}
+                      className={`h-2 w-2 rounded-full transition ${
+                        wizardStep >= step ? 'bg-primary' : 'bg-dark-border'
+                      }`}
+                    />
+                  ))}
+            </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

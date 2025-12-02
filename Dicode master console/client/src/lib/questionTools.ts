@@ -1,7 +1,7 @@
 import { auth } from "@/lib/firebase";
 import type { QuestionRole } from "@/lib/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api-6easthj3va-uc.a.run.app";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api-x76kgbqadq-uc.a.run.app";
 const normalizedApiBase = API_BASE.replace(/\/$/, "");
 const questionToolsUrl = `${normalizedApiBase}${normalizedApiBase.endsWith("/api") ? "" : "/api"
   }/question-tools`;

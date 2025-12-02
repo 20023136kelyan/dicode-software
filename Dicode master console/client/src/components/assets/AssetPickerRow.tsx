@@ -2,11 +2,10 @@
 
 import Link from 'next/link';
 import { AssetCard } from './AssetCard';
-import { MagnifyingGlassIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
+import { Search, RefreshCw, Plus } from 'lucide-react';
 import type { Asset } from '@/lib/types';
 import { useAssets } from '@/hooks/useAssets';
 import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
 
 export interface AssetPickerRowProps {
   selectedAssetIds?: string[];
@@ -34,14 +33,17 @@ export function AssetPickerRow({
     void refresh();
   };
 
+  // Fixed height for content area to match asset card height (h-24 = 96px + padding)
+  const contentMinHeight = 'min-h-[112px]';
+
   const renderContent = () => {
     if (loading) {
       return (
-        <div className="flex gap-3 overflow-hidden">
+        <div className={`flex items-center gap-3 overflow-hidden ${contentMinHeight}`}>
           {Array.from({ length: 4 }).map((_, index) => (
             <div
               key={`asset-skeleton-${index}`}
-              className="h-32 min-w-[220px] animate-pulse rounded-2xl border border-border/40 bg-muted/40"
+              className="h-24 min-w-[180px] animate-pulse rounded-xl border border-slate-200 bg-slate-100"
             />
           ))}
         </div>
@@ -50,17 +52,18 @@ export function AssetPickerRow({
 
     if (error) {
       return (
-        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-destructive/20 bg-destructive/5 px-6 py-10 text-center">
-          <p className="text-sm font-medium text-destructive">
-            Failed to load assets
-          </p>
-          <p className="mb-4 mt-1 text-xs text-muted-foreground">
-            {error}
-          </p>
-          <Button variant="outline" size="sm" onClick={handleRetry}>
-            <ArrowPathIcon className="mr-2 h-4 w-4" />
+        <div className={`flex items-center justify-center gap-4 rounded-xl border border-dashed border-rose-200 bg-rose-50 px-6 ${contentMinHeight}`}>
+          <div className="text-center">
+            <p className="text-sm font-medium text-rose-700">Failed to load assets</p>
+            <p className="mt-1 text-xs text-rose-600">{error}</p>
+          </div>
+          <button
+            onClick={handleRetry}
+            className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-medium text-rose-700 transition hover:bg-rose-50"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
             Retry
-          </Button>
+          </button>
         </div>
       );
     }
@@ -68,32 +71,33 @@ export function AssetPickerRow({
     if (!filteredAssets.length) {
       if (!hasAssets) {
         return (
-          <div className="rounded-2xl border border-dashed border-border/60 bg-card/60 p-6 text-center">
-            <p className="text-sm font-medium text-foreground">
-              No reusable assets yet
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Create assets once and drag them into any prompt for consistent visuals.
-            </p>
+          <div className={`flex items-center justify-between rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 ${contentMinHeight}`}>
+            <div>
+              <p className="text-sm font-medium text-slate-700">No reusable assets yet</p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Create assets for consistent characters, environments, and more.
+              </p>
+            </div>
             <Link
               href="/assets"
-              className="mt-4 inline-flex rounded-full bg-sky-500 px-4 py-2 text-xs font-semibold text-white"
+              className="flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-slate-800"
             >
-              Go to asset library
+              <Plus className="h-3.5 w-3.5" />
+              Create asset
             </Link>
           </div>
         );
       }
 
       return (
-        <div className="rounded-2xl border border-dashed border-border/60 bg-card/60 p-6 text-center text-sm text-muted-foreground">
-          No assets match “{searchQuery}”.
+        <div className={`flex items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 ${contentMinHeight}`}>
+          <p className="text-sm text-slate-500">No assets match "{searchQuery}"</p>
         </div>
       );
     }
 
     return (
-      <div className="flex gap-3 overflow-x-auto py-4 px-1">
+      <div className={`flex items-center gap-2.5 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent ${contentMinHeight}`}>
         {filteredAssets.map((asset) => (
           <AssetCard
             key={asset.id}
@@ -109,35 +113,33 @@ export function AssetPickerRow({
   return (
     <section
       className={cn(
-        'rounded-3xl border border-border/60 bg-card/80 px-4 py-5',
+        'rounded-2xl border border-slate-200 bg-white p-5',
         className
       )}
     >
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="flex-1 min-w-[200px]">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Reusable assets
-          </p>
-          <p className="text-sm text-muted-foreground">
-            Click an asset to add it to your prompt.
-          </p>
+      <div className="mb-4 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <h3 className="text-sm font-medium text-slate-900">Assets</h3>
+          {rankedAssets.length > 0 && (
+            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
+              {rankedAssets.length}
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-2">
-          <div className="relative w-48">
-            <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               type="search"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder={
-                rankedAssets.length ? 'Search assets…' : 'Loading assets…'
-              }
-              className="h-9 w-full rounded-full border border-border/60 bg-transparent pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-border focus:outline-none focus:ring-0"
+              placeholder={rankedAssets.length ? 'Search...' : 'Loading...'}
+              className="h-8 w-40 rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-300 focus:bg-white focus:outline-none"
             />
           </div>
           <Link
             href="/assets"
-            className="text-xs font-semibold text-sky-600 hover:text-sky-500"
+            className="text-xs font-medium text-slate-500 transition hover:text-slate-900"
           >
             Manage
           </Link>
@@ -147,4 +149,3 @@ export function AssetPickerRow({
     </section>
   );
 }
-

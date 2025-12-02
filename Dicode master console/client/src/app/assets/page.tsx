@@ -3,9 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import MainLayout from '@/components/Layout/MainLayout';
-import CollapsibleHero from '@/components/Layout/CollapsibleHero';
 import { Asset, AssetPromptMetadata, AssetType } from '@/lib/types';
-import { getAssetsByUser, createAsset, updateAsset, deleteAsset } from '@/lib/firestore';
+import { getAssetsByUser, createAsset, updateAsset, deleteAsset, logActivity } from '@/lib/firestore';
 import {
   Search,
   Plus,
@@ -18,16 +17,28 @@ import {
   SunMedium,
   Camera,
   LayoutGrid,
-  Rows,
+  List,
+  User,
+  MapPin,
+  Lightbulb,
+  Video,
 } from 'lucide-react';
 
-// Helper functions at module level
 const getTypeColor = (type: AssetType) => {
   switch (type) {
-    case 'character': return 'bg-purple-100 text-purple-700 border-purple-200';
-    case 'environment': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-    case 'lighting': return 'bg-amber-100 text-amber-700 border-amber-200';
-    case 'camera': return 'bg-sky-100 text-sky-700 border-sky-200';
+    case 'character': return 'bg-purple-100 text-purple-700';
+    case 'environment': return 'bg-emerald-100 text-emerald-700';
+    case 'lighting': return 'bg-amber-100 text-amber-700';
+    case 'camera': return 'bg-sky-100 text-sky-700';
+  }
+};
+
+const getTypeIcon = (type: AssetType) => {
+  switch (type) {
+    case 'character': return User;
+    case 'environment': return MapPin;
+    case 'lighting': return Lightbulb;
+    case 'camera': return Video;
   }
 };
 
@@ -36,7 +47,7 @@ const getTypeLabel = (type: AssetType) => {
     case 'character': return 'Character';
     case 'environment': return 'Environment';
     case 'lighting': return 'Lighting';
-    case 'camera': return 'Camera Angle';
+    case 'camera': return 'Camera';
   }
 };
 
@@ -73,10 +84,25 @@ export default function AssetsPage() {
 
   const handleDelete = async (assetId: string) => {
     if (!confirm('Are you sure you want to delete this asset?')) return;
+    if (!user) return;
+
+    const assetToDelete = assets.find(a => a.id === assetId);
 
     try {
       await deleteAsset(assetId);
       setAssets(assets.filter(a => a.id !== assetId));
+
+      if (assetToDelete) {
+        await logActivity({
+          action: 'asset_deleted',
+          userId: user.uid,
+          userEmail: user.email || '',
+          userName: user.displayName || undefined,
+          resourceId: assetId,
+          resourceName: assetToDelete.name,
+          resourceType: 'asset',
+        });
+      }
     } catch (error) {
       console.error('Error deleting asset:', error);
       alert('Failed to delete asset');
@@ -91,264 +117,280 @@ export default function AssetsPage() {
   });
 
   const assetsByType = {
-    character: filteredAssets.filter(a => a.type === 'character'),
-    environment: filteredAssets.filter(a => a.type === 'environment'),
-    lighting: filteredAssets.filter(a => a.type === 'lighting'),
-    camera: filteredAssets.filter(a => a.type === 'camera'),
+    character: assets.filter(a => a.type === 'character'),
+    environment: assets.filter(a => a.type === 'environment'),
+    lighting: assets.filter(a => a.type === 'lighting'),
+    camera: assets.filter(a => a.type === 'camera'),
   };
-
-  interface StatCardProps {
-    value: number;
-    label: string;
-    sublabel: string;
-  }
-
-  function StatCard({ value, label, sublabel }: StatCardProps) {
-    return (
-      <div className="rounded-2xl border border-white/70 bg-white/90 p-4 text-center shadow-sm">
-        <p className="text-3xl font-semibold text-slate-900">{value}</p>
-        <p className="mt-2 text-[0.65rem] uppercase tracking-[0.25em] text-slate-400 leading-tight break-words whitespace-normal">
-          {label}
-        </p>
-        <p className="mt-1 text-xs text-slate-500 break-words whitespace-normal">{sublabel}</p>
-      </div>
-    );
-  }
 
   return (
     <MainLayout>
-      <div className="space-y-8 text-slate-900">
-        <CollapsibleHero>
-          <section className="rounded-[32px] border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-8 shadow-xl shadow-slate-100">
-            <div className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
-              <div className="space-y-4">
-                <p className="text-xs uppercase tracking-[0.4em] text-slate-400">Asset store</p>
-                <h1 className="text-3xl font-semibold leading-tight text-slate-900 sm:text-4xl">
-                  Keep your characters, lighting, and camera setups synced across campaigns.
-                </h1>
-                <p className="text-slate-600 max-w-2xl">
-                  Curate the prompts and visual ingredients that make your DiCode programs feel on brand. The refreshed
-                  asset hub mirrors the new video and campaigns design for a seamless workflow.
-                </p>
+      <div className="max-w-6xl mx-auto space-y-6">
+        {/* Page Header */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold text-slate-900">Prompt Assets</h1>
+            <p className="text-sm text-slate-500 mt-1">
+              Reusable characters, environments, and camera setups
+            </p>
+          </div>
                 <button
                   onClick={() => setShowCreateModal(true)}
-                  className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_15px_45px_rgba(15,23,42,0.25)] transition hover:brightness-110"
+            className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
                 >
-                  <Sparkles className="h-4 w-4" />
-                  Create new asset
+            <Plus className="h-4 w-4" />
+            New Asset
                 </button>
+        </div>
+
+        {/* Stats Cards */}
+        <div className="grid gap-4 sm:grid-cols-4">
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                <Palette className="h-5 w-5" />
               </div>
-              <div className="grid w-full max-w-xl gap-4 grid-cols-2 sm:grid-cols-2">
-                <StatCard label="Total" sublabel="assets" value={assets.length} />
-                <StatCard label="Characters" sublabel="talent briefs" value={assetsByType.character.length} />
-                <StatCard label="Scenes" sublabel="environments" value={assetsByType.environment.length} />
-                <StatCard
-                  label="Lighting / Cam"
-                  sublabel="setups"
-                  value={assetsByType.lighting.length + assetsByType.camera.length}
-                />
+              <div>
+                <p className="text-2xl font-semibold text-slate-900">{assets.length}</p>
+                <p className="text-xs text-slate-500">Total Assets</p>
               </div>
             </div>
-          </section>
-        </CollapsibleHero>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-100 text-purple-600">
+                <User className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-2xl font-semibold text-slate-900">{assetsByType.character.length}</p>
+                <p className="text-xs text-slate-500">Characters</p>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
+                <MapPin className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-2xl font-semibold text-slate-900">{assetsByType.environment.length}</p>
+                <p className="text-xs text-slate-500">Environments</p>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100 text-amber-600">
+                <Lightbulb className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="text-2xl font-semibold text-slate-900">{assetsByType.lighting.length + assetsByType.camera.length}</p>
+                <p className="text-xs text-slate-500">Lighting & Camera</p>
+              </div>
+            </div>
+          </div>
+        </div>
 
-        <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex-1 min-w-[240px]">
-              <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-slate-50 px-5 py-3">
-                <Search className="h-4 w-4 text-slate-400" />
+        {/* Filters & Search */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center rounded-lg border border-slate-200 bg-white p-1">
+              {(['all', 'character', 'environment', 'lighting', 'camera'] as const).map((filter) => (
+                <button
+                  key={filter}
+                  onClick={() => setSelectedType(filter)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                    selectedType === filter
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {filter.charAt(0).toUpperCase() + filter.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search assets by name or description…"
-                  className="flex-1 border-none bg-transparent text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none"
+                placeholder="Search assets..."
+                className="h-9 w-64 rounded-lg border border-slate-200 bg-white pl-9 pr-4 text-sm text-slate-700 placeholder:text-slate-400 transition focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-100"
                 />
-              </div>
             </div>
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
-            >
-              <Plus className="h-4 w-4" />
-              Add asset
-            </button>
 
-            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-1 py-1">
+            <div className="flex items-center rounded-lg border border-slate-200 bg-white p-1">
               <button
                 onClick={() => setViewMode('grid')}
-                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition ${viewMode === 'grid' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                className={`flex h-7 w-7 items-center justify-center rounded-md transition ${
+                  viewMode === 'grid'
+                    ? 'bg-slate-100 text-slate-900'
+                    : 'text-slate-400 hover:text-slate-600'
                   }`}
+                title="Grid view"
               >
                 <LayoutGrid className="h-4 w-4" />
-                Grid
               </button>
               <button
                 onClick={() => setViewMode('list')}
-                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition ${viewMode === 'list' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                className={`flex h-7 w-7 items-center justify-center rounded-md transition ${
+                  viewMode === 'list'
+                    ? 'bg-slate-100 text-slate-900'
+                    : 'text-slate-400 hover:text-slate-600'
                   }`}
+                title="List view"
               >
-                <Rows className="h-4 w-4" />
-                List
+                <List className="h-4 w-4" />
               </button>
+            </div>
             </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap gap-2">
-            {([
-              { value: 'all', label: `All (${assets.length})` },
-              { value: 'character', label: `Characters (${assetsByType.character.length})` },
-              { value: 'environment', label: `Environments (${assetsByType.environment.length})` },
-              { value: 'lighting', label: `Lighting (${assetsByType.lighting.length})` },
-              { value: 'camera', label: `Camera (${assetsByType.camera.length})` },
-            ] as const).map((filter) => (
-              <button
-                key={filter.value}
-                onClick={() => setSelectedType(filter.value)}
-                className={`rounded-full px-4 py-2 text-sm font-medium transition ${selectedType === filter.value
-                    ? 'bg-slate-900 text-white shadow-[0_10px_30px_rgba(15,23,42,0.25)]'
-                    : 'border border-slate-200 text-slate-600 hover:border-slate-300 hover:text-slate-800'
-                  }`}
-              >
-                {filter.label}
-              </button>
-            ))}
+        {/* Content */}
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20">
+            <div className="h-8 w-8 rounded-full border-2 border-slate-200 border-t-slate-900 animate-spin" />
+            <p className="mt-4 text-sm text-slate-500">Loading assets...</p>
           </div>
-        </section>
-
-        <section className="space-y-6">
-          {loading ? (
-            <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 rounded-[32px] border border-slate-200 bg-white">
-              <div className="h-10 w-10 rounded-full border-2 border-slate-200 border-t-slate-900 animate-spin" />
-              <p className="text-sm text-slate-500">Loading your asset kits…</p>
+        ) : filteredAssets.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white py-20 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-slate-100 text-slate-400 mb-4">
+              <Palette className="h-7 w-7" />
             </div>
-          ) : filteredAssets.length === 0 ? (
-            <div className="flex min-h-[40vh] flex-col items-center justify-center rounded-[32px] border border-dashed border-slate-200 bg-white text-center p-12">
-              <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
-                <Palette className="h-8 w-8" />
-              </div>
-              <h3 className="text-xl font-semibold text-slate-800 mb-2">
-                {assets.length === 0 ? 'No assets yet' : 'No matches for your filters'}
+            <h3 className="text-lg font-semibold text-slate-900">
+              {assets.length === 0 ? 'No assets yet' : 'No matching assets'}
               </h3>
-              <p className="text-slate-500 max-w-md">
+            <p className="mt-1 text-sm text-slate-500 max-w-sm">
                 {assets.length === 0
-                  ? 'Create reusable characters, lighting setups, and camera moves to keep campaigns consistent.'
-                  : 'Try adjusting your search terms or switching categories.'}
+                ? 'Create reusable characters, lighting setups, and camera moves.'
+                : 'Try adjusting your search or filters.'}
               </p>
+            {assets.length === 0 && user && (
               <button
                 onClick={() => setShowCreateModal(true)}
-                className="mt-6 inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_15px_45px_rgba(15,23,42,0.25)] transition hover:brightness-110"
+                className="mt-6 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
               >
-                <Sparkles className="h-4 w-4" />
-                Create asset
+                <Plus className="h-4 w-4" />
+                Create Asset
               </button>
+            )}
             </div>
           ) : viewMode === 'grid' ? (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {filteredAssets.map((asset) => (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredAssets.map((asset) => {
+              const TypeIcon = getTypeIcon(asset.type);
+              return (
                 <div
                   key={asset.id}
-                  className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg"
+                  className="group rounded-xl border border-slate-200 bg-white p-5 transition hover:border-slate-300 hover:shadow-md"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <span className={`inline-flex items-center justify-center rounded-full border px-3 py-1 text-xs font-semibold ${getTypeColor(asset.type)}`}>
-                        {asset.type === 'character' && <Sparkles className="h-3.5 w-3.5" />}
-                        {asset.type === 'environment' && <Trees className="h-3.5 w-3.5" />}
-                        {asset.type === 'lighting' && <SunMedium className="h-3.5 w-3.5" />}
-                        {asset.type === 'camera' && <Camera className="h-3.5 w-3.5" />}
+                  <div className="flex items-start justify-between mb-3">
+                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${getTypeColor(asset.type)}`}>
+                      <TypeIcon className="h-3 w-3" />
+                      {getTypeLabel(asset.type)}
                       </span>
-                      <h3 className="mt-3 text-lg font-semibold text-slate-900 line-clamp-1">{asset.name}</h3>
-                      {asset.metadata.usageCount ? (
-                        <p className="text-xs text-slate-400">{asset.metadata.usageCount} uses</p>
-                      ) : null}
-                    </div>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
                       <button
                         onClick={() => setEditingAsset(asset)}
-                        className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
                         title="Edit"
                       >
                         <Pencil className="h-4 w-4" />
                       </button>
                       <button
                         onClick={() => handleDelete(asset.id)}
-                        className="rounded-full border border-red-100 p-2 text-red-500 transition hover:border-red-200 hover:bg-red-50"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-500"
                         title="Delete"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
                   </div>
-                  <p className="mt-3 text-sm text-slate-500 line-clamp-4">{asset.description}</p>
-                  <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-400">
+
+                  <h3 className="text-base font-semibold text-slate-900 line-clamp-1 mb-1">
+                    {asset.name}
+                  </h3>
+                  <p className="text-sm text-slate-500 line-clamp-3 mb-4">
+                    {asset.description}
+                  </p>
+
+                  <div className="flex items-center justify-between text-xs text-slate-400 pt-3 border-t border-slate-100">
                     <span>
-                      Created {asset.metadata.createdAt instanceof Date
+                      {asset.metadata.createdAt instanceof Date
                         ? asset.metadata.createdAt.toLocaleDateString()
                         : asset.metadata.createdAt && typeof (asset.metadata.createdAt as any).toDate === 'function'
                           ? (asset.metadata.createdAt as any).toDate().toLocaleDateString()
                           : ''}
                     </span>
-                    <span className="inline-flex items-center gap-1 text-slate-500">
-                      {asset.type === 'character' && <Sparkles className="h-3.5 w-3.5" />}
-                      {asset.type === 'environment' && <Trees className="h-3.5 w-3.5" />}
-                      {asset.type === 'lighting' && <SunMedium className="h-3.5 w-3.5" />}
-                      {asset.type === 'camera' && <Camera className="h-3.5 w-3.5" />}
-                      {getTypeLabel(asset.type)}
-                    </span>
+                    {asset.metadata.usageCount ? (
+                      <span>{asset.metadata.usageCount} uses</span>
+                    ) : null}
                   </div>
                 </div>
-              ))}
+              );
+            })}
             </div>
           ) : (
-            <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-slate-50 text-xs font-semibold uppercase text-slate-500">
-                  <tr>
-                    <th className="px-6 py-4">Asset</th>
-                    <th className="px-6 py-4">Type</th>
-                    <th className="px-6 py-4 text-center">Usage</th>
-                    <th className="px-6 py-4 text-right">Created</th>
-                    <th className="px-6 py-4 text-right">Actions</th>
+          <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50">
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Asset
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Type
+                  </th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Usage
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Created
+                  </th>
+                  <th className="px-4 py-3 w-20"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredAssets.map((asset) => (
+                {filteredAssets.map((asset) => {
+                  const TypeIcon = getTypeIcon(asset.type);
+                  return (
                     <tr key={asset.id} className="transition hover:bg-slate-50">
-                      <td className="px-6 py-4">
-                        <div className="font-semibold text-slate-900">{asset.name}</div>
-                        <p className="text-xs text-slate-500 line-clamp-1 mt-0.5">{asset.description}</p>
+                      <td className="px-4 py-3">
+                        <p className="text-sm font-medium text-slate-900">{asset.name}</p>
+                        <p className="text-xs text-slate-500 line-clamp-1">{asset.description}</p>
                       </td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex items-center justify-center rounded-full border px-3 py-1 text-xs font-semibold ${getTypeColor(asset.type)}`}>
-                          {asset.type === 'character' && <Sparkles className="h-3.5 w-3.5" />}
-                          {asset.type === 'environment' && <Trees className="h-3.5 w-3.5" />}
-                          {asset.type === 'lighting' && <SunMedium className="h-3.5 w-3.5" />}
-                          {asset.type === 'camera' && <Camera className="h-3.5 w-3.5" />}
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${getTypeColor(asset.type)}`}>
+                          <TypeIcon className="h-3 w-3" />
+                          {getTypeLabel(asset.type)}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-center text-slate-600 tabular-nums">
+                      <td className="px-4 py-3 text-center text-sm text-slate-600">
                         {asset.metadata.usageCount ?? 0}
                       </td>
-                      <td className="px-6 py-4 text-right text-slate-500 tabular-nums">
+                      <td className="px-4 py-3 text-right text-sm text-slate-500">
                         {asset.metadata.createdAt instanceof Date
                           ? asset.metadata.createdAt.toLocaleDateString()
                           : asset.metadata.createdAt && typeof (asset.metadata.createdAt as any).toDate === 'function'
                             ? (asset.metadata.createdAt as any).toDate().toLocaleDateString()
                             : ''}
                       </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="inline-flex items-center gap-2">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-1">
                           <button
                             onClick={() => setEditingAsset(asset)}
-                            className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+                            className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
                             title="Edit"
                           >
                             <Pencil className="h-4 w-4" />
                           </button>
                           <button
                             onClick={() => handleDelete(asset.id)}
-                            className="rounded-full border border-red-100 p-2 text-red-500 transition hover:border-red-200 hover:bg-red-50"
+                            className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-500"
                             title="Delete"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -356,12 +398,13 @@ export default function AssetsPage() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  );
+                })}
                 </tbody>
               </table>
             </div>
           )}
-        </section>
+      </div>
 
         {/* Create/Edit Modal */}
         {(showCreateModal || editingAsset) && (
@@ -377,8 +420,26 @@ export default function AssetsPage() {
               try {
                 if (editingAsset) {
                   await updateAsset(editingAsset.id, data);
+                await logActivity({
+                  action: 'asset_updated',
+                  userId: user.uid,
+                  userEmail: user.email || '',
+                  userName: user.displayName || undefined,
+                  resourceId: editingAsset.id,
+                  resourceName: data.name,
+                  resourceType: 'asset',
+                });
                 } else {
-                  await createAsset(user.uid, data);
+                const newAssetId = await createAsset(user.uid, data);
+                await logActivity({
+                  action: 'asset_created',
+                  userId: user.uid,
+                  userEmail: user.email || '',
+                  userName: user.displayName || undefined,
+                  resourceId: newAssetId,
+                  resourceName: data.name,
+                  resourceType: 'asset',
+                });
                 }
                 await loadAssets();
                 setShowCreateModal(false);
@@ -390,7 +451,6 @@ export default function AssetsPage() {
             }}
           />
         )}
-      </div>
     </MainLayout>
   );
 }
@@ -425,63 +485,65 @@ function AssetModal({ asset, onClose, onSave }: AssetModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-2xl overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-2xl">
+      <div className="w-full max-w-lg overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
         <form onSubmit={handleSubmit}>
           <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-            <div>
-              <p className="text-xs uppercase tracking-[0.4em] text-slate-400">
-                {asset ? 'Edit asset' : 'New asset'}
-              </p>
-              <h2 className="text-xl font-semibold text-slate-900">
-                {asset ? 'Update existing asset' : 'Create reusable component'}
+            <h2 className="text-lg font-semibold text-slate-900">
+              {asset ? 'Edit Asset' : 'New Asset'}
               </h2>
-            </div>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
 
-          <div className="space-y-5 px-6 py-6">
+          <div className="space-y-4 p-6">
             <div>
-              <label className="text-sm font-medium text-slate-700">Asset type</label>
-              <div className="mt-3 grid grid-cols-2 gap-3">
-                {(['character', 'environment', 'lighting', 'camera'] as AssetType[]).map((t) => (
+              <label className="text-sm font-medium text-slate-700 mb-2 block">Type</label>
+              <div className="grid grid-cols-4 gap-2">
+                {(['character', 'environment', 'lighting', 'camera'] as AssetType[]).map((t) => {
+                  const TypeIcon = getTypeIcon(t);
+                  return (
                   <button
                     key={t}
                     type="button"
                     onClick={() => setType(t)}
-                    className={`rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition ${type === t ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 text-slate-600'
+                      className={`flex flex-col items-center gap-1 rounded-lg border p-3 text-center transition ${
+                        type === t
+                          ? 'border-slate-900 bg-slate-900 text-white'
+                          : 'border-slate-200 text-slate-600 hover:border-slate-300'
                       }`}
                   >
-                    {getTypeLabel(t)}
+                      <TypeIcon className="h-5 w-5" />
+                      <span className="text-xs font-medium">{getTypeLabel(t)}</span>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
             <div>
-              <label className="text-sm font-medium text-slate-700">Asset name</label>
+              <label className="text-sm font-medium text-slate-700 mb-1.5 block">Name</label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Hero protagonist, Neon office, Soft key light…"
-                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm focus:border-slate-900 focus:ring-2 focus:ring-slate-100"
+                placeholder="e.g., Hero protagonist, Neon office..."
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-100"
                 required
               />
             </div>
 
             <div>
-              <label className="text-sm font-medium text-slate-700">Description / prompt</label>
+              <label className="text-sm font-medium text-slate-700 mb-1.5 block">Description / Prompt</label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Detailed prompt that will inform Sora about this asset."
-                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm focus:border-slate-900 focus:ring-2 focus:ring-slate-100"
+                placeholder="Detailed prompt that will inform Sora about this asset..."
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-100"
                 rows={4}
                 required
               />
@@ -495,16 +557,16 @@ function AssetModal({ asset, onClose, onSave }: AssetModalProps) {
             <button
               type="button"
               onClick={onClose}
-              className="rounded-full border border-slate-200 px-5 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+              className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving || !name || !description}
-              className="rounded-full bg-slate-900 px-5 py-2 text-sm font-semibold text-white shadow-[0_10px_30px_rgba(15,23,42,0.25)] transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
             >
-              {saving ? 'Saving…' : asset ? 'Update asset' : 'Create asset'}
+              {saving ? 'Saving...' : asset ? 'Update' : 'Create'}
             </button>
           </div>
         </form>

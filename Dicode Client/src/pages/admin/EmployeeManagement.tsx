@@ -1,12 +1,31 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { UserPlus, FolderPlus, Search, Edit2, Trash2, X, Check, Copy, RefreshCw, Upload } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import {
+  UserPlus,
+  FolderPlus,
+  Search,
+  Edit2,
+  Trash2,
+  X,
+  Check,
+  Copy,
+  RefreshCw,
+  Upload,
+  Users,
+  Clock,
+  Building2,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
+  Mail,
+  ChevronRight,
+} from 'lucide-react';
 import { Employee, Cohort, Invitation } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   getUsersByOrganization,
   getCohortsByOrganization,
   createCohort,
-  // deleteCohort, // TODO: Uncomment when delete cohort UI is implemented
   addEmployeeToCohort,
   removeEmployeeFromCohort,
   updateUserCohorts,
@@ -18,6 +37,7 @@ import {
 } from '@/lib/firestore';
 import InviteModal from '@/components/InviteModal';
 import BulkImportModal from '@/components/BulkImportModal';
+import CohortPanel from '@/components/CohortPanel';
 
 type PeopleRow = {
   kind: 'employee' | 'invite';
@@ -30,10 +50,15 @@ type PeopleRow = {
   status: 'active' | 'inactive' | 'invited' | 'expired';
   employee?: Employee;
   invitation?: Invitation;
+  createdAt?: Date;
 };
+
+type SortField = 'name' | 'email' | 'department' | 'cohort' | 'status';
+type SortDirection = 'asc' | 'desc';
 
 const EmployeeManagement: React.FC = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [cohorts, setCohorts] = useState<Cohort[]>([]);
@@ -49,13 +74,14 @@ const EmployeeManagement: React.FC = () => {
   const [showBatchAssignCohort, setShowBatchAssignCohort] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCohortFilter, setSelectedCohortFilter] = useState<string>('all');
-  const [groupBy, setGroupBy] = useState<'none' | 'department' | 'cohort' | 'status'>('none');
+  const [selectedDepartmentFilter, setSelectedDepartmentFilter] = useState<string>('all');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('all');
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<Set<string>>(new Set());
 
-  const [newCohort, setNewCohort] = useState({
-    name: '',
-    description: '',
-  });
+  // Sorting state
+  const [sortField, setSortField] = useState<SortField>('name');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+
 
   // Load data function
   const loadData = async () => {
@@ -68,13 +94,11 @@ const EmployeeManagement: React.FC = () => {
     try {
       setIsLoading(true);
 
-      // Load organization to get departments
       const org = await getOrganization(user.organization);
       if (org) {
         setDepartments(org.departments);
       }
 
-      // Load employees, cohorts, and invitations in parallel
       const [loadedEmployees, loadedCohorts, loadedInvitations] = await Promise.all([
         getUsersByOrganization(user.organization),
         getCohortsByOrganization(user.organization),
@@ -82,7 +106,6 @@ const EmployeeManagement: React.FC = () => {
       ]);
 
       setEmployees(loadedEmployees);
-      // Map cohorts to convert null to undefined for type compatibility
       setCohorts(loadedCohorts.map(c => ({
         ...c,
         description: c.description || undefined,
@@ -96,14 +119,12 @@ const EmployeeManagement: React.FC = () => {
     }
   };
 
-  // Load data on mount
   useEffect(() => {
     loadData();
   }, [user?.organization]);
 
   const searchValue = searchTerm.toLowerCase();
 
-  // Helper function to get cohort names
   const getCohortNames = (cohortIds?: string[]) => {
     if (!cohortIds || cohortIds.length === 0) return 'Unassigned';
     const names = cohortIds
@@ -112,7 +133,6 @@ const EmployeeManagement: React.FC = () => {
     return names.length > 0 ? names.join(', ') : 'Unknown';
   };
 
-  // Filter employees
   const filteredEmployees = employees.filter((employee) => {
     const matchesSearch =
       employee.name.toLowerCase().includes(searchValue) ||
@@ -125,7 +145,15 @@ const EmployeeManagement: React.FC = () => {
         ? !employee.cohortIds || employee.cohortIds.length === 0
         : employee.cohortIds?.includes(selectedCohortFilter);
 
-    return matchesSearch && matchesCohort;
+    const matchesDepartment = selectedDepartmentFilter === 'all'
+      ? true
+      : employee.department === selectedDepartmentFilter;
+
+    const matchesStatus = selectedStatusFilter === 'all'
+      ? true
+      : employee.status === selectedStatusFilter;
+
+    return matchesSearch && matchesCohort && matchesDepartment && matchesStatus;
   });
 
   const peopleRows = useMemo<PeopleRow[]>(() => {
@@ -144,10 +172,16 @@ const EmployeeManagement: React.FC = () => {
           ? !invitation.cohortIds || invitation.cohortIds.length === 0
           : invitation.cohortIds?.includes(selectedCohortFilter);
 
-      return matchesSearch && matchesCohort;
+      const matchesDepartment = selectedDepartmentFilter === 'all'
+        ? true
+        : invitation.department === selectedDepartmentFilter;
+
+      const matchesStatus = selectedStatusFilter === 'all' || selectedStatusFilter === 'invited';
+
+      return matchesSearch && matchesCohort && matchesDepartment && matchesStatus;
     });
 
-    return [
+    const rows: PeopleRow[] = [
       ...filteredEmployees.map((employee) => ({
         kind: 'employee' as const,
         id: employee.id,
@@ -158,6 +192,7 @@ const EmployeeManagement: React.FC = () => {
         cohortLabel: getCohortNames(employee.cohortIds),
         status: employee.status,
         employee,
+        createdAt: employee.createdAt,
       })),
       ...filteredInvitations.map((invitation) => {
         const inviteStatus: PeopleRow['status'] = invitation.status === 'expired' ? 'expired' : 'invited';
@@ -171,21 +206,90 @@ const EmployeeManagement: React.FC = () => {
           cohortLabel: getCohortNames(invitation.cohortIds),
           status: inviteStatus,
           invitation,
+          createdAt: invitation.createdAt,
         };
       }),
     ];
-  }, [filteredEmployees, invitations, searchValue, selectedCohortFilter, cohorts]);
 
-  const statusTokens: Record<PeopleRow['status'], { label: string; className: string }> = {
-    active: { label: 'Active', className: 'border-dark-border/70 bg-dark-bg/60 text-dark-text' },
-    inactive: { label: 'Inactive', className: 'border-dark-border/70 bg-dark-bg/60 text-dark-text' },
-    invited: { label: 'Invited', className: 'border-dark-border/70 bg-dark-bg/60 text-dark-text' },
-    expired: { label: 'Expired', className: 'border-dark-border/70 bg-dark-bg/60 text-dark-text' },
+    // Sort rows
+    return rows.sort((a, b) => {
+      let aVal: string = '';
+      let bVal: string = '';
+
+      switch (sortField) {
+        case 'name':
+          aVal = a.name.toLowerCase();
+          bVal = b.name.toLowerCase();
+          break;
+        case 'email':
+          aVal = a.email.toLowerCase();
+          bVal = b.email.toLowerCase();
+          break;
+        case 'department':
+          aVal = a.department.toLowerCase();
+          bVal = b.department.toLowerCase();
+          break;
+        case 'cohort':
+          aVal = a.cohortLabel.toLowerCase();
+          bVal = b.cohortLabel.toLowerCase();
+          break;
+        case 'status':
+          const statusOrder = { active: 4, invited: 3, inactive: 2, expired: 1 };
+          return sortDirection === 'asc'
+            ? statusOrder[a.status] - statusOrder[b.status]
+            : statusOrder[b.status] - statusOrder[a.status];
+      }
+
+      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [filteredEmployees, invitations, searchValue, selectedCohortFilter, selectedDepartmentFilter, selectedStatusFilter, cohorts, sortField, sortDirection]);
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
   };
+
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (sortField !== field) {
+      return <ChevronsUpDown className="h-3.5 w-3.5 text-dark-text-muted/50" />;
+    }
+    return sortDirection === 'asc'
+      ? <ChevronUp className="h-3.5 w-3.5 text-dark-text" />
+      : <ChevronDown className="h-3.5 w-3.5 text-dark-text" />;
+  };
+
+  const getStatusStyles = (status: PeopleRow['status']) => {
+    switch (status) {
+      case 'active':
+        return { bg: 'bg-emerald-500/10', text: 'text-emerald-400', label: 'Active' };
+      case 'invited':
+        return { bg: 'bg-amber-500/10', text: 'text-amber-400', label: 'Invited' };
+      case 'inactive':
+        return { bg: 'bg-slate-500/10', text: 'text-slate-400', label: 'Inactive' };
+      case 'expired':
+        return { bg: 'bg-red-500/10', text: 'text-red-400', label: 'Expired' };
+      default:
+        return { bg: 'bg-dark-bg', text: 'text-dark-text-muted', label: status };
+    }
+  };
+
+  // Stats
+  const stats = useMemo(() => {
+    const total = employees.length;
+    const active = employees.filter(e => e.status === 'active').length;
+    const pending = invitations.filter(inv => inv.status === 'pending').length;
+    const cohortCount = cohorts.length;
+    return { total, active, pending, cohortCount };
+  }, [employees, invitations, cohorts]);
 
   const handleInviteModalClose = async () => {
     setShowInviteModal(false);
-    // Reload invitations to show the newly created one
     if (user?.organization) {
       const loadedInvitations = await getOrganizationInvitations(user.organization);
       setInvitations(loadedInvitations);
@@ -211,7 +315,6 @@ const EmployeeManagement: React.FC = () => {
 
     try {
       await resendInvitation(invitationId);
-      // Reload invitations
       if (user?.organization) {
         const loadedInvitations = await getOrganizationInvitations(user.organization);
         setInvitations(loadedInvitations);
@@ -230,7 +333,6 @@ const EmployeeManagement: React.FC = () => {
 
     try {
       await revokeInvitation(invitationId);
-      // Remove from local state
       setInvitations(invitations.filter(inv => inv.id !== invitationId));
       alert('Invitation revoked successfully!');
     } catch (error) {
@@ -239,39 +341,28 @@ const EmployeeManagement: React.FC = () => {
     }
   };
 
-  const handleCreateCohort = async (e: React.FormEvent) => {
-    e.preventDefault();
-
+  const handleCreateCohort = async (data: { name: string; description: string }) => {
     if (!user?.organization) {
-      console.error('[EmployeeManagement] Cannot create cohort without organization');
-      return;
+      throw new Error('Cannot create cohort without organization');
     }
 
-    try {
-      const cohortId = await createCohort(
-        newCohort.name,
-        newCohort.description || undefined,
-        [],
-        user.organization
-      );
+    const cohortId = await createCohort(
+      data.name,
+      data.description || undefined,
+      [],
+      user.organization
+    );
 
-      // Add to local state
-      const newCohortData: Cohort = {
-        id: cohortId,
-        name: newCohort.name,
-        description: newCohort.description || undefined,
-        employeeIds: [],
-        organization: user.organization,
-        createdAt: new Date(),
-      };
+    const newCohortData: Cohort = {
+      id: cohortId,
+      name: data.name,
+      description: data.description || undefined,
+      employeeIds: [],
+      organization: user.organization,
+      createdAt: new Date(),
+    };
 
-      setCohorts([...cohorts, newCohortData]);
-      setNewCohort({ name: '', description: '' });
-      setShowCreateCohort(false);
-    } catch (error) {
-      console.error('[EmployeeManagement] Failed to create cohort:', error);
-      alert('Failed to create cohort. Please try again.');
-    }
+    setCohorts([...cohorts, newCohortData]);
   };
 
   const handleAssignToCohort = async (employeeId: string, cohortId: string | null) => {
@@ -282,12 +373,10 @@ const EmployeeManagement: React.FC = () => {
         return;
       }
 
-      // Get cohort name for confirmation message
       const cohortName = cohortId
         ? cohorts.find(c => c.id === cohortId)?.name || 'Unknown Cohort'
         : 'Unassigned';
 
-      // Confirmation dialog
       const confirmMessage = cohortId
         ? `Assign ${employee.name} to "${cohortName}"?`
         : `Remove ${employee.name} from all cohorts?`;
@@ -298,39 +387,32 @@ const EmployeeManagement: React.FC = () => {
 
       const oldCohortIds = employee.cohortIds || [];
 
-      // 1. Remove employee from all old cohorts
       await Promise.all(
         oldCohortIds.map(oldCohortId => removeEmployeeFromCohort(oldCohortId, employeeId))
       );
 
-      // 2. Add employee to new cohort (if not null)
       let newCohortIds: string[] = [];
       if (cohortId) {
         await addEmployeeToCohort(cohortId, employeeId);
         newCohortIds = [cohortId];
       }
 
-      // 3. Update user's cohortIds field
       await updateUserCohorts(employeeId, newCohortIds);
 
-      // 4. Update local state for immediate UI feedback
       setEmployees(
         employees.map((emp) =>
           emp.id === employeeId ? { ...emp, cohortIds: newCohortIds.length > 0 ? newCohortIds : undefined } : emp
         )
       );
 
-      // Update cohort employee lists in local state
       setCohorts(
         cohorts.map((cohort) => {
           if (cohortId && cohort.id === cohortId) {
-            // Add to new cohort
             return {
               ...cohort,
               employeeIds: [...cohort.employeeIds.filter(id => id !== employeeId), employeeId],
             };
           }
-          // Remove from all other cohorts
           return {
             ...cohort,
             employeeIds: cohort.employeeIds.filter((id) => id !== employeeId),
@@ -339,14 +421,12 @@ const EmployeeManagement: React.FC = () => {
       );
 
       setShowAssignCohort(null);
-      console.log('✅ Employee assigned to cohort:', { employeeId, cohortId });
     } catch (error) {
       console.error('❌ Failed to assign employee to cohort:', error);
       alert('Failed to assign employee to cohort. Please try again.');
     }
   };
 
-  // Batch assignment handler
   const handleBatchAssignToCohort = async (cohortId: string | null) => {
     const selectedEmployees = employees.filter(emp => selectedEmployeeIds.has(emp.id));
 
@@ -368,27 +448,22 @@ const EmployeeManagement: React.FC = () => {
     }
 
     try {
-      // Process each employee
       for (const employee of selectedEmployees) {
         const oldCohortIds = employee.cohortIds || [];
 
-        // Remove from old cohorts
         await Promise.all(
           oldCohortIds.map(oldCohortId => removeEmployeeFromCohort(oldCohortId, employee.id))
         );
 
-        // Add to new cohort (if not null)
         let newCohortIds: string[] = [];
         if (cohortId) {
           await addEmployeeToCohort(cohortId, employee.id);
           newCohortIds = [cohortId];
         }
 
-        // Update user's cohortIds field
         await updateUserCohorts(employee.id, newCohortIds);
       }
 
-      // Update local state
       const selectedIds = new Set(selectedEmployees.map(e => e.id));
       setEmployees(
         employees.map((emp) => {
@@ -399,11 +474,9 @@ const EmployeeManagement: React.FC = () => {
         })
       );
 
-      // Update cohort employee lists in local state
       setCohorts(
         cohorts.map((cohort) => {
           if (cohortId && cohort.id === cohortId) {
-            // Add all selected employees to new cohort
             const newEmployeeIds = [...cohort.employeeIds];
             selectedEmployees.forEach(emp => {
               if (!newEmployeeIds.includes(emp.id)) {
@@ -412,7 +485,6 @@ const EmployeeManagement: React.FC = () => {
             });
             return { ...cohort, employeeIds: newEmployeeIds };
           }
-          // Remove all selected employees from other cohorts
           return {
             ...cohort,
             employeeIds: cohort.employeeIds.filter((id) => !selectedIds.has(id)),
@@ -422,14 +494,12 @@ const EmployeeManagement: React.FC = () => {
 
       setShowBatchAssignCohort(false);
       setSelectedEmployeeIds(new Set());
-      console.log(`✅ Batch assigned ${selectedEmployees.length} employees to cohort:`, cohortId);
     } catch (error) {
       console.error('❌ Failed to batch assign employees to cohort:', error);
       alert('Failed to batch assign employees. Please try again.');
     }
   };
 
-  // Selection helpers
   const toggleEmployeeSelection = (employeeId: string) => {
     const newSelection = new Set(selectedEmployeeIds);
     if (newSelection.has(employeeId)) {
@@ -449,23 +519,19 @@ const EmployeeManagement: React.FC = () => {
     setSelectedEmployeeIds(new Set());
   };
 
-
   const handleDeleteEmployee = async (employeeId: string) => {
     if (!window.confirm('Are you sure you want to delete this employee? This will remove their profile but not their Firebase Auth account.')) {
       return;
     }
 
     try {
-      // Remove employee from all cohorts first
       const employeeCohorts = cohorts.filter(c => c.employeeIds.includes(employeeId));
       await Promise.all(
         employeeCohorts.map(cohort => removeEmployeeFromCohort(cohort.id, employeeId))
       );
 
-      // Delete user profile
       await deleteUserProfile(employeeId);
 
-      // Update local state
       setEmployees(employees.filter((emp) => emp.id !== employeeId));
       setCohorts(
         cohorts.map((cohort) => ({
@@ -473,397 +539,371 @@ const EmployeeManagement: React.FC = () => {
           employeeIds: cohort.employeeIds.filter((id) => id !== employeeId),
         }))
       );
-
-      console.log('[EmployeeManagement] Employee deleted:', employeeId);
     } catch (error) {
       console.error('[EmployeeManagement] Failed to delete employee:', error);
       alert('Failed to delete employee. Please try again.');
     }
   };
 
-  // TODO: Implement delete cohort UI before enabling this function
-  // const handleDeleteCohort = async (cohortId: string) => {
-  //   if (!window.confirm('Are you sure you want to delete this cohort? Employees will be unassigned.')) {
-  //     return;
-  //   }
-
-  //   try {
-  //     await deleteCohort(cohortId);
-
-  //     // Update local state
-  //     setCohorts(cohorts.filter((cohort) => cohort.id !== cohortId));
-  //     setEmployees(
-  //       employees.map((emp) =>
-  //         emp.cohortIds?.includes(cohortId)
-  //           ? { ...emp, cohortIds: emp.cohortIds.filter((id) => id !== cohortId) }
-  //           : emp
-  //       )
-  //     );
-
-  //     console.log('[EmployeeManagement] Cohort deleted:', cohortId);
-  //   } catch (error) {
-  //     console.error('[EmployeeManagement] Failed to delete cohort:', error);
-  //     alert('Failed to delete cohort. Please try again.');
-  //   }
-  // };
-
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-dark-text-muted">Loading employee data...</div>
+      <div className="max-w-6xl mx-auto space-y-6">
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="h-8 w-8 rounded-full border-2 border-dark-border border-t-primary animate-spin" />
+          <p className="mt-4 text-sm text-dark-text-muted">Loading employee data...</p>
+        </div>
       </div>
     );
   }
 
   if (!user?.organization) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-dark-text-muted">No organization found. Please complete onboarding first.</div>
+      <div className="max-w-6xl mx-auto space-y-6">
+        <div className="flex flex-col items-center justify-center py-20">
+          <p className="text-dark-text-muted">No organization found. Please complete onboarding first.</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="border-b border-dark-border/70 pb-8">
-        <div className="flex flex-wrap items-start justify-between gap-8">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.4em] text-dark-text-muted">People Operations</p>
-            <h1 className="mt-3 text-4xl font-semibold">Employee Management</h1>
-            <p className="mt-2 max-w-2xl text-sm text-dark-text-muted">
-              Create and manage employee accounts, cohorts, and invitations in a single workspace.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-6 text-base text-dark-text-muted">
-              <div>
-                <span className="text-dark-text font-semibold text-xl">{employees.length}</span> employees
-              </div>
-              <div>
-                <span className="text-dark-text font-semibold text-xl">{cohorts.length}</span> cohorts
-              </div>
-              <div>
-                <span className="text-dark-text font-semibold text-xl">
-                  {invitations.filter((inv) => inv.status === 'pending').length}
-                </span>{' '}
-                pending invites
-              </div>
+    <div className="max-w-6xl mx-auto space-y-6">
+      {/* Page Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-dark-text">Employees</h1>
+          <p className="text-sm text-dark-text-muted mt-1">
+            Manage your team members and pending invitations
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowBulkImportModal(true)}
+            className="inline-flex items-center gap-2 rounded-lg border border-dark-border bg-dark-card px-4 py-2.5 text-sm font-medium text-dark-text transition hover:bg-dark-bg"
+          >
+            <Upload size={16} />
+            Import
+          </button>
+          <button
+            onClick={() => setShowCreateCohort(true)}
+            className="inline-flex items-center gap-2 rounded-lg border border-dark-border bg-dark-card px-4 py-2.5 text-sm font-medium text-dark-text transition hover:bg-dark-bg"
+          >
+            <FolderPlus size={16} />
+            Cohort
+          </button>
+          <button
+            onClick={() => setShowInviteModal(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-primary/90"
+          >
+            <UserPlus size={16} />
+            Invite
+          </button>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-xl border border-dark-border bg-dark-card px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-dark-bg">
+              <Users className="h-4 w-4 text-dark-text-muted" />
+            </div>
+            <div>
+              <p className="text-xl font-semibold text-dark-text">{stats.total}</p>
+              <p className="text-[11px] text-dark-text-muted">Total Employees</p>
             </div>
           </div>
-          <div className="flex flex-wrap justify-end gap-3">
-            <button
-              onClick={() => setShowBulkImportModal(true)}
-              className="btn-secondary flex items-center gap-2 px-6 py-3 text-sm uppercase tracking-[0.2em]"
-            >
-              <Upload size={18} />
-              Import CSV
-            </button>
-            <button
-              onClick={() => setShowCreateCohort(true)}
-              className="btn-secondary flex items-center gap-2 px-6 py-3 text-sm uppercase tracking-[0.2em]"
-            >
-              <FolderPlus size={18} />
-              New Cohort
-            </button>
-            <button
-              onClick={() => setShowInviteModal(true)}
-              className="btn-primary flex items-center gap-2 px-6 py-3 text-sm uppercase tracking-[0.2em]"
-            >
-              <UserPlus size={18} />
-              Invite Employee
-            </button>
+        </div>
+        <div className="rounded-xl border border-dark-border bg-dark-card px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10">
+              <Check className="h-4 w-4 text-emerald-400" />
+            </div>
+            <div>
+              <p className="text-xl font-semibold text-dark-text">{stats.active}</p>
+              <p className="text-[11px] text-dark-text-muted">Active</p>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-xl border border-dark-border bg-dark-card px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500/10">
+              <Clock className="h-4 w-4 text-amber-400" />
+            </div>
+            <div>
+              <p className="text-xl font-semibold text-dark-text">{stats.pending}</p>
+              <p className="text-[11px] text-dark-text-muted">Pending Invites</p>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-xl border border-dark-border bg-dark-card px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+              <Building2 className="h-4 w-4 text-primary" />
+            </div>
+            <div>
+              <p className="text-xl font-semibold text-dark-text">{stats.cohortCount}</p>
+              <p className="text-[11px] text-dark-text-muted">Cohorts</p>
+            </div>
           </div>
         </div>
       </div>
 
-      <div>
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-          <div>
-            <h2 className="text-xl font-semibold">People</h2>
-            <p className="text-sm text-dark-text-muted">Employees and pending invitations</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="rounded-2xl border border-dark-border/70 bg-dark-bg/60 px-3 py-2 text-sm">
-              <select
-                value={groupBy}
-                onChange={(e) => setGroupBy(e.target.value as 'none' | 'department' | 'cohort' | 'status')}
-                className="w-full bg-transparent text-dark-text focus:outline-none"
-              >
-                <option value="none">No Grouping</option>
-                <option value="department">Group by Department</option>
-                <option value="cohort">Group by Cohort</option>
-                <option value="status">Group by Status</option>
-              </select>
-            </div>
-            <div className="rounded-2xl border border-dark-border/70 bg-dark-bg/60 px-3 py-2 text-sm">
-              <select
-                value={selectedCohortFilter}
-                onChange={(e) => setSelectedCohortFilter(e.target.value)}
-                className="w-full bg-transparent text-dark-text focus:outline-none"
-              >
-                <option value="all">All Cohorts</option>
-                <option value="unassigned">Unassigned</option>
-                {cohorts.map((cohort) => (
-                  <option key={cohort.id} value={cohort.id}>
-                    {cohort.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-center rounded-2xl border border-dark-border/70 bg-dark-bg/60 px-3 py-2">
-              <Search size={16} className="text-dark-text-muted" />
-              <input
-                type="text"
-                placeholder="Search people..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-56 bg-transparent pl-3 text-sm text-dark-text focus:outline-none"
-              />
-            </div>
-          </div>
+      {/* Filters & Search */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[240px] max-w-md">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-dark-text-muted" />
+          <input
+            type="search"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search employees..."
+            className="h-10 w-full rounded-lg border border-dark-border bg-dark-card pl-10 pr-4 text-sm text-dark-text placeholder:text-dark-text-muted focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+          />
         </div>
+        <select
+          value={selectedDepartmentFilter}
+          onChange={(e) => setSelectedDepartmentFilter(e.target.value)}
+          className="h-10 rounded-full border border-dark-border bg-dark-card px-4 text-sm text-dark-text focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+        >
+          <option value="all">All Departments</option>
+          {departments.map((dept) => (
+            <option key={dept} value={dept}>{dept}</option>
+          ))}
+        </select>
+        <select
+          value={selectedCohortFilter}
+          onChange={(e) => setSelectedCohortFilter(e.target.value)}
+          className="h-10 rounded-full border border-dark-border bg-dark-card px-4 text-sm text-dark-text focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+        >
+          <option value="all">All Cohorts</option>
+          <option value="unassigned">Unassigned</option>
+          {cohorts.map((cohort) => (
+            <option key={cohort.id} value={cohort.id}>{cohort.name}</option>
+          ))}
+        </select>
+        <select
+          value={selectedStatusFilter}
+          onChange={(e) => setSelectedStatusFilter(e.target.value)}
+          className="h-10 rounded-full border border-dark-border bg-dark-card px-4 text-sm text-dark-text focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+        >
+          <option value="all">All Status</option>
+          <option value="active">Active</option>
+          <option value="invited">Invited</option>
+          <option value="inactive">Inactive</option>
+        </select>
+      </div>
 
-        {/* Batch Selection Toolbar */}
-        {selectedEmployeeIds.size > 0 && (
-          <div className="flex items-center justify-between gap-4 mb-4 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-            <div className="flex items-center gap-4">
-              <span className="text-sm font-medium text-dark-text">
-                {selectedEmployeeIds.size} employee(s) selected
-              </span>
-              <button
-                onClick={clearSelection}
-                className="text-sm text-dark-text-muted hover:text-dark-text transition-colors"
-              >
-                Clear selection
-              </button>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowBatchAssignCohort(true)}
-                className="btn-primary flex items-center gap-2 px-4 py-2 text-sm"
-              >
-                Assign to Cohort
-              </button>
-            </div>
+      {/* Batch Selection Toolbar */}
+      {selectedEmployeeIds.size > 0 && (
+        <div className="flex items-center justify-between gap-4 p-4 rounded-xl border border-primary/30 bg-primary/5">
+          <div className="flex items-center gap-4">
+            <span className="text-sm font-medium text-dark-text">
+              {selectedEmployeeIds.size} employee(s) selected
+            </span>
+            <button
+              onClick={clearSelection}
+              className="text-sm text-dark-text-muted hover:text-dark-text transition-colors"
+            >
+              Clear selection
+            </button>
           </div>
-        )}
-
-        <div className="hidden lg:grid lg:grid-cols-[40px_1.5fr_1.5fr_0.8fr_1fr_1fr_1.2fr] gap-4 text-xs uppercase tracking-[0.3em] text-dark-text-muted px-2 pb-3">
-          <div className="flex items-center justify-center">
-            <input
-              type="checkbox"
-              checked={filteredEmployees.length > 0 && selectedEmployeeIds.size === filteredEmployees.length}
-              onChange={(e) => e.target.checked ? selectAllEmployees() : clearSelection()}
-              className="w-4 h-4 rounded border-dark-border bg-dark-bg checked:bg-blue-500 checked:border-blue-500 cursor-pointer"
-              title="Select all employees"
-            />
-          </div> {/* Checkbox column */}
-          <span>Employee</span>
-
-          <span>Email</span>
-          <span>Role</span>
-          <span>Department</span>
-          <span>Cohort</span>
-          <span className="text-right">Status</span>
+          <button
+            onClick={() => setShowBatchAssignCohort(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-primary/90"
+          >
+            Assign to Cohort
+          </button>
         </div>
+      )}
 
-        <div>
-          {peopleRows.length === 0 ? (
-            <div className="text-center py-10 text-dark-text-muted">
-              No people found
+      {/* Employee Table */}
+      <div className="rounded-xl border border-dark-border bg-dark-card">
+        {peopleRows.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-dark-bg">
+              <Users className="h-7 w-7 text-dark-text-muted" />
             </div>
-          ) : groupBy === 'none' ? (
-            peopleRows.map((row, index) => {
-              const status = statusTokens[row.status];
+            <h3 className="text-sm font-medium text-dark-text">No employees found</h3>
+            <p className="mt-1 text-sm text-dark-text-muted">
+              {searchTerm ? 'Try adjusting your search or filters' : 'Invite your first team member to get started'}
+            </p>
+            {!searchTerm && (
+              <button
+                onClick={() => setShowInviteModal(true)}
+                className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary/90"
+              >
+                <UserPlus size={16} />
+                Invite Employee
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="divide-y divide-dark-border">
+            {/* Table Header */}
+            <div className="grid grid-cols-[40px_2fr_2fr_1.5fr_1.5fr_100px_100px] gap-4 px-6 py-3 text-xs font-medium uppercase tracking-wide text-dark-text-muted bg-dark-bg">
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={filteredEmployees.length > 0 && selectedEmployeeIds.size === filteredEmployees.length}
+                  onChange={(e) => e.target.checked ? selectAllEmployees() : clearSelection()}
+                  className="w-4 h-4 rounded border-dark-border bg-dark-bg checked:bg-primary checked:border-primary cursor-pointer"
+                  title="Select all employees"
+                />
+              </div>
+              <button
+                onClick={() => handleSort('name')}
+                className="flex items-center gap-1.5 hover:text-dark-text transition text-left"
+              >
+                Employee
+                <SortIcon field="name" />
+              </button>
+              <button
+                onClick={() => handleSort('email')}
+                className="flex items-center gap-1.5 hover:text-dark-text transition text-left"
+              >
+                Email
+                <SortIcon field="email" />
+              </button>
+              <button
+                onClick={() => handleSort('department')}
+                className="flex items-center gap-1.5 hover:text-dark-text transition text-left"
+              >
+                Department
+                <SortIcon field="department" />
+              </button>
+              <button
+                onClick={() => handleSort('cohort')}
+                className="flex items-center gap-1.5 hover:text-dark-text transition text-left"
+              >
+                Cohort
+                <SortIcon field="cohort" />
+              </button>
+              <button
+                onClick={() => handleSort('status')}
+                className="flex items-center gap-1.5 hover:text-dark-text transition text-left"
+              >
+                Status
+                <SortIcon field="status" />
+              </button>
+              <div className="text-right">Actions</div>
+            </div>
+
+            {/* Table Rows */}
+            {peopleRows.map((row) => {
+              const statusStyles = getStatusStyles(row.status);
               const isSelected = row.kind === 'employee' && selectedEmployeeIds.has(row.id);
               return (
                 <div
                   key={`${row.kind}-${row.id}`}
-                  className={`p-4 transition-colors ${index % 2 === 0 ? 'bg-white/5' : 'bg-white/[0.02]'
-                    } hover:bg-white/10`}
+                  className="grid grid-cols-[40px_2fr_2fr_1.5fr_1.5fr_100px_100px] gap-4 px-6 py-4 items-center hover:bg-dark-bg/50 transition cursor-pointer group"
+                  onClick={() => row.kind === 'employee' && navigate(`/admin/employees/${row.id}`)}
                 >
-                  <div className="grid grid-cols-[40px_1.5fr_1.5fr_0.8fr_1fr_1fr_1.2fr] gap-4 items-center">
-                    {/* Checkbox column */}
-                    <div className="flex items-center justify-center">
-                      {row.kind === 'employee' ? (
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleEmployeeSelection(row.id)}
-                          className="w-4 h-4 rounded border-dark-border bg-dark-bg checked:bg-blue-500 checked:border-blue-500 cursor-pointer"
-                        />
-                      ) : (
-                        <>
-                          {/* Spacer for invitations */}
-                          <div className="w-4 h-4" />
-                        </>
-                      )}
+                  {/* Checkbox */}
+                  <div>
+                    {row.kind === 'employee' ? (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleEmployeeSelection(row.id)}
+                        className="w-4 h-4 rounded border-dark-border bg-dark-bg checked:bg-primary checked:border-primary cursor-pointer"
+                      />
+                    ) : (
+                      <div className="w-4 h-4" />
+                    )}
+                  </div>
+
+                  {/* Employee */}
+                  <div>
+                    <p className="text-sm font-medium text-dark-text truncate">{row.name}</p>
+                    <p className="text-xs text-dark-text-muted truncate">
+                      {row.kind === 'invite' ? 'Pending invite' : 'Employee'}
+                    </p>
+                  </div>
+
+                  {/* Email */}
+                  <div>
+                    <div className="flex items-center gap-1.5 text-sm text-dark-text-muted">
+                      <Mail className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span className="truncate">{row.email}</span>
                     </div>
-                    <div>
-                      <p className="font-medium text-dark-text">{row.name}</p>
-                      <p className="text-xs text-dark-text-muted">
-                        {row.kind === 'invite' ? 'Pending invite' : 'Directory'}
-                      </p>
-                    </div>
-                    <div className="text-sm text-dark-text break-all">{row.email}</div>
-                    <div className="text-sm text-dark-text capitalize">{row.role}</div>
-                    <div className="text-sm text-dark-text">{row.department}</div>
-                    <div className="text-sm text-dark-text">{row.cohortLabel}</div>
-                    <div className="flex items-center gap-2 justify-end">
-                      <span className={`rounded-full border px-3 py-1 text-xs font-medium ${status.className}`}>
-                        {status.label}
-                      </span>
+                  </div>
+
+                  {/* Department */}
+                  <div>
+                    <span className="text-sm text-dark-text truncate">{row.department}</span>
+                  </div>
+
+                  {/* Cohort */}
+                  <div>
+                    <span className="text-sm text-dark-text truncate">{row.cohortLabel}</span>
+                  </div>
+
+                  {/* Status */}
+                  <div>
+                    <span className={`inline-flex rounded-md px-2 py-1 text-xs font-medium ${statusStyles.bg} ${statusStyles.text}`}>
+                      {statusStyles.label}
+                    </span>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition">
                       {row.kind === 'employee' ? (
                         <>
                           <button
-                            onClick={() => setShowAssignCohort(row.employee!.id)}
-                            className="p-2 rounded-lg hover:bg-dark-bg transition-colors"
+                            onClick={(e) => { e.stopPropagation(); setShowAssignCohort(row.employee!.id); }}
+                            className="flex h-7 w-7 items-center justify-center rounded-md text-dark-text-muted transition hover:bg-dark-bg hover:text-dark-text"
                             title="Assign to cohort"
                           >
-                            <Edit2 size={16} className="text-dark-text-muted" />
+                            <Edit2 className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => handleDeleteEmployee(row.employee!.id)}
-                            className="p-2 rounded-lg hover:bg-red-500/10 transition-colors"
+                            onClick={(e) => { e.stopPropagation(); handleDeleteEmployee(row.employee!.id); }}
+                            className="flex h-7 w-7 items-center justify-center rounded-md text-dark-text-muted transition hover:bg-red-500/10 hover:text-red-400"
                             title="Delete employee"
                           >
-                            <Trash2 size={16} className="text-red-500" />
+                            <Trash2 className="h-4 w-4" />
                           </button>
                         </>
                       ) : (
                         <>
                           <button
-                            onClick={() => handleCopyInviteLink(row.invitation!.token)}
-                            className="p-2 rounded-lg hover:bg-dark-bg transition-colors"
+                            onClick={(e) => { e.stopPropagation(); handleCopyInviteLink(row.invitation!.token); }}
+                            className="flex h-7 w-7 items-center justify-center rounded-md text-dark-text-muted transition hover:bg-dark-bg hover:text-dark-text"
                             title="Copy invite link"
                           >
-                            <Copy size={16} className="text-dark-text-muted" />
+                            <Copy className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => handleResendInvite(row.invitation!.id)}
-                            className="p-2 rounded-lg hover:bg-blue-500/10 transition-colors"
+                            onClick={(e) => { e.stopPropagation(); handleResendInvite(row.invitation!.id); }}
+                            className="flex h-7 w-7 items-center justify-center rounded-md text-dark-text-muted transition hover:bg-primary/10 hover:text-primary"
                             title="Resend invitation"
                           >
-                            <RefreshCw size={16} className="text-blue-400" />
+                            <RefreshCw className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => handleRevokeInvite(row.invitation!.id)}
-                            className="p-2 rounded-lg hover:bg-red-500/10 transition-colors"
+                            onClick={(e) => { e.stopPropagation(); handleRevokeInvite(row.invitation!.id); }}
+                            className="flex h-7 w-7 items-center justify-center rounded-md text-dark-text-muted transition hover:bg-red-500/10 hover:text-red-400"
                             title="Revoke invitation"
                           >
-                            <Trash2 size={16} className="text-red-500" />
+                            <Trash2 className="h-4 w-4" />
                           </button>
                         </>
                       )}
-                    </div>
                   </div>
                 </div>
               );
-            })
-          ) : (
-            (() => {
-              // Group rows based on selected grouping
-              const grouped = peopleRows.reduce((acc, row) => {
-                let key: string;
-                if (groupBy === 'department') {
-                  key = row.department || 'Unassigned';
-                } else if (groupBy === 'cohort') {
-                  key = row.cohortLabel;
-                } else if (groupBy === 'status') {
-                  key = statusTokens[row.status].label;
-                } else {
-                  key = 'All';
-                }
-
-                if (!acc[key]) {
-                  acc[key] = [];
-                }
-                acc[key].push(row);
-                return acc;
-              }, {} as Record<string, PeopleRow[]>);
-
-              return Object.entries(grouped).map(([groupName, groupRows]) => (
-                <div key={groupName} className="mb-6">
-                  <div className="px-2 py-3 bg-dark-bg/40">
-                    <h3 className="font-semibold text-dark-text">
-                      {groupName} <span className="text-sm text-dark-text-muted">({groupRows.length})</span>
-                    </h3>
-                  </div>
-                  {groupRows.map((row, index) => {
-                    const status = statusTokens[row.status];
-                    return (
-                      <div
-                        key={`${row.kind}-${row.id}`}
-                        className={`p-4 transition-colors ${index % 2 === 0 ? 'bg-white/5' : 'bg-white/[0.02]'
-                          } hover:bg-white/10`}
-                      >
-                        <div className="grid grid-cols-[1.5fr_1.5fr_0.8fr_1fr_1fr_1.2fr] gap-4 items-center">
-                          <div>
-                            <p className="font-medium text-dark-text">{row.name}</p>
-                            <p className="text-xs text-dark-text-muted">
-                              {row.kind === 'invite' ? 'Pending invite' : 'Directory'}
-                            </p>
-                          </div>
-                          <div className="text-sm text-dark-text break-all">{row.email}</div>
-                          <div className="text-sm text-dark-text capitalize">{row.role}</div>
-                          <div className="text-sm text-dark-text">{row.department}</div>
-                          <div className="text-sm text-dark-text">{row.cohortLabel}</div>
-                          <div className="flex items-center gap-2 justify-end">
-                            <span className={`rounded-full border px-3 py-1 text-xs font-medium ${status.className}`}>
-                              {status.label}
-                            </span>
-                            {row.kind === 'employee' ? (
-                              <>
-                                <button
-                                  onClick={() => setShowAssignCohort(row.employee!.id)}
-                                  className="p-2 rounded-lg hover:bg-dark-bg transition-colors"
-                                  title="Assign to cohort"
-                                >
-                                  <Edit2 size={16} className="text-dark-text-muted" />
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteEmployee(row.employee!.id)}
-                                  className="p-2 rounded-lg hover:bg-red-500/10 transition-colors"
-                                  title="Delete employee"
-                                >
-                                  <Trash2 size={16} className="text-red-500" />
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  onClick={() => handleCopyInviteLink(row.invitation!.token)}
-                                  className="p-2 rounded-lg hover:bg-dark-bg transition-colors"
-                                  title="Copy invite link"
-                                >
-                                  <Copy size={16} className="text-dark-text-muted" />
-                                </button>
-                                <button
-                                  onClick={() => handleResendInvite(row.invitation!.id)}
-                                  className="p-2 rounded-lg hover:bg-blue-500/10 transition-colors"
-                                  title="Resend invitation"
-                                >
-                                  <RefreshCw size={16} className="text-blue-400" />
-                                </button>
-                                <button
-                                  onClick={() => handleRevokeInvite(row.invitation!.id)}
-                                  className="p-2 rounded-lg hover:bg-red-500/10 transition-colors"
-                                  title="Revoke invitation"
-                                >
-                                  <Trash2 size={16} className="text-red-500" />
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ));
-            })()
-          )}
-        </div>
+            })}
+          </div>
+        )}
       </div>
+
+      {/* Results count */}
+      {peopleRows.length > 0 && (
+        <p className="text-sm text-dark-text-muted">
+          Showing {peopleRows.length} of {employees.length + invitations.filter(i => i.status === 'pending').length} people
+        </p>
+      )}
 
       {/* Invite Modal */}
       <InviteModal
@@ -879,95 +919,46 @@ const EmployeeManagement: React.FC = () => {
         onClose={() => setShowBulkImportModal(false)}
         onSuccess={() => {
           setShowBulkImportModal(false);
-          loadData(); // Reload data to show new invitations
+          loadData();
         }}
         cohorts={cohorts}
       />
 
-      {/* Create Cohort Modal */}
-      {showCreateCohort && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-dark-card border border-dark-border rounded-lg p-6 w-full max-w-md">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">Create Cohort</h2>
-              <button
-                onClick={() => setShowCreateCohort(false)}
-                className="p-1 hover:bg-dark-bg rounded transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <form onSubmit={handleCreateCohort} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-dark-text mb-2">
-                  Cohort Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="input w-full"
-                  value={newCohort.name}
-                  onChange={(e) => setNewCohort({ ...newCohort, name: e.target.value })}
-                  placeholder="e.g., Q1 2024 Leadership Program"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-dark-text mb-2">
-                  Description (optional)
-                </label>
-                <textarea
-                  className="input w-full min-h-[100px] resize-none"
-                  value={newCohort.description}
-                  onChange={(e) => setNewCohort({ ...newCohort, description: e.target.value })}
-                  placeholder="Describe the purpose of this cohort..."
-                />
-              </div>
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateCohort(false)}
-                  className="btn-secondary flex-1"
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary flex-1 flex items-center justify-center gap-2">
-                  <Check size={18} />
-                  Create Cohort
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Create Cohort Panel */}
+      <CohortPanel
+        isOpen={showCreateCohort}
+        onClose={() => setShowCreateCohort(false)}
+        onSubmit={handleCreateCohort}
+      />
 
       {/* Assign to Cohort Modal */}
       {showAssignCohort && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-dark-card border border-dark-border rounded-lg p-6 w-full max-w-md">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">Assign to Cohort</h2>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-dark-card border border-dark-border rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-semibold text-dark-text">Assign to Cohort</h2>
               <button
                 onClick={() => setShowAssignCohort(null)}
-                className="p-1 hover:bg-dark-bg rounded transition-colors"
+                className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-dark-bg transition-colors"
               >
-                <X size={20} />
+                <X size={18} className="text-dark-text-muted" />
               </button>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-2 max-h-80 overflow-y-auto">
               <button
                 onClick={() => handleAssignToCohort(showAssignCohort, null)}
-                className="w-full p-4 border border-dark-border rounded-lg hover:bg-dark-bg transition-colors text-left"
+                className="w-full p-4 border border-dark-border rounded-xl hover:bg-dark-bg transition-colors text-left"
               >
-                <div className="font-medium">Unassigned</div>
+                <div className="font-medium text-dark-text">Unassigned</div>
                 <div className="text-sm text-dark-text-muted">Remove from all cohorts</div>
               </button>
               {cohorts.map((cohort) => (
                 <button
                   key={cohort.id}
                   onClick={() => handleAssignToCohort(showAssignCohort, cohort.id)}
-                  className="w-full p-4 border border-dark-border rounded-lg hover:bg-dark-bg transition-colors text-left"
+                  className="w-full p-4 border border-dark-border rounded-xl hover:bg-dark-bg transition-colors text-left"
                 >
-                  <div className="font-medium">{cohort.name}</div>
+                  <div className="font-medium text-dark-text">{cohort.name}</div>
                   {cohort.description && (
                     <div className="text-sm text-dark-text-muted">{cohort.description}</div>
                   )}
@@ -977,10 +968,10 @@ const EmployeeManagement: React.FC = () => {
                 </button>
               ))}
             </div>
-            <div className="pt-4">
+            <div className="pt-4 mt-4 border-t border-dark-border">
               <button
                 onClick={() => setShowAssignCohort(null)}
-                className="w-full btn-secondary"
+                className="w-full h-10 rounded-lg border border-dark-border bg-dark-bg text-sm font-medium text-dark-text transition hover:bg-dark-card"
               >
                 Cancel
               </button>
@@ -991,35 +982,35 @@ const EmployeeManagement: React.FC = () => {
 
       {/* Batch Assign Cohort Modal */}
       {showBatchAssignCohort && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-dark-card border border-dark-border rounded-lg p-6 w-full max-w-md">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold">Batch Assign to Cohort</h2>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-dark-card border border-dark-border rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-semibold text-dark-text">Batch Assign to Cohort</h2>
               <button
                 onClick={() => setShowBatchAssignCohort(false)}
-                className="p-1 hover:bg-dark-bg rounded transition-colors"
+                className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-dark-bg transition-colors"
               >
-                <X size={20} />
+                <X size={18} className="text-dark-text-muted" />
               </button>
             </div>
             <p className="text-sm text-dark-text-muted mb-4">
               Assign {selectedEmployeeIds.size} employee(s) to a cohort
             </p>
-            <div className="space-y-3">
+            <div className="space-y-2 max-h-80 overflow-y-auto">
               <button
                 onClick={() => handleBatchAssignToCohort(null)}
-                className="w-full p-4 border border-dark-border rounded-lg hover:bg-dark-bg transition-colors text-left"
+                className="w-full p-4 border border-dark-border rounded-xl hover:bg-dark-bg transition-colors text-left"
               >
-                <div className="font-medium">Unassigned</div>
+                <div className="font-medium text-dark-text">Unassigned</div>
                 <div className="text-sm text-dark-text-muted">Remove from all cohorts</div>
               </button>
               {cohorts.map((cohort) => (
                 <button
                   key={cohort.id}
                   onClick={() => handleBatchAssignToCohort(cohort.id)}
-                  className="w-full p-4 border border-dark-border rounded-lg hover:bg-dark-bg transition-colors text-left"
+                  className="w-full p-4 border border-dark-border rounded-xl hover:bg-dark-bg transition-colors text-left"
                 >
-                  <div className="font-medium">{cohort.name}</div>
+                  <div className="font-medium text-dark-text">{cohort.name}</div>
                   {cohort.description && (
                     <div className="text-sm text-dark-text-muted">{cohort.description}</div>
                   )}
@@ -1029,10 +1020,10 @@ const EmployeeManagement: React.FC = () => {
                 </button>
               ))}
             </div>
-            <div className="pt-4">
+            <div className="pt-4 mt-4 border-t border-dark-border">
               <button
                 onClick={() => setShowBatchAssignCohort(false)}
-                className="w-full btn-secondary"
+                className="w-full h-10 rounded-lg border border-dark-border bg-dark-bg text-sm font-medium text-dark-text transition hover:bg-dark-card"
               >
                 Cancel
               </button>
@@ -1045,4 +1036,3 @@ const EmployeeManagement: React.FC = () => {
 };
 
 export default EmployeeManagement;
-

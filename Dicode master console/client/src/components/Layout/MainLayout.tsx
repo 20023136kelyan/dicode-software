@@ -1,20 +1,38 @@
 'use client';
 
+import { useSidebar } from '@/contexts/SidebarContext';
 import Sidebar from './Sidebar';
+import Header from './Header';
+import { cn } from '@/lib/utils';
 
 interface MainLayoutProps {
   children: React.ReactNode;
+  /** Hide the header for full-page layouts */
+  hideHeader?: boolean;
+  /** Custom page title override */
+  pageTitle?: string;
 }
 
-export default function MainLayout({ children }: MainLayoutProps) {
+export default function MainLayout({ children, hideHeader = false }: MainLayoutProps) {
+  const { isCollapsed } = useSidebar();
+
   return (
-    <div className="h-screen flex overflow-hidden bg-gray-50">
-      {/* Floating Sidebar */}
+    <div className="min-h-screen bg-slate-50">
+      {/* Sidebar */}
       <Sidebar />
 
+      {/* Header */}
+      {!hideHeader && <Header />}
+
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto ml-80" data-scroll-container="true">
-        <div className="container mx-auto p-6">
+      <main
+        className={cn(
+          'min-h-screen transition-all duration-300',
+          isCollapsed ? 'ml-[72px]' : 'ml-64',
+          !hideHeader && 'pt-16'
+        )}
+      >
+        <div className="p-6">
           {children}
         </div>
       </main>

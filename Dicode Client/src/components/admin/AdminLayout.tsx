@@ -1,17 +1,39 @@
 import React from 'react';
 import { Outlet } from 'react-router-dom';
-import Sidebar from './Sidebar';
+import Sidebar, { SidebarProvider, useSidebar } from './Sidebar';
+import Header from './Header';
+
+const AdminLayoutContent: React.FC = () => {
+  const { isCollapsed } = useSidebar();
+  
+  return (
+    <div className="min-h-screen bg-dark-bg">
+      {/* Sidebar */}
+      <Sidebar />
+      
+      {/* Header */}
+      <Header />
+      
+      {/* Main Content */}
+      <main 
+        className={`min-h-screen transition-all duration-300 pt-14 ${
+          isCollapsed ? 'ml-[72px]' : 'ml-64'
+        }`}
+        data-scroll-container
+      >
+        <div className="p-6">
+          <Outlet />
+        </div>
+      </main>
+    </div>
+  );
+};
 
 const AdminLayout: React.FC = () => {
   return (
-    <div className="flex min-h-screen bg-dark-bg">
-      <Sidebar />
-      <div className="flex-1 ml-64">
-        <main className="p-8">
-          <Outlet />
-        </main>
-      </div>
-    </div>
+    <SidebarProvider>
+      <AdminLayoutContent />
+    </SidebarProvider>
   );
 };
 

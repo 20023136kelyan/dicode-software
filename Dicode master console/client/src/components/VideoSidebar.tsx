@@ -114,60 +114,56 @@ const VideoSidebar = ({
   return (
     <aside
       className={cn(
-        "flex w-full flex-col rounded-[32px] border border-border/70 bg-card shadow-[0_25px_65px_rgba(15,23,42,0.08)]",
+        "flex w-full flex-col rounded-2xl border border-slate-200 bg-white",
         className,
-        isMobileOpen ? "fixed inset-0 z-50 m-4" : "hidden lg:flex",
-        "lg:sticky lg:top-6 lg:m-0 lg:w-[480px] lg:h-[calc(100vh-3rem)]",
+        isMobileOpen ? "fixed inset-0 z-50 m-4" : "hidden xl:flex",
+        "xl:w-[380px]",
       )}
     >
-      <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <div className="flex items-start justify-between gap-3 border-b border-border/60 px-5 py-5">
-          <div className="flex flex-col gap-1">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-              Library
-            </div>
-            <div className="text-xl font-semibold text-foreground">
-              Your generations
-            </div>
-            <div className="text-xs text-muted-foreground">{downloadHint}</div>
+      <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-semibold text-slate-900">Generations</h2>
+            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
+              {items.length}
+            </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {selectedVideoIds.length >= 2 && (
               <Button
                 size="sm"
-                variant="default"
+                variant="outline"
                 onClick={() => onMergeSelected(selectedVideoIds)}
-                className="rounded-full whitespace-nowrap"
+                className="h-8 rounded-lg text-xs"
               >
-                <Merge className="h-4 w-4" />
-                Merge ({selectedVideoIds.length})
+                <Merge className="h-3.5 w-3.5" />
+                Merge
               </Button>
             )}
+            {selectedVideoIds.length > 0 && (
             <Button
               size="sm"
               variant="default"
               onClick={() => onSaveSelected(selectedVideoIds)}
-              className="rounded-full whitespace-nowrap"
-              disabled={selectedVideoIds.length === 0}
+                className="h-8 rounded-lg text-xs"
             >
-              <Save className="h-4 w-4" />
-              {selectedVideoIds.length > 0
-                ? `Save (${selectedVideoIds.length})`
-                : "Select videos to save"}
+                <Save className="h-3.5 w-3.5" />
+                Save ({selectedVideoIds.length})
             </Button>
+            )}
             <Button
               type="button"
               variant="ghost"
               size="icon"
               onClick={onMobileClose}
-              className="-mr-1 text-muted-foreground hover:text-foreground lg:hidden"
+              className="h-8 w-8 text-slate-400 hover:text-slate-600 xl:hidden"
               aria-label="Close sidebar"
             >
-              <X className="h-5 w-5" />
+              <X className="h-4 w-4" />
             </Button>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto bg-muted/40 px-4 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50/50 px-3 py-3">
           {loading ? (
             renderSkeletons()
           ) : items.length === 0 ? (

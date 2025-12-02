@@ -5,6 +5,7 @@ import { QuestionFormData } from '@/lib/types';
 import { validateQuestion } from '@/lib/questionValidation';
 import { QUESTION_META } from '@/lib/questionDefaults';
 import { COMPETENCIES, type CompetencyDefinition, type SkillDefinition } from '@/lib/competencies';
+import { useCompetencies } from '@/hooks/useCompetencies';
 import type { QuestionAssistantState } from '@/types/questionAssist';
 import { Sparkles, ShieldCheck, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
@@ -32,6 +33,7 @@ export default function QuestionEditor({
   onApplySuggestion,
 }: QuestionEditorProps) {
   const [errors, setErrors] = useState<string[]>([]);
+  const { competencies: firestoreCompetencies } = useCompetencies();
 
   useEffect(() => {
     const validationErrors = validateQuestion(question);
@@ -39,7 +41,10 @@ export default function QuestionEditor({
   }, [question]);
 
   const mergedCompetencies = useMemo<CompetencyDefinition[]>(() => {
-    const base = competencyOptions && competencyOptions.length > 0 ? competencyOptions : COMPETENCIES;
+    // Use provided options, then Firestore competencies, then static fallback
+    const base = competencyOptions && competencyOptions.length > 0 
+      ? competencyOptions 
+      : (firestoreCompetencies.length > 0 ? firestoreCompetencies : COMPETENCIES);
 
     if (!question.competencyId) {
       return base;
@@ -48,13 +53,15 @@ export default function QuestionEditor({
     const existsInBase = base.some((competency) => competency.id === question.competencyId);
     if (existsInBase) return base;
 
-    const fallback = COMPETENCIES.find((competency) => competency.id === question.competencyId);
+    // Try to find in Firestore competencies first, then static fallback
+    const fallback = firestoreCompetencies.find((competency) => competency.id === question.competencyId)
+      || COMPETENCIES.find((competency) => competency.id === question.competencyId);
     if (fallback) {
       return [fallback, ...base];
     }
 
     return base;
-  }, [competencyOptions, question.competencyId]);
+  }, [competencyOptions, firestoreCompetencies, question.competencyId]);
 
   const matchFromLegacy = useMemo(() => {
     if (!question.competency || question.skillId) return null;

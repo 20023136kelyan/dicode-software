@@ -50,8 +50,8 @@ service cloud.firestore {
         organizationId == getUserOrganization()
       );
       allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && isOrgAdmin(organizationId);
-      allow delete: if isAuthenticated() && isOrgAdmin(organizationId);
+      allow update: if isAuthenticated() && (isDiCodeStaff() || isOrgAdmin(organizationId));
+      allow delete: if isAuthenticated() && (isDiCodeStaff() || isOrgAdmin(organizationId));
     }
 
     // Users Collection
@@ -66,9 +66,9 @@ service cloud.firestore {
         ));
       allow create: if isOwner(userId);
       allow update: if isOwner(userId) ||
-        (isAuthenticated() && isOrgAdmin(resource.data.organization));
+        (isAuthenticated() && (isDiCodeStaff() || isOrgAdmin(resource.data.organization)));
       allow delete: if isOwner(userId) ||
-        (isAuthenticated() && isOrgAdmin(resource.data.organization));
+        (isAuthenticated() && (isDiCodeStaff() || isOrgAdmin(resource.data.organization)));
     }
 
     // Cohorts Collection
@@ -122,14 +122,18 @@ service cloud.firestore {
       
       // Write: DiCode Staff OR Org Admin/Creator for their own campaigns
       allow create: if isAuthenticated() && (
+        isDiCodeStaff() ||
         (request.resource.data.source == 'dicode' && isDiCodeStaff()) ||
         (request.resource.data.source == 'organization' && willBeCreator())
       );
       allow update: if isAuthenticated() && (
+        isDiCodeStaff() ||
         (resource.data.source == 'dicode' && isDiCodeStaff()) ||
         (resource.data.source == 'organization' && isCreator())
       );
+      // DiCode Staff can delete any campaign
       allow delete: if isAuthenticated() && (
+        isDiCodeStaff() ||
         (resource.data.source == 'dicode' && isDiCodeStaff()) ||
         (resource.data.source == 'organization' && isCreator())
       );
@@ -139,49 +143,50 @@ service cloud.firestore {
     match /campaignItems/{itemId} {
       allow read: if isAuthenticated()
         && exists(/databases/$(database)/documents/campaigns/$(resource.data.campaignId));
-        // Note: Strict check on parent campaign logic is implied by UI flow, but could be tighter.
-        // For simplicity/performance, if they can read the campaign, they can usually fetch items.
-        // But keeping strict parent check is safer if we can replicate the logic.
-        // Let's use a simple check:
       
-      allow create, update, delete: if isAuthenticated()
-        && exists(/databases/$(database)/documents/campaigns/$(resource.data.campaignId)) // Check current resource
-        && get(/databases/$(database)/documents/campaigns/$(resource.data.campaignId)).data.metadata.createdBy == request.auth.uid; 
-        // Only creator of campaign can manage items? Or DiCode staff?
-        // Let's allow DiCode staff too.
+      // DiCode staff can manage any campaign items, or campaign creator can manage their own
+      allow create, update, delete: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        (
+          exists(/databases/$(database)/documents/campaigns/$(resource.data.campaignId)) &&
+          get(/databases/$(database)/documents/campaigns/$(resource.data.campaignId)).data.metadata.createdBy == request.auth.uid
+        )
+      );
     }
 
     // Campaign Enrollments Collection
     match /campaignEnrollments/{enrollmentId} {
       allow read: if isAuthenticated() && (
+        isDiCodeStaff() ||
         isOwner(resource.data.userId) ||
-        // Allow campaign creator/admin to read enrollments? Yes.
         exists(/databases/$(database)/documents/campaigns/$(resource.data.campaignId))
       );
       allow create: if isAuthenticated();
       allow update: if isAuthenticated() && (
-        isOwner(resource.data.userId) ||
-        // Allow update by system/admin?
-        true 
+        isDiCodeStaff() ||
+        isOwner(resource.data.userId)
       );
-      allow delete: if isAuthenticated(); // Allow deletion?
+      allow delete: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        isOwner(resource.data.userId)
+      );
     }
 
     // Campaign Progress Collection
     match /campaignProgress/{progressId} {
       allow read: if isAuthenticated() && (
-        isOwner(resource.data.userId) ||
-        // Allow admin reading?
-        true
+        isDiCodeStaff() ||
+        isOwner(resource.data.userId)
       );
-      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
-      allow update: if isAuthenticated() && isOwner(resource.data.userId);
-      allow delete: if isAuthenticated() && isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && (isDiCodeStaff() || isOwner(request.resource.data.userId));
+      allow update: if isAuthenticated() && (isDiCodeStaff() || isOwner(resource.data.userId));
+      allow delete: if isAuthenticated() && (isDiCodeStaff() || isOwner(resource.data.userId));
     }
 
     // Campaign Responses Collection
     match /campaignResponses/{responseId} {
       allow read: if isAuthenticated() && (
+        isDiCodeStaff() ||
         // User can read their own responses
         isOwner(resource.data.userId) ||
         // Allow org-level reads for comparison/analytics
@@ -189,7 +194,8 @@ service cloud.firestore {
       );
       allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
       allow update: if false; // Immutable
-      allow delete: if false;
+      // DiCode staff can delete responses when deleting an organization
+      allow delete: if isAuthenticated() && isDiCodeStaff();
     }
 
     // Campaign Notifications Collection
@@ -233,6 +239,39 @@ service cloud.firestore {
     // Assets Collection
     match /assets/{assetId} {
       allow read: if isAuthenticated();
+      allow create, update, delete: if isAuthenticated() && isDiCodeStaff();
+    }
+
+    // Activities Collection (Activity Tracking)
+    match /activities/{activityId} {
+      // All authenticated users can read activities
+      allow read: if isAuthenticated();
+      // All authenticated users can create activities (logging their own actions)
+      allow create: if isAuthenticated();
+      // No updates or deletes - activities are immutable audit logs
+      allow update, delete: if false;
+    }
+
+    // Notifications Collection (User Notification Center)
+    match /notifications/{notificationId} {
+      // Users can only read their own notifications
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Users can create notifications for themselves, or DiCode staff can create for anyone
+      allow create: if isAuthenticated() && (
+        request.resource.data.userId == request.auth.uid ||
+        isDiCodeStaff()
+      );
+      // Users can update their own notifications (mark as read)
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Users can delete their own notifications
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Competencies Collection (System Configuration)
+    match /competencies/{competencyId} {
+      // All authenticated users can read competencies
+      allow read: if isAuthenticated();
+      // Only DiCode Staff can manage competencies
       allow create, update, delete: if isAuthenticated() && isDiCodeStaff();
     }
   }

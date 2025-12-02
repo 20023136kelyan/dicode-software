@@ -1084,6 +1084,7 @@ export const onInvitationCreated = onDocumentWritten(
 export const createEmployeeAccount = onCall(
   {
     cors: true,
+    invoker: "public", // Allow unauthenticated invocations (Firebase Auth is handled separately)
   },
   async (request) => {
     try {

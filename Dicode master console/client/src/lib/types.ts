@@ -420,3 +420,67 @@ export interface Organization {
     createdBy: string;
   };
 }
+
+// Activity Tracking Types
+
+export type ActivityAction =
+  | 'campaign_created'
+  | 'campaign_updated'
+  | 'campaign_published'
+  | 'campaign_deleted'
+  | 'video_generated'
+  | 'video_uploaded'
+  | 'video_deleted'
+  | 'asset_created'
+  | 'asset_updated'
+  | 'asset_deleted'
+  | 'access_updated';
+
+export type ActivityResourceType = 'campaign' | 'video' | 'asset' | 'access';
+
+export interface Activity {
+  id?: string;
+  action: ActivityAction;
+  userId: string;
+  userEmail: string;
+  userName?: string;
+  resourceId: string;
+  resourceName: string;
+  resourceType: ActivityResourceType;
+  metadata?: Record<string, any>;
+  createdAt: any; // Timestamp
+}
+
+// Notification System Types
+
+export type NotificationType =
+  | 'video_generation_complete'
+  | 'video_generation_failed'
+  | 'video_generation_progress'
+  | 'campaign_published'
+  | 'campaign_starting'
+  | 'campaign_ending'
+  | 'team_activity'
+  | 'system_alert';
+
+export type NotificationPriority = 'low' | 'normal' | 'high';
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  priority: NotificationPriority;
+  read: boolean;
+  userId: string; // Who should see this notification
+  actorId?: string; // Who triggered this (for team activity)
+  actorName?: string;
+  actorEmail?: string;
+  resourceId?: string;
+  resourceType?: ActivityResourceType | 'job';
+  resourceName?: string;
+  actionUrl?: string; // Link to navigate when clicked
+  progress?: number; // For progress notifications (0-100)
+  createdAt: any; // Timestamp
+  expiresAt?: any; // Optional expiration
+}

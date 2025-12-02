@@ -2,7 +2,7 @@ import { auth } from "@/lib/firebase";
 import type { GeneratedImageSuggestion } from "@/types/generated";
 import type { ShotResult } from "@/utils/video";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api-6easthj3va-uc.a.run.app";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api-x76kgbqadq-uc.a.run.app";
 
 const readJson = async <T>(response: Response): Promise<T> => {
   const text = await response.text();
@@ -31,7 +31,9 @@ const withAuthHeaders = async (headers: HeadersInit = {}) => {
 
 const authorizedFetch = async (path: string, init?: RequestInit) => {
   const headers = await withAuthHeaders(init?.headers);
-  return fetch(`${API_BASE}${path}`, {
+  // Ensure path has /api prefix for Cloud Functions routing
+  const apiPath = path.startsWith('/api') ? path : `/api${path}`;
+  return fetch(`${API_BASE}${apiPath}`, {
     ...init,
     headers,
   });

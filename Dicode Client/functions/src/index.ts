@@ -14,6 +14,8 @@
 
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
+import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { randomBytes } from 'crypto';
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -700,3 +702,116 @@ export const processRecurringCampaigns = functions.pubsub
 // CLOUD FUNCTION: AI Copilot (RAG)
 // ============================================
 export { askCompanyBot } from './askCompanyBot';
+
+// ============================================
+// CLOUD FUNCTION: Create Employee Account
+// ============================================
+
+/**
+ * Cloud Function to create employee Firebase Auth accounts and Firestore user documents
+ * This prevents the client-side auth state from being affected and bypasses Firestore security rules
+ * Also generates a password reset link for the employee to set their own password
+ */
+export const createEmployeeAccount = onCall(
+  {
+    cors: true,
+  },
+  async (request) => {
+    try {
+      const { email, role, name, organization, department } = request.data;
+
+      if (!email) {
+        throw new HttpsError('invalid-argument', 'Email is required');
+      }
+
+      if (!role || !name || !organization) {
+        throw new HttpsError('invalid-argument', 'Role, name, and organization are required');
+      }
+
+      console.log(`[createEmployeeAccount] Creating account for: ${email}`);
+
+      // Generate a secure random password (user will never see this)
+      const randomPassword = randomBytes(32).toString('hex');
+
+      // Step 1: Create Firebase Auth account (doesn't affect client auth state)
+      const userRecord = await admin.auth().createUser({
+        email: email.toLowerCase(),
+        password: randomPassword,
+        emailVerified: false,
+      });
+
+      console.log(`✅ Firebase Auth account created: ${userRecord.uid}`);
+
+      // Step 2: Generate password reset link
+      const appUrl = process.env.APP_URL || 'https://dicode-workspace.web.app';
+
+      // Generate Firebase password reset link
+      const firebaseResetLink = await admin.auth().generatePasswordResetLink(
+        email.toLowerCase(),
+        {
+          url: `${appUrl}/login`, // Where to go AFTER password is set
+        }
+      );
+
+      // Extract oobCode from Firebase link to create our custom link
+      const url = new URL(firebaseResetLink);
+      const oobCode = url.searchParams.get('oobCode');
+
+      if (!oobCode) {
+        throw new HttpsError('internal', 'Failed to extract oobCode from password reset link');
+      }
+
+      // Create direct link to our custom password reset page
+      const passwordResetLink = `${appUrl}/reset-password?oobCode=${oobCode}`;
+
+      console.log(`✅ Password reset link generated for: ${email}`);
+
+      // Step 3: Create Firestore user document (bypasses security rules)
+      const userDoc = {
+        email: email.toLowerCase(),
+        role,
+        name,
+        organization,
+        department: department || null,
+        requirePasswordChange: false, // User will set password via reset link
+        avatar: null,
+        gender: null,
+        dateOfBirth: null,
+        onboardingCompletedAt: null,
+        invitationId: null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+
+      await db.collection('users').doc(userRecord.uid).set(userDoc);
+
+      console.log(`✅ Firestore user document created: ${userRecord.uid}`);
+
+      return {
+        success: true,
+        userId: userRecord.uid,
+        passwordResetLink,
+        message: `Account created for ${email}`,
+      };
+    } catch (error: any) {
+      console.error('❌ Error creating employee account:', error);
+
+      // Handle specific Firebase Auth errors
+      if (error.code === 'auth/email-already-exists') {
+        throw new HttpsError(
+          'already-exists',
+          'An account with this email already exists'
+        );
+      }
+
+      if (error.code === 'auth/invalid-email') {
+        throw new HttpsError('invalid-argument', 'Invalid email address');
+      }
+
+      throw new HttpsError(
+        'internal',
+        error.message || 'Failed to create employee account'
+      );
+    }
+  }
+);

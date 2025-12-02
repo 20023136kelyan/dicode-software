@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut, GoogleAuthProvider, signInWithPopup, User as FirebaseUser } from 'firebase/auth';
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut, GoogleAuthProvider, signInWithPopup, User as FirebaseUser, browserLocalPersistence, browserSessionPersistence, setPersistence } from 'firebase/auth';
 import type { AuthState, User, UserRole } from '@/types';
 import { auth } from '@/lib/firebase';
 import { getUserProfile, upsertUserProfile, getUserCohorts, type UserProfileDoc } from '@/lib/firestore';
@@ -78,12 +78,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const login = async (email: string, password: string, desiredRole?: UserRole) => {
+  const login = async (email: string, password: string, desiredRole?: UserRole, rememberMe: boolean = true) => {
+    // Set persistence based on rememberMe
+    await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+    
     const credential = await signInWithEmailAndPassword(auth, email, password);
     await validateRole(credential.user, desiredRole);
   };
 
-  const loginWithGoogle = async (desiredRole?: UserRole) => {
+  const loginWithGoogle = async (desiredRole?: UserRole, rememberMe: boolean = true) => {
+    // Set persistence based on rememberMe
+    await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+    
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({
       prompt: 'select_account'

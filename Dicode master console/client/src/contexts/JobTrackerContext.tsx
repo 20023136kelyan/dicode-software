@@ -88,6 +88,8 @@ export function JobTrackerProvider({ children }: { children: ReactNode }) {
               try {
                 await saveGeneratedVideos({
                   userId: user.uid,
+                  userEmail: user.email || undefined,
+                  userName: user.displayName || undefined,
                   result,
                   shots: job.shots,
                   quality: job.quality,
