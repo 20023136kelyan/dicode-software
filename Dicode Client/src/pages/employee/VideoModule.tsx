@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { X, ChevronUp, Loader, Check } from 'lucide-react';
 import {
   getCampaign,
@@ -54,10 +55,13 @@ const VideoModule: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // Response type for Q2 SJT questions (moved here for state type)
+  type ResponseValue = string | number | boolean | { selectedOptionId: string; intentScore: number };
+
   // Current state
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
-  const [responses, setResponses] = useState<Record<string, string | number | boolean>>({});
-  const [savingResponse, setSavingResponse] = useState<string | null>(null); // questionId being saved
+  const [responses, setResponses] = useState<Record<string, ResponseValue>>({});
+  const [savingResponse, setSavingResponse] = useState<string | null>(null); // composite key (videoId_questionId) being saved
 
   // Real-time responses hook
   const { responses: savedResponses } = useCampaignResponsesRealtime(
@@ -79,16 +83,7 @@ const VideoModule: React.FC = () => {
       setLoadError(null);
 
       try {
-        // Check and ensure enrollment
-        const existingEnrollment = await checkUserEnrollment(moduleId, user.id);
-        if (!existingEnrollment) {
-          await enrollUserInCampaign(moduleId, user.id, user.organization || '', 'system', true);
-        }
-
-        // Update enrollment access
-        await updateEnrollmentAccess(moduleId, user.id);
-
-        // Load campaign
+        // Load campaign first to check if it's a DiCode campaign
         const campaignData = await getCampaign(moduleId);
         if (!isMounted) return;
 
@@ -99,6 +94,25 @@ const VideoModule: React.FC = () => {
         }
 
         setCampaign(campaignData);
+
+        // Check enrollment
+        let enrollment = await checkUserEnrollment(moduleId, user.id);
+
+        // For DiCode campaigns, user must already be enrolled (no auto-enrollment)
+        if (!enrollment && campaignData.source === 'dicode') {
+          setLoadError('You are not enrolled in this campaign');
+          setIsLoading(false);
+          return;
+        }
+
+        // For org campaigns, auto-enroll if needed (safety net)
+        if (!enrollment) {
+          await enrollUserInCampaign(moduleId, user.id, user.organization || '', 'system', true);
+          enrollment = await checkUserEnrollment(moduleId, user.id);
+        }
+
+        // Update enrollment access
+        await updateEnrollmentAccess(moduleId, user.id);
 
         // Load videos from campaign items
         if (campaignData.items.length === 0) {
@@ -143,8 +157,14 @@ const VideoModule: React.FC = () => {
         // Build slides (Video -> Q1 -> Q2 -> Video 2 -> ...)
         const generatedSlides: Slide[] = [];
         let globalIndex = 0;
+        
+        // Track the first slide index for each module (by itemId)
+        const moduleStartIndices: Record<string, number> = {};
 
         videosData.forEach((video) => {
+          // Record the starting index for this module
+          moduleStartIndices[video.itemId] = globalIndex;
+          
           // Add Video Slide
           generatedSlides.push({
             id: `video-${video.id}`,
@@ -156,10 +176,10 @@ const VideoModule: React.FC = () => {
             index: globalIndex++,
           });
 
-          // Add Question Slides
+          // Add Question Slides (use video.id in key to make it unique across videos)
           video.questions.forEach((question) => {
             generatedSlides.push({
-              id: `q-${question.id}`,
+              id: `q-${video.id}-${question.id}`,
               type: 'question',
               videoId: video.id,
               questionId: question.id,
@@ -171,8 +191,36 @@ const VideoModule: React.FC = () => {
           });
         });
 
+        // Find the first incomplete module to start from
+        let startingSlideIndex = 0;
+        if (enrollment?.moduleProgress) {
+          // Find the first module that isn't completed
+          for (const item of sortedItems) {
+            const moduleState = enrollment.moduleProgress[item.id];
+            if (!moduleState?.completed) {
+              // Start from this module
+              startingSlideIndex = moduleStartIndices[item.id] || 0;
+              console.log(`📍 Starting from module ${item.id} at slide index ${startingSlideIndex}`);
+              break;
+            }
+          }
+        }
+
         setSlides(generatedSlides);
+        setCurrentSlideIndex(startingSlideIndex);
         setIsLoading(false);
+        
+        // Scroll to the starting position after a brief delay to ensure DOM is ready
+        if (startingSlideIndex > 0) {
+          setTimeout(() => {
+            if (containerRef.current) {
+              containerRef.current.scrollTo({
+                top: startingSlideIndex * containerRef.current.clientHeight,
+                behavior: 'auto' // Use 'auto' for instant scroll on load
+              });
+            }
+          }, 100);
+        }
 
       } catch (error) {
         console.error('[VideoModule] Failed to load campaign:', error);
@@ -207,16 +255,32 @@ const VideoModule: React.FC = () => {
   }, [slides.length, currentSlideIndex]);
 
   // Pre-fill responses from saved responses when slides and savedResponses are ready
+  // Fixed: reconstruct SJT object from metadata (same as Desktop)
   useEffect(() => {
     if (slides.length > 0 && Object.keys(savedResponses).length > 0) {
       // Pre-fill responses from Firestore
-      const preFilledResponses: Record<string, string | number | boolean> = {};
+      const preFilledResponses: Record<string, ResponseValue> = {};
       slides.forEach((slide) => {
         if (slide.type === 'question') {
-          const questionId = (slide.content as Question).id;
-          const savedResponse = savedResponses[questionId];
-          if (savedResponse) {
-            preFilledResponses[questionId] = savedResponse.answer;
+          const question = slide.content as Question;
+          const questionId = question.id;
+          const videoId = slide.videoId;
+          // Use composite key: videoId_questionId
+          const compositeKey = `${videoId}_${questionId}`;
+          const saved = savedResponses[compositeKey];
+          if (saved) {
+            // For SJT questions, reconstruct the full response object from metadata
+            // because we only save intentScore as the answer value
+            const isSJT = question.type === 'behavioral-intent' &&
+                          saved.metadata?.selectedOptionId;
+            if (isSJT && saved.metadata) {
+              preFilledResponses[compositeKey] = {
+                selectedOptionId: saved.metadata.selectedOptionId!,
+                intentScore: saved.answer as number
+              };
+            } else {
+              preFilledResponses[compositeKey] = saved.answer;
+            }
           }
         }
       });
@@ -247,6 +311,7 @@ const VideoModule: React.FC = () => {
     totalDuration?: number
   ) => {
     if (!campaign || !user) return;
+    console.log(`🎬 handleVideoCompleted called:`, { itemId, videoId, questionTarget, watchedDuration, totalDuration });
     try {
       if (watchedDuration !== undefined && totalDuration !== undefined) {
         handleVideoProgress(videoId, watchedDuration, totalDuration);
@@ -257,30 +322,50 @@ const VideoModule: React.FC = () => {
         watchedDuration,
         totalDuration,
       });
+      console.log(`✅ setModuleVideoFinished completed for ${itemId}`);
     } catch (error) {
       console.error('Failed to record video completion', error);
     }
   };
 
-  const handleAnswer = async (questionId: string, answer: string | number | boolean) => {
-    setResponses(prev => ({ ...prev, [questionId]: answer }));
+  const handleAnswer = async (questionId: string, videoId: string, answer: ResponseValue) => {
+    const compositeKey = `${videoId}_${questionId}`;
+    console.log(`📝 handleAnswer called:`, { questionId, videoId, compositeKey, answer });
+    setResponses(prev => ({ ...prev, [compositeKey]: answer }));
     const currentSlide = slides[currentSlideIndex];
 
     if (!campaign || !user || !currentSlide) return;
 
-    setSavingResponse(questionId);
+    console.log(`📝 Current slide info:`, { 
+      itemId: currentSlide.itemId, 
+      questionTarget: currentSlide.questionTarget,
+      videoId: currentSlide.videoId 
+    });
+
+    setSavingResponse(compositeKey);
     try {
       const question = currentSlide.content as Question;
+
+      // Handle SJT response (Q2 with options)
+      const isSJTResponse = typeof answer === 'object' && 'selectedOptionId' in answer;
+
       await saveCampaignResponse(
         campaign.id,
         currentSlide.videoId,
         questionId,
         user.id,
         user.organization || '',
-        answer,
+        isSJTResponse ? (answer as { selectedOptionId: string; intentScore: number }).intentScore : answer,
         {
           questionType: question.type,
-          questionText: question.statement
+          questionText: question.statement,
+          competencyId: question.competencyId,
+          skillId: question.skillId,
+          // Include SJT-specific fields for Q2
+          ...(isSJTResponse && {
+            selectedOptionId: (answer as { selectedOptionId: string; intentScore: number }).selectedOptionId,
+            intentScore: (answer as { selectedOptionId: string; intentScore: number }).intentScore
+          })
         }
       );
 
@@ -307,8 +392,8 @@ const VideoModule: React.FC = () => {
 
   const scrollToSlide = (index: number) => {
     if (index >= slides.length) {
-      // End of campaign
-      navigate(`/employee/comparison/${moduleId}`);
+      // End of campaign - go to campaign details to show completion summary
+      navigate(`/employee/campaign/${moduleId}`);
       return;
     }
     if (containerRef.current) {
@@ -319,12 +404,27 @@ const VideoModule: React.FC = () => {
     }
   };
 
-  // Loading state
+  // Loading state - skeleton that matches the video experience
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center px-6">
-        <Loader className="w-12 h-12 animate-spin text-white mb-4" />
-        <p className="text-white/70">Loading experience...</p>
+      <div className="fixed inset-0 bg-black text-white overflow-hidden">
+        {/* Close button skeleton */}
+        <div className="absolute top-6 right-6 z-50 w-10 h-10 rounded-full bg-white/10 animate-pulse" />
+
+        {/* Video player skeleton */}
+        <div className="h-full w-full flex flex-col items-center justify-center px-6">
+          {/* Video area */}
+          <div className="w-full max-w-md aspect-[9/16] bg-white/5 rounded-2xl animate-pulse mb-6" />
+
+          {/* Title skeleton */}
+          <div className="w-3/4 h-6 bg-white/10 rounded-lg animate-pulse mb-3" />
+          <div className="w-1/2 h-4 bg-white/10 rounded animate-pulse" />
+        </div>
+
+        {/* Bottom hint skeleton */}
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2">
+          <div className="w-8 h-8 bg-white/10 rounded-full animate-pulse" />
+        </div>
       </div>
     );
   }
@@ -382,9 +482,11 @@ const VideoModule: React.FC = () => {
               ) : (
                 <QuestionSlide
                   data={slide.content as Question}
-                  response={responses[(slide.content as Question).id]}
-                  onAnswer={(val) => handleAnswer((slide.content as Question).id, val)}
-                  isSaving={savingResponse === (slide.content as Question).id}
+                  response={responses[`${slide.videoId}_${(slide.content as Question).id}`]}
+                  onAnswer={(val) => handleAnswer((slide.content as Question).id, slide.videoId, val)}
+                  isSaving={savingResponse === `${slide.videoId}_${(slide.content as Question).id}`}
+                  questionIndex={slides.filter((s, i) => i <= index && s.type === 'question').length - 1}
+                  totalQuestions={slides.filter(s => s.type === 'question').length}
                 />
               )}
 
@@ -473,23 +575,39 @@ const VideoSlide = ({
   );
 };
 
+// Response type for Q2 SJT questions
+interface SJTResponse {
+  selectedOptionId: string;
+  intentScore: number;
+}
+
 const QuestionSlide = ({
   data,
   response,
   onAnswer,
-  isSaving
+  isSaving,
+  questionIndex,
+  totalQuestions
 }: {
   data: Question;
-  response: string | number | boolean | undefined;
-  onAnswer: (val: string | number | boolean) => void;
+  response: string | number | boolean | SJTResponse | undefined;
+  onAnswer: (val: string | number | boolean | SJTResponse) => void;
   isSaving: boolean;
+  questionIndex?: number;
+  totalQuestions?: number;
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [textValue, setTextValue] = useState(
     typeof response === 'string' ? response : ''
   );
 
+  // Determine if answered based on response type
   const isAnswered = response !== undefined;
+
+  // For Q2 SJT, check if response has selectedOptionId
+  const selectedOptionId = typeof response === 'object' && response !== null && 'selectedOptionId' in response
+    ? (response as SJTResponse).selectedOptionId
+    : undefined;
 
   // Sync textValue when response prop changes (e.g., loaded from Firestore)
   useEffect(() => {
@@ -498,84 +616,289 @@ const QuestionSlide = ({
     }
   }, [response]);
 
-  return (
-    <div className="w-full h-full bg-dark-bg flex flex-col items-center justify-center p-8 relative">
-      {/* Background decoration */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-blue-900/20 to-transparent" />
-      </div>
+  // Progress percentage for the bar
+  const progressPercent = questionIndex !== undefined && totalQuestions 
+    ? ((questionIndex + 1) / totalQuestions) * 100 
+    : 0;
 
-      <div className="w-full max-w-md z-10">
-        <div className="flex items-center justify-center gap-3 mb-8">
-          <h3 className="text-2xl font-bold text-center text-white leading-snug">
-            {data.statement}
-          </h3>
-          {isAnswered && (
-            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-green-500 flex items-center justify-center">
-              <Check size={20} className="text-white" strokeWidth={3} />
+  return (
+    <div className="w-full h-full bg-gradient-to-b from-[#0f1419] to-[#1a1a1a] flex items-center justify-center p-5 relative overflow-y-auto">
+      {/* Progress bar */}
+      {questionIndex !== undefined && totalQuestions !== undefined && (
+        <div className="absolute top-10 left-6 right-20 h-2 bg-white/10 rounded-full overflow-hidden">
+          <motion.div 
+            className="h-full bg-gradient-to-r from-[#00A3FF] to-[#00D4FF] rounded-full"
+            initial={{ width: 0 }}
+            animate={{ width: `${progressPercent}%` }}
+            transition={{ duration: 0.3 }}
+          />
             </div>
           )}
-        </div>
 
-        <div className={`space-y-3 ${isAnswered ? 'opacity-50 pointer-events-none' : ''}`}>
-          {(data.type === 'behavioral-perception' || data.type === 'behavioral-intent') && (
-            <>
-              <div className="flex justify-between text-sm text-white/50 mb-2 px-2">
-                <span>{data.scaleLabels?.low || 'Disagree'}</span>
-                <span>{data.scaleLabels?.high || 'Agree'}</span>
+      <div className="w-full max-w-sm mx-auto">
+        {/* Question Counter */}
+        {questionIndex !== undefined && totalQuestions !== undefined && (
+          <motion.div 
+            className="mb-5"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <span className="text-[#00A3FF] text-base font-semibold">Question {questionIndex + 1}</span>
+            <span className="text-white/30 text-base">/{totalQuestions}</span>
+          </motion.div>
+        )}
+
+        {/* Context Card */}
+        <motion.div 
+          className="bg-gradient-to-br from-white/8 to-white/4 backdrop-blur-sm rounded-2xl p-4 mb-6 border border-white/5"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <div className="flex items-start gap-3">
+            <span className="text-[#00A3FF] text-4xl font-bold flex-shrink-0 leading-none">*</span>
+            <p className="text-sm leading-relaxed flex-1 pt-1">
+              {(() => {
+                const text = data.statement || '';
+                const words = text.split(' ');
+                const midWordIndex = Math.ceil(words.length / 2);
+                const firstHalf = words.slice(0, midWordIndex).join(' ');
+                const secondHalf = words.slice(midWordIndex).join(' ');
+                return (
+                  <>
+                    <span className="text-white/40">{firstHalf} </span>
+                    <span className="text-white">{secondHalf}</span>
+                  </>
+                );
+              })()}
+            </p>
+        </div>
+        </motion.div>
+
+        {/* Question Prompt */}
+        {data.type === 'behavioral-intent' && data.options && data.options.length > 0 && (
+          <motion.h3 
+            className="text-white font-semibold text-lg mb-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2 }}
+          >
+            What would you do?
+          </motion.h3>
+        )}
+
+        <div className={`${isAnswered ? 'pointer-events-none' : ''}`}>
+          {/* Q1 - Behavioral Perception (7-point Likert scale) */}
+          {data.type === 'behavioral-perception' && (
+            <motion.div 
+              className="space-y-5"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.2 }}
+            >
+              <div className="flex justify-between text-xs text-white/40 px-1">
+                <span>{data.scaleLabels?.low || 'Strongly Disagree'}</span>
+                <span>{data.scaleLabels?.high || 'Strongly Agree'}</span>
               </div>
-              <div className="grid grid-cols-5 gap-3">
-                {[1, 2, 3, 4, 5].map((val) => (
-                  <button
+              <div className="grid grid-cols-7 gap-2">
+                {[1, 2, 3, 4, 5, 6, 7].map((val) => (
+                  <motion.button
                     key={val}
                     onClick={() => !isAnswered && onAnswer(val)}
                     disabled={isAnswered}
+                    whileTap={{ scale: 0.95 }}
                     className={`
-                                            aspect-square rounded-xl font-bold text-lg transition-all
-                                            ${response === val
-                        ? 'bg-primary text-white scale-110 shadow-lg shadow-primary/50'
+                      aspect-square rounded-2xl font-bold text-base transition-all duration-200
+                      ${response === val
+                        ? 'bg-gradient-to-br from-[#00A3FF] to-[#0077B3] text-white shadow-xl shadow-[#00A3FF]/30 scale-110'
                         : isAnswered
-                          ? 'bg-white/5 text-white/20 cursor-not-allowed'
-                          : 'bg-white/10 hover:bg-white/20 text-white cursor-pointer'}
-                                        `}
+                          ? 'bg-white/5 text-white/20'
+                          : 'bg-white/10 hover:bg-white/15 text-white/70 hover:text-white active:scale-95'}
+                    `}
                   >
                     {val}
-                  </button>
+                  </motion.button>
                 ))}
               </div>
-            </>
+            </motion.div>
           )}
 
+          {/* Q2 - Behavioral Intent (SJT Multiple Choice) - Tall 2x2 Grid */}
+          {data.type === 'behavioral-intent' && data.options && data.options.length > 0 && (
+            <div className="grid grid-cols-2 gap-3">
+              {data.options.map((option, idx) => {
+                const isSelected = selectedOptionId === option.id;
+                
+                return (
+                  <motion.button
+                  key={option.id}
+                  onClick={() => !isAnswered && onAnswer({
+                    selectedOptionId: option.id,
+                    intentScore: option.intentScore
+                  })}
+                  disabled={isAnswered}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1 + idx * 0.05 }}
+                    whileTap={{ scale: 0.98 }}
+                  className={`
+                      relative rounded-3xl p-4 transition-all duration-200 min-h-[160px] flex flex-col
+                      ${isSelected
+                        ? isAnswered
+                          ? 'bg-gradient-to-br from-[#00A3FF]/30 to-[#0077B3]/20 ring-1 ring-[#00A3FF]/50'
+                          : 'bg-gradient-to-br from-[#00A3FF] to-[#0077B3] ring-2 ring-[#00A3FF] shadow-xl shadow-[#00A3FF]/30'
+                      : isAnswered
+                          ? 'bg-white/5'
+                          : 'bg-gradient-to-br from-white/10 to-white/5 hover:from-white/15 hover:to-white/8 active:scale-[0.98]'}
+                    `}
+                  >
+                    {/* Selection indicator - show check when answered */}
+                    {isSelected && isAnswered && (
+                      <motion.div 
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        className="absolute top-3 left-3 w-6 h-6 rounded-full flex items-center justify-center shadow-lg bg-[#00A3FF]/70"
+                      >
+                        <Check size={14} className="text-white" strokeWidth={3} />
+                      </motion.div>
+                    )}
+                    
+                    {/* Option content */}
+                    <div className="flex flex-col items-center justify-center flex-1 text-center px-2">
+                      {/* Option text */}
+                      <span className={`text-[11px] leading-snug transition-all ${
+                        isSelected
+                          ? isAnswered
+                            ? 'text-white/80 font-medium'
+                            : 'text-white font-medium'
+                          : isAnswered
+                            ? 'text-white/30'
+                            : 'text-white/70'
+                      }`}>
+                        {option.text}
+                      </span>
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Fallback for Q2 without options (legacy support) */}
+          {data.type === 'behavioral-intent' && (!data.options || data.options.length === 0) && (
+            <motion.div 
+              className="space-y-5"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.2 }}
+            >
+              <h3 className="text-white font-semibold text-lg">
+                How likely would you do this?
+              </h3>
+              <div className="flex justify-between text-xs text-white/40 px-1">
+                <span>{data.scaleLabels?.low || 'Unlikely'}</span>
+                <span>{data.scaleLabels?.high || 'Very Likely'}</span>
+              </div>
+              <div className="grid grid-cols-7 gap-2">
+                {[1, 2, 3, 4, 5, 6, 7].map((val) => (
+                  <motion.button
+                    key={val}
+                    onClick={() => !isAnswered && onAnswer(val)}
+                    disabled={isAnswered}
+                    whileTap={{ scale: 0.95 }}
+                    className={`
+                      aspect-square rounded-2xl font-bold text-base transition-all duration-200
+                      ${response === val
+                        ? 'bg-gradient-to-br from-[#00A3FF] to-[#0077B3] text-white shadow-xl shadow-[#00A3FF]/30 scale-110'
+                        : isAnswered
+                          ? 'bg-white/5 text-white/20'
+                          : 'bg-white/10 hover:bg-white/15 text-white/70 hover:text-white active:scale-95'}
+                    `}
+                  >
+                    {val}
+                  </motion.button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {/* Q3 - Qualitative (Free text) */}
           {data.type === 'qualitative' && (
-            <div className="space-y-4">
+            <motion.div 
+              className="space-y-4"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.2 }}
+            >
+              <h3 className="text-white font-semibold text-lg">
+                Share your thoughts
+              </h3>
               <textarea
                 ref={textareaRef}
                 value={textValue}
                 onChange={(e) => !isAnswered && setTextValue(e.target.value)}
                 disabled={isAnswered}
-                className={`w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white placeholder:text-white/30 min-h-[150px] focus:outline-none transition-colors ${isAnswered
-                  ? 'cursor-not-allowed opacity-60'
-                  : 'focus:border-primary/50'
+                className={`w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white placeholder:text-white/30 min-h-[140px] focus:outline-none transition-all resize-none ${isAnswered
+                  ? 'opacity-50'
+                  : 'focus:border-[#00A3FF]/50 focus:ring-2 focus:ring-[#00A3FF]/20'
                   }`}
-                placeholder={isAnswered ? "Your answer has been saved" : "Type your thoughts here..."}
+                placeholder={isAnswered ? "Your answer has been saved" : "Type your response here..."}
                 onBlur={(e) => !isAnswered && e.target.value && onAnswer(e.target.value)}
               />
-              {!isAnswered && (
-                <button
+              {!isAnswered && textValue && (
+                <motion.button
                   onClick={() => textareaRef.current?.blur()}
-                  className="w-full py-3 bg-primary rounded-xl font-semibold text-white hover:bg-blue-600 transition-colors"
+                  whileTap={{ scale: 0.98 }}
+                  className="w-full py-3.5 bg-gradient-to-r from-[#00A3FF] to-[#0077B3] rounded-2xl font-semibold text-sm text-white shadow-lg shadow-[#00A3FF]/20 hover:shadow-xl hover:shadow-[#00A3FF]/30 transition-all"
                 >
-                  Submit Answer
-                </button>
+                  Submit
+                </motion.button>
               )}
-            </div>
+            </motion.div>
           )}
         </div>
 
+        {/* Saving indicator */}
         {isSaving && (
-          <div className="mt-6 flex justify-center">
-            <Loader className="animate-spin text-white/50" size={20} />
+          <motion.div 
+            className="mt-6 flex justify-center"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+          >
+            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 text-white/60 text-sm">
+              <Loader className="animate-spin" size={16} />
+              <span>Saving...</span>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Answered indicator */}
+        {isAnswered && !isSaving && (
+          <motion.div 
+            className="mt-6 flex justify-center"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <div className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-r from-green-500/20 to-green-600/20 border border-green-500/30 text-green-400 text-sm font-medium shadow-lg shadow-green-500/10">
+              <Check size={16} strokeWidth={3} />
+              <span>Answer saved</span>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Swipe hint */}
+        {isAnswered && !isSaving && (
+          <motion.div 
+            className="mt-4 flex justify-center"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5 }}
+          >
+            <div className="flex flex-col items-center text-white/30 text-xs">
+              <ChevronUp size={20} className="animate-bounce" />
+              <span>Swipe up for next</span>
           </div>
+          </motion.div>
         )}
       </div>
     </div>

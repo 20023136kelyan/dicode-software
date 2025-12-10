@@ -172,17 +172,15 @@ const InviteModal: React.FC<InviteModalProps> = ({ isOpen, onClose, departments,
     <>
       {/* Backdrop */}
       <div
-        className={`fixed inset-0 bg-black/40 z-40 transition-opacity duration-300 ${
-          isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
-        }`}
+        className={`fixed inset-0 bg-black/40 z-40 transition-opacity duration-300 ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
         onClick={onClose}
       />
 
       {/* Slide-over Panel */}
       <div
-        className={`fixed right-0 top-0 bottom-0 w-full max-w-md bg-dark-card border-l border-dark-border shadow-2xl z-50 overflow-y-auto transform transition-transform duration-300 ease-out ${
-          isOpen ? 'translate-x-0' : 'translate-x-full'
-        }`}
+        className={`fixed right-0 top-0 bottom-0 w-full max-w-md bg-dark-card border-l border-dark-border shadow-2xl z-50 overflow-y-auto transform transition-transform duration-300 ease-out ${isOpen ? 'translate-x-0' : 'translate-x-full'
+          }`}
       >
         {/* Header */}
         <div className="sticky top-0 bg-dark-card border-b border-dark-border px-6 py-4 flex items-center justify-between z-10">
@@ -258,42 +256,54 @@ const InviteModal: React.FC<InviteModalProps> = ({ isOpen, onClose, departments,
                 <label className="block text-sm font-medium text-dark-text mb-2">
                   Role *
                 </label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   <button
                     type="button"
                     onClick={() => setFormData({ ...formData, role: 'employee' })}
-                    className={`p-4 rounded-xl border-2 transition-all text-left ${
-                      formData.role === 'employee'
-                        ? 'border-primary bg-primary/10'
-                        : 'border-dark-border bg-dark-bg hover:border-dark-border/80'
-                    }`}
+                    className={`p-3 rounded-xl border-2 transition-all text-left ${formData.role === 'employee'
+                      ? 'border-primary bg-primary/10'
+                      : 'border-dark-border bg-dark-bg hover:border-dark-border/80'
+                      }`}
                   >
                     <Users className={`h-5 w-5 mb-2 ${formData.role === 'employee' ? 'text-primary' : 'text-dark-text-muted'}`} />
                     <div className={`text-sm font-medium ${formData.role === 'employee' ? 'text-dark-text' : 'text-dark-text-muted'}`}>
                       Employee
                     </div>
-                    <div className="text-xs text-dark-text-muted mt-0.5">Standard access</div>
+                    <div className="text-[10px] text-dark-text-muted mt-0.5">Standard</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, role: 'applicant', department: '' })}
+                    className={`p-3 rounded-xl border-2 transition-all text-left ${formData.role === 'applicant'
+                      ? 'border-primary bg-primary/10'
+                      : 'border-dark-border bg-dark-bg hover:border-dark-border/80'
+                      }`}
+                  >
+                    <UserPlus className={`h-5 w-5 mb-2 ${formData.role === 'applicant' ? 'text-primary' : 'text-dark-text-muted'}`} />
+                    <div className={`text-sm font-medium ${formData.role === 'applicant' ? 'text-dark-text' : 'text-dark-text-muted'}`}>
+                      Applicant
+                    </div>
+                    <div className="text-[10px] text-dark-text-muted mt-0.5">Restricted</div>
                   </button>
                   <button
                     type="button"
                     onClick={() => setFormData({ ...formData, role: 'admin' })}
-                    className={`p-4 rounded-xl border-2 transition-all text-left ${
-                      formData.role === 'admin'
-                        ? 'border-primary bg-primary/10'
-                        : 'border-dark-border bg-dark-bg hover:border-dark-border/80'
-                    }`}
+                    className={`p-3 rounded-xl border-2 transition-all text-left ${formData.role === 'admin'
+                      ? 'border-primary bg-primary/10'
+                      : 'border-dark-border bg-dark-bg hover:border-dark-border/80'
+                      }`}
                   >
                     <Building2 className={`h-5 w-5 mb-2 ${formData.role === 'admin' ? 'text-primary' : 'text-dark-text-muted'}`} />
                     <div className={`text-sm font-medium ${formData.role === 'admin' ? 'text-dark-text' : 'text-dark-text-muted'}`}>
                       Admin
                     </div>
-                    <div className="text-xs text-dark-text-muted mt-0.5">Full control</div>
+                    <div className="text-[10px] text-dark-text-muted mt-0.5">Control</div>
                   </button>
                 </div>
               </div>
 
               {/* Department */}
-              {departments.length > 0 && (
+              {departments.length > 0 && formData.role !== 'applicant' && (
                 <div>
                   <label className="block text-sm font-medium text-dark-text mb-2">
                     Department (optional)
@@ -321,11 +331,10 @@ const InviteModal: React.FC<InviteModalProps> = ({ isOpen, onClose, departments,
                     {cohorts.map((cohort) => (
                       <label
                         key={cohort.id}
-                        className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
-                          formData.cohortIds.includes(cohort.id)
-                            ? 'border-primary bg-primary/5'
-                            : 'border-dark-border hover:bg-dark-bg'
-                        }`}
+                        className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${formData.cohortIds.includes(cohort.id)
+                          ? 'border-primary bg-primary/5'
+                          : 'border-dark-border hover:bg-dark-bg'
+                          }`}
                       >
                         <input
                           type="checkbox"

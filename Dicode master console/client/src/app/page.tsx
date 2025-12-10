@@ -6,16 +6,18 @@ import MainLayout from '@/components/Layout/MainLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { getRecentActivities } from '@/lib/firestore';
 import type { Activity, ActivityAction } from '@/lib/types';
-import { 
-  LayoutGrid, 
-  Sparkles, 
-  ArrowUpRight, 
-  FolderOpen, 
-  Film, 
+import { Avatar } from '@/components/ui/avatar';
+import {
+  LayoutGrid,
+  Sparkles,
+  ArrowUpRight,
+  FolderOpen,
+  Film,
   Shield,
   Clock,
   Plus,
   TrendingUp,
+  Building2,
 } from 'lucide-react';
 
 interface Tool {
@@ -76,6 +78,15 @@ const tools: Tool[] = [
     color: 'text-emerald-600',
     bgColor: 'bg-emerald-500',
   },
+  {
+    id: 'client-management',
+    name: 'Client Management',
+    description: 'View and manage client organizations and their users',
+    icon: <Building2 className="h-5 w-5" />,
+    path: '/clients',
+    color: 'text-indigo-600',
+    bgColor: 'bg-indigo-500',
+  },
 ];
 
 const quickActions = [
@@ -108,11 +119,13 @@ function getActionDescription(action: ActivityAction): string {
     campaign_deleted: 'deleted campaign',
     video_generated: 'generated video',
     video_uploaded: 'uploaded video',
+    video_updated: 'updated video',
     video_deleted: 'deleted video',
     asset_created: 'created asset',
     asset_updated: 'updated asset',
     asset_deleted: 'deleted asset',
     access_updated: 'updated access for',
+    bulk_access_updated: 'bulk updated access for',
   };
   return descriptions[action] || action;
 }
@@ -157,7 +170,7 @@ export default function Home() {
 
   return (
     <MainLayout>
-      <div className="max-w-6xl mx-auto space-y-8">
+      <div className="space-y-8">
         {/* Welcome Section */}
         <section className="space-y-1">
           <h1 className="text-2xl font-semibold text-slate-900">
@@ -171,16 +184,16 @@ export default function Home() {
         {/* Quick Actions */}
         <section className="flex flex-wrap gap-2">
           {quickActions.map((action) => (
-                <button
+            <button
               key={action.path}
               onClick={() => handleToolClick(action.path)}
               className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:border-slate-300 hover:shadow-sm"
-                >
+            >
               {action.icon}
               {action.label}
-                </button>
+            </button>
           ))}
-          </section>
+        </section>
 
         {/* Main Grid */}
         <div className="grid gap-6 lg:grid-cols-3">
@@ -200,13 +213,13 @@ export default function Home() {
                   className="group relative flex items-start gap-4 rounded-xl border border-slate-200 bg-white p-4 text-left transition-all hover:border-slate-300 hover:shadow-md"
                 >
                   <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg ${tool.bgColor} text-white shadow-sm`}>
-                      {tool.icon}
-                    </div>
+                    {tool.icon}
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <h3 className="text-sm font-semibold text-slate-900">
-                      {tool.name}
-                    </h3>
+                        {tool.name}
+                      </h3>
                       {tool.badge && (
                         <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-violet-600">
                           {tool.badge}
@@ -269,9 +282,12 @@ export default function Home() {
                 <div className="divide-y divide-slate-100">
                   {activities.map((activity) => (
                     <div key={activity.id} className="flex items-start gap-3 p-4">
-                      <div className="h-8 w-8 rounded-full bg-gradient-to-br from-sky-400 to-violet-500 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
-                        {(activity.userName || activity.userEmail)?.[0]?.toUpperCase() || '?'}
-                      </div>
+                      <Avatar
+                        src={activity.userAvatar}
+                        name={activity.userName}
+                        email={activity.userEmail}
+                        className="h-8 w-8 text-xs shrink-0"
+                      />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-slate-700 leading-snug">
                           <span className="font-medium text-slate-900">
@@ -293,7 +309,7 @@ export default function Home() {
             </div>
           </section>
         </div>
-    </div>
+      </div>
     </MainLayout>
   );
 }

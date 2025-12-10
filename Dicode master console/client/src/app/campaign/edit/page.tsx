@@ -13,7 +13,8 @@ import {
   getAllVideos,
   createCampaignItem,
   getVideo,
-  setCampaignPublishState
+  setCampaignPublishState,
+  logActivity,
 } from '@/lib/firestore';
 import { type CompetencyDefinition, type SkillDefinition } from '@/lib/competencies';
 import { useCompetencies } from '@/hooks/useCompetencies';
@@ -115,8 +116,12 @@ export default function EditCampaignPage() {
           return;
         }
 
-        // Check ownership
-        if (campaign.metadata.createdBy !== user.uid) {
+        // Check access: DiCode staff can edit dicode/legacy campaigns, others need ownership
+        const isDiCodeStaff = user.email?.endsWith('@di-code.de');
+        const isDicodeCampaign = campaign.source === 'dicode' || !campaign.source;
+        const isOwner = campaign.metadata.createdBy === user.uid;
+
+        if (!isOwner && !(isDiCodeStaff && isDicodeCampaign)) {
           setError('You do not have permission to edit this campaign');
           return;
         }
@@ -458,6 +463,18 @@ export default function EditCampaignPage() {
           ),
         );
       }
+
+      // Log activity
+      await logActivity({
+        action: publish !== originalCampaign.metadata.isPublished && publish ? 'campaign_published' : 'campaign_updated',
+        userId: user.uid,
+        userEmail: user.email || '',
+        userName: user.displayName || undefined,
+        resourceId: campaignId,
+        resourceName: form.name,
+        resourceType: 'campaign',
+        metadata: { videosCount: selectedVideos.length },
+      });
 
       router.push(`/campaign?id=${campaignId}`);
     } catch (err: any) {

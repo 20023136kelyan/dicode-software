@@ -16,6 +16,7 @@ import {
   setDoc,
   runTransaction,
   deleteField,
+  limit as firestoreLimit,
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, auth, functions } from './firebase';
@@ -37,6 +38,13 @@ import type {
   CampaignInstance,
   NotificationType,
   ModuleProgress,
+  UserStreak,
+  UserStreakSummary,
+  StreakEvent,
+  StreakStatus,
+  QuestionType,
+  UserRole,
+  SkillAssessment,
 } from '@/types';
 
 const CAMPAIGNS_COLLECTION = 'campaigns';
@@ -49,9 +57,14 @@ const ORGANIZATIONS_COLLECTION = 'organizations';
 const INVITATIONS_COLLECTION = 'invitations';
 export const CAMPAIGN_ENROLLMENTS_COLLECTION = 'campaignEnrollments';
 const CAMPAIGN_PROGRESS_COLLECTION = 'campaignProgress';
+const ORGANIZATION_ACTIVITIES_COLLECTION = 'organizationActivities';
 export const CAMPAIGN_RESPONSES_COLLECTION = 'campaignResponses';
 const CAMPAIGN_NOTIFICATIONS_COLLECTION = 'campaignNotifications';
+const ORGANIZATION_NOTIFICATIONS_COLLECTION = 'organizationNotifications';
 const CAMPAIGN_INSTANCES_COLLECTION = 'campaignInstances';
+const SUPPORT_TICKETS_COLLECTION = 'supportTickets';
+const USER_STREAKS_COLLECTION = 'userStreaks';
+const STREAK_EVENTS_COLLECTION = 'streakEvents';
 
 function logFirestoreOperation(operation: string, collectionName: string, details?: Record<string, unknown>) {
   console.log(`🔥 Firestore ${operation}:`, {
@@ -436,6 +449,11 @@ export async function getCampaignsForAdmin(
       if (seen.has(docSnap.id)) continue;
       const campaign = await getCampaign(docSnap.id);
       if (campaign) {
+        // Filter out unpublished DiCode campaigns (only show published templates)
+        if (campaign.source === 'dicode' && !campaign.metadata.isPublished) {
+          continue;
+        }
+
         // For DiCode global queries, ensure allowlist truly empty/null/missing
         if (
           campaign.source === 'dicode' &&
@@ -459,7 +477,8 @@ export async function getPublishedCampaigns(
   userOrganization?: string | null,
   userDepartment?: string,
   userId?: string,
-  userCohortIds?: string[]
+  userCohortIds?: string[],
+  userRole?: UserRole
 ): Promise<Campaign[]> {
   const campaigns: Campaign[] = [];
   const seen = new Set<string>();
@@ -548,13 +567,30 @@ export async function getPublishedCampaigns(
         continue;
       }
 
+      // DiCode campaigns require explicit enrollment at org level
+      // Employees only see DiCode campaigns if they have been enrolled by an admin
+      if (campaign.source === 'dicode' && userId) {
+        const enrollment = await checkUserEnrollment(campaign.id, userId);
+        if (!enrollment) {
+          // User is not enrolled in this DiCode campaign, skip it
+          continue;
+        }
+      }
+
       // Organization-level gate already handled by query; now enforce granular filters
-      const { allowedDepartments, allowedEmployeeIds, allowedCohortIds } = campaign;
+      const { allowedDepartments, allowedEmployeeIds, allowedCohortIds, allowedRoles } = campaign;
 
       // If user has no organization, no further filters apply
       if (!userOrganization) {
         campaigns.push(campaign);
         continue;
+      }
+
+      // Role filter (Strict for Applicants)
+      if (userRole === 'applicant') {
+        if (!allowedRoles || !allowedRoles.includes('applicant')) {
+          continue;
+        }
       }
 
       const hasGranularFilters =
@@ -630,6 +666,36 @@ export async function setCampaignPublishState(campaignId: string, isPublished: b
     'metadata.isPublished': isPublished,
     'metadata.updatedAt': Timestamp.now(),
   });
+
+  // Instrument: Log Publication Activity
+  if (isPublished && auth.currentUser) {
+    try {
+      const campaign = await getCampaign(campaignId);
+      if (campaign) {
+        // Log Activity
+        await logActivity(
+          (auth.currentUser as any).organization || campaign.allowedOrganizations?.[0] || '',
+          'campaign_published',
+          {
+            id: auth.currentUser.uid,
+            name: auth.currentUser.displayName || 'Admin'
+          },
+          { id: campaignId, name: campaign.title }
+        );
+
+        // Notify Admins
+        await notifyAdmins(
+          (auth.currentUser as any).organization || campaign.allowedOrganizations?.[0] || '',
+          'campaign_status',
+          'Campaign Published',
+          `"${campaign.title}" is now live and available to employees.`,
+          `/admin/campaigns/${campaignId}`
+        );
+      }
+    } catch (e) {
+      console.warn('Failed to log campaign publish activity', e);
+    }
+  }
 }
 
 export async function batchGetCampaignItems(itemIds: string[]): Promise<CampaignItem[]> {
@@ -869,8 +935,8 @@ export async function getVideosByUser(userId: string): Promise<Video[]> {
   }
 }
 
-export async function getAllVideos(): Promise<Video[]> {
-  logFirestoreOperation('READ', VIDEOS_COLLECTION, {});
+export async function getAllVideos(userOrganizationId?: string): Promise<Video[]> {
+  logFirestoreOperation('READ', VIDEOS_COLLECTION, { userOrganizationId });
 
   const q = query(
     collection(db, VIDEOS_COLLECTION),
@@ -881,7 +947,7 @@ export async function getAllVideos(): Promise<Video[]> {
     const querySnapshot = await getDocs(q);
     console.log(`✅ Found ${querySnapshot.docs.length} total videos`);
 
-    return querySnapshot.docs.map((docSnap) => {
+    const videos = querySnapshot.docs.map((docSnap) => {
       const data = docSnap.data() as Omit<Video, 'id'>;
       return {
         id: docSnap.id,
@@ -892,6 +958,21 @@ export async function getAllVideos(): Promise<Video[]> {
           updatedAt: timestampToDate(data.metadata.updatedAt),
         },
       };
+    });
+
+    // If no org ID provided (e.g. DiCode admin), return all
+    if (!userOrganizationId) {
+      return videos;
+    }
+
+    // Filter by organization
+    return videos.filter(video => {
+      // Global videos (no specific allowed orgs)
+      if (!video.allowedOrganizations || video.allowedOrganizations.length === 0) {
+        return true;
+      }
+      // Organization-specific videos
+      return video.allowedOrganizations.includes(userOrganizationId);
     });
   } catch (error) {
     console.error('❌ Failed to fetch videos:', error);
@@ -1026,7 +1107,8 @@ export async function incrementAssetUsage(assetId: string): Promise<void> {
 }
 
 export type UserProfileDoc = {
-  role: 'admin' | 'employee';
+  email?: string | null;
+  role: 'admin' | 'employee' | 'applicant';
   department?: string | null;
   organization?: string | null;
   name?: string | null;
@@ -1036,6 +1118,13 @@ export type UserProfileDoc = {
   requirePasswordChange?: boolean;
   onboardingCompletedAt?: Date | Timestamp | null;
   invitationId?: string | null;
+  notificationPreferences?: {
+    campaignReminders?: boolean;
+    newCampaigns?: boolean;
+    streakAlerts?: boolean;
+    badgeNotifications?: boolean;
+    emailDigest?: boolean;
+  } | null;
   createdAt: Date | Timestamp;
   updatedAt: Date | Timestamp;
 };
@@ -1068,6 +1157,7 @@ export async function upsertUserProfile(uid: string, profile: UserProfileUpdate)
   };
 
   // Only set fields that are explicitly provided
+  if (profile.email !== undefined) updateData.email = profile.email;
   if (profile.role !== undefined) updateData.role = profile.role;
   if (profile.department !== undefined) updateData.department = profile.department;
   if (profile.organization !== undefined) updateData.organization = profile.organization;
@@ -1090,6 +1180,49 @@ export async function upsertUserProfile(uid: string, profile: UserProfileUpdate)
 
   const updated = await getDoc(profileRef);
   const data = updated.data() as UserProfileDoc;
+
+  // Instrument: Log Employee Update (Only if performed by another user/admin)
+  if (auth.currentUser && auth.currentUser.uid !== uid) {
+    try {
+      const organizationId = (auth.currentUser as any).organization || data.organization;
+      if (organizationId) {
+        const changes: Record<string, any> = {};
+        if (profile.department) changes.department = profile.department;
+        if (profile.role) changes.role = profile.role;
+
+        // Only log if significant fields changed
+        if (Object.keys(changes).length > 0) {
+          await logActivity(
+            organizationId,
+            'employee_updated',
+            {
+              id: auth.currentUser.uid,
+              name: auth.currentUser.displayName || 'Admin',
+              avatar: auth.currentUser.photoURL || undefined
+            },
+            {
+              id: uid,
+              name: data.name || data.email || 'Unknown User'
+            },
+            changes
+          );
+
+          // Notify Admins
+          const changeList = Object.keys(changes).join(', ');
+          await notifyAdmins(
+            organizationId,
+            'organization_update',
+            'Employee Updated',
+            `Admins updated ${data.name || data.email || 'User'}'s profile: ${changeList}.`,
+            `/admin/employees`
+          );
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to log employee update activity', e);
+    }
+  }
+
   return {
     ...data,
     createdAt: timestampToDate(data.createdAt),
@@ -1139,17 +1272,61 @@ export async function getUsersByOrganization(organizationId: string): Promise<Em
 }
 
 /**
- * Delete a user profile from Firestore
- * Note: This only deletes the Firestore user document, not the Firebase Auth account
- * TODO: Implement Cloud Function to also delete Firebase Auth account
+ * Delete a user profile completely (Firebase Auth + Firestore + related data)
+ * Uses Cloud Function to delete the Firebase Auth account and clean up all related data
  */
 export async function deleteUserProfile(userId: string): Promise<void> {
   logFirestoreOperation('DELETE', USERS_COLLECTION, { id: userId });
 
-  const userRef = doc(db, USERS_COLLECTION, userId);
-  await deleteDoc(userRef);
+  // Instrument: Log Employee Deletion (Get user details first)
+  try {
+    const userDoc = await getDoc(doc(db, USERS_COLLECTION, userId));
+    const userData = userDoc.data();
 
-  console.log(`✅ User profile deleted: ${userId}`);
+    if (userData && auth.currentUser) {
+      const organizationId = (auth.currentUser as any).organization || userData.organization;
+      if (organizationId) {
+        await logActivity(
+          organizationId,
+          'employee_deleted',
+          {
+            id: auth.currentUser.uid,
+            name: auth.currentUser.displayName || 'Admin',
+            avatar: auth.currentUser.photoURL || undefined
+          },
+          {
+            id: userId,
+            name: userData.name || userData.email || 'Unknown User'
+          },
+          { role: userData.role, department: userData.department }
+        );
+
+        // Notify Admins
+        await notifyAdmins(
+          organizationId,
+          'system_alert',
+          'Employee Removed',
+          `${userData.name || userData.email || 'Unknown User'} was removed from the organization.`,
+          `/admin/employees`
+        );
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to log employee deletion activity', e);
+  }
+
+  const deleteEmployeeAccount = httpsCallable<
+    { userId: string },
+    { success: boolean; message: string }
+  >(functions, 'deleteEmployeeAccount');
+
+  const result = await deleteEmployeeAccount({ userId });
+
+  if (!result.data.success) {
+    throw new Error(result.data.message || 'Failed to delete user');
+  }
+
+  console.log(`✅ User completely deleted: ${userId}`);
 }
 
 // ============================================
@@ -1325,6 +1502,25 @@ export async function createCohort(
   try {
     const docRef = await addDoc(collection(db, COHORTS_COLLECTION), cohortDoc);
     console.log('✅ Cohort created successfully:', docRef.id);
+
+    // Instrument: Log Activity
+    if (organization && auth.currentUser) {
+      try {
+        await logActivity(
+          organization,
+          'cohort_created',
+          {
+            id: auth.currentUser.uid,
+            name: auth.currentUser.displayName || 'Admin',
+            avatar: auth.currentUser.photoURL || undefined
+          },
+          { id: docRef.id, name: name }
+        );
+      } catch (e) {
+        console.warn('Failed to log cohort activity', e);
+      }
+    }
+
     return docRef.id;
   } catch (error) {
     console.error('❌ Failed to create cohort:', error);
@@ -1524,7 +1720,7 @@ export async function createInvitation(data: {
   organizationId: string;
   organizationName: string;
   email: string;
-  role: 'employee' | 'admin';
+  role: UserRole;
   department?: string;
   cohortIds?: string[];
   invitedBy: string;
@@ -1609,6 +1805,29 @@ export async function createInvitation(data: {
     const docRef = await addDoc(collection(db, INVITATIONS_COLLECTION), cleanInvitationDoc);
 
     console.log('✅ Invitation created successfully:', docRef.id);
+
+    // Instrument: Log Activity
+    try {
+      let inviterName = 'Admin';
+      let inviterAvatar = undefined;
+      // Try to fetch inviter details
+      const inviterDoc = await getDoc(doc(db, USERS_COLLECTION, data.invitedBy));
+      if (inviterDoc.exists()) {
+        const d = inviterDoc.data();
+        inviterName = d.name || d.email || 'Admin';
+        inviterAvatar = d.avatar;
+      }
+
+      await logActivity(
+        data.organizationId,
+        'invitation_sent',
+        { id: data.invitedBy, name: inviterName, avatar: inviterAvatar },
+        { id: docRef.id, name: normalizedEmail },
+        { role: data.role }
+      );
+    } catch (e) {
+      console.warn('Failed to log invitation activity', e);
+    }
 
     // Return invitation ID and password reset link
     return {
@@ -1779,12 +1998,72 @@ export async function updateInvitationStatus(
   const docRef = doc(db, INVITATIONS_COLLECTION, invitationId);
   const updateData: any = { status };
 
+  // Fetch the invitation document to get its current data
+  const invitationDoc = await getDoc(docRef);
+  if (!invitationDoc.exists()) {
+    console.warn('Invitation not found for status update:', invitationId);
+    return;
+  }
+  const invitation = { id: invitationDoc.id, ...invitationDoc.data() } as Invitation;
+
+
   if (status === 'accepted') {
     updateData.acceptedAt = Timestamp.now();
+
+    // Instrument: Notify Admins of New User
+    try {
+      if (invitation.organizationId) {
+        // Fetch invitee name if available in metadata or use email
+        const inviteeName = invitation.metadata?.inviteeName || invitation.email;
+        await notifyAdmins(
+          invitation.organizationId,
+          'user_joined',
+          'New Team Member',
+          `${inviteeName} has joined the organization via invitation.`,
+          '/admin/employees' // Link to employees page
+        );
+      }
+    } catch (e) {
+      console.warn('Failed to notify admins of user join', e);
+    }
   }
 
   await updateDoc(docRef, updateData);
+  await updateDoc(docRef, updateData);
   console.log(`✅ Invitation status updated to ${status}:`, invitationId);
+
+  // Instrument: Log Employee Joined
+  if (status === 'accepted') {
+    try {
+      const invitationDoc = await getDoc(docRef);
+      if (invitationDoc.exists()) {
+        const invData = invitationDoc.data();
+        // Actor is the new user (invitee)
+        // Target is also the user? Or the Organization? 
+        // Let's say Actor = User, Target = Organization (or implicit).
+        // But logActivity requires a target. Maybe Target = "The Invitation" or "The Role"?
+        // Let's make Target = The User (self)
+
+        let actorName = invData.email; // Fallback
+        let actorId = invData.userId || 'unknown';
+
+        if (auth.currentUser) {
+          actorName = auth.currentUser.displayName || invData.email;
+          actorId = auth.currentUser.uid;
+        }
+
+        await logActivity(
+          invData.organizationId,
+          'invitation_accepted', // Using 'invitation_accepted' instead of 'employee_joined' to match pattern, but mapped to "Employee Joined" in UI
+          { id: actorId, name: actorName },
+          { id: actorId, name: actorName }, // Target is self joining
+          { role: invData.role, department: invData.department }
+        );
+      }
+    } catch (e) {
+      console.warn('Failed to log invitation acceptance', e);
+    }
+  }
 }
 
 /**
@@ -1883,7 +2162,20 @@ export async function enrollUserInCampaign(
   // Check if enrollment already exists
   const existing = await checkUserEnrollment(campaignId, userId);
   if (existing) {
-    console.log('⚠️ User already enrolled in campaign:', existing.id);
+    // If existing enrollment has empty or different organizationId, update it
+    // This handles legacy enrollments created before org-scoping was enforced
+    if (organizationId && (!existing.organizationId || existing.organizationId !== organizationId)) {
+      console.log('🔄 Updating enrollment organizationId:', existing.id, 'from', existing.organizationId || '(empty)', 'to', organizationId);
+      try {
+        const enrollmentRef = doc(db, CAMPAIGN_ENROLLMENTS_COLLECTION, existing.id);
+        await updateDoc(enrollmentRef, { organizationId });
+        console.log('✅ Enrollment organizationId updated');
+      } catch (updateError) {
+        console.error('❌ Failed to update enrollment organizationId:', updateError);
+      }
+    } else {
+      console.log('⚠️ User already enrolled in campaign:', existing.id);
+    }
     return existing.id;
   }
 
@@ -1908,6 +2200,66 @@ export async function enrollUserInCampaign(
   try {
     const docRef = await addDoc(collection(db, CAMPAIGN_ENROLLMENTS_COLLECTION), enrollmentDoc);
     console.log('✅ Campaign enrollment created:', docRef.id);
+
+    // Instrument: Log Activity
+    try {
+      // Resolve Actor
+      let actor: { id: string; name: string; avatar?: string } = { id: 'system', name: 'System' };
+      if (enrolledBy) {
+        // If enrolledBy is provided (ID), try to resolve name, or use ID
+        const enrollerDoc = await getDoc(doc(db, USERS_COLLECTION, enrolledBy));
+        if (enrollerDoc.exists()) {
+          const d = enrollerDoc.data();
+          actor = { id: enrolledBy, name: d.name || d.email || 'Admin', avatar: d.avatar };
+        } else {
+          actor = { id: enrolledBy, name: 'Admin' };
+        }
+      } else if (autoEnrolled) {
+        actor = { id: 'system', name: 'System (Auto)' };
+      } else if (auth.currentUser) {
+        actor = {
+          id: auth.currentUser.uid,
+          name: auth.currentUser.displayName || 'Admin',
+          avatar: auth.currentUser.photoURL || undefined
+        };
+      }
+
+      // Resolve Target (User)
+      let targetName = 'User';
+      const userDoc = await getDoc(doc(db, USERS_COLLECTION, userId));
+      if (userDoc.exists()) {
+        const d = userDoc.data();
+        targetName = d.name || d.email || 'User';
+      }
+
+      // Resolve Campaign Context
+      let campaignTitle = 'Campaign';
+      const campaignDoc = await getDoc(doc(db, CAMPAIGNS_COLLECTION, campaignId));
+      if (campaignDoc.exists()) {
+        campaignTitle = campaignDoc.data().title || 'Campaign';
+      }
+
+      await logActivity(
+        organizationId,
+        'campaign_assigned',
+        actor,
+        { id: userId, name: targetName },
+        { campaignId, campaignTitle }
+      );
+
+      // Notify Admins
+      await notifyAdmins(
+        organizationId,
+        'organization_update',
+        'Campaign Assigned',
+        `${actor.name} assigned campaign "${campaignTitle}" to ${targetName}.`,
+        `/admin/campaigns/${campaignId}`
+      );
+
+    } catch (e) {
+      console.warn('Failed to log enrollment activity', e);
+    }
+
     return docRef.id;
   } catch (error) {
     console.error('❌ Failed to create enrollment:', error);
@@ -1939,14 +2291,19 @@ export async function checkUserEnrollment(
 }
 
 /**
- * Get all enrollments for a campaign
+ * Get all enrollments for a campaign within an organization
+ * The organizationId filter is required for Firestore security rules validation
  */
-export async function getCampaignEnrollments(campaignId: string): Promise<CampaignEnrollment[]> {
-  logFirestoreOperation('QUERY', CAMPAIGN_ENROLLMENTS_COLLECTION, { campaignId });
+export async function getCampaignEnrollments(
+  campaignId: string,
+  organizationId: string
+): Promise<CampaignEnrollment[]> {
+  logFirestoreOperation('QUERY', CAMPAIGN_ENROLLMENTS_COLLECTION, { campaignId, organizationId });
 
   const q = query(
     collection(db, CAMPAIGN_ENROLLMENTS_COLLECTION),
     where('campaignId', '==', campaignId),
+    where('organizationId', '==', organizationId),
     orderBy('enrolledAt', 'desc')
   );
 
@@ -1991,6 +2348,151 @@ export async function getUserEnrollments(userId: string): Promise<CampaignEnroll
 }
 
 /**
+ * Recent activity item for organization dashboard
+ */
+export interface RecentActivityItem {
+  id: string;
+  userId: string;
+  userName: string;
+  userAvatar?: string;
+  action: 'completed' | 'started' | 'in_progress' | 'enrolled' | 'invitation_sent' | 'cohort_created' | 'campaign_published' | 'campaign_assigned' | 'invitation_accepted' | 'employee_deleted' | 'employee_updated';
+
+  campaignId: string;
+  campaignTitle: string; // @deprecated use targetName
+  targetName?: string;
+  department?: string;
+  timestamp: Date;
+}
+
+export interface OrganizationActivity {
+  id: string;
+  organizationId: string;
+  type: RecentActivityItem['action'];
+  actorId: string;
+  actorName: string;
+  actorAvatar?: string;
+  targetId: string;
+  targetName: string;
+  metadata?: Record<string, any>;
+  createdAt: Timestamp;
+}
+
+/**
+ * Send a notification to organization admins
+ */
+export async function notifyAdmins(
+  organizationId: string,
+  type: OrganizationActivity['type'] | 'system_alert' | 'user_joined' | 'campaign_status' | 'license_limit' | 'organization_update',
+  title: string,
+  message: string,
+  link?: string,
+  metadata?: Record<string, any>
+): Promise<void> {
+  try {
+    const notificationData = {
+      organizationId,
+      type,
+      title,
+      message,
+      read: false,
+      createdAt: Timestamp.now(),
+      link,
+      metadata
+    };
+
+    // We remove undefined fields
+    const cleanData = removeUndefined(notificationData);
+
+    await addDoc(collection(db, ORGANIZATION_NOTIFICATIONS_COLLECTION), cleanData);
+    // Silent log
+    // console.log(`🔔 Notification sent: ${title}`);
+  } catch (e) {
+    console.warn('Failed to send admin notification', e);
+  }
+}
+
+/**
+ * Log an organization activity
+ */
+export async function logActivity(
+  organizationId: string,
+  type: OrganizationActivity['type'],
+  actor: { id: string; name: string; avatar?: string },
+  target: { id: string; name: string },
+  metadata?: Record<string, any>
+): Promise<void> {
+  try {
+    const activityDoc: Omit<OrganizationActivity, 'id'> = {
+      organizationId,
+      type,
+      actorId: actor.id,
+      actorName: actor.name,
+      actorAvatar: actor.avatar,
+      targetId: target.id,
+      targetName: target.name,
+      metadata,
+      createdAt: Timestamp.now(),
+    };
+
+    const cleanDoc = removeUndefined(activityDoc);
+    await addDoc(collection(db, ORGANIZATION_ACTIVITIES_COLLECTION), cleanDoc);
+    // console.log(`📝 Logged activity: ${type} by ${actor.name}`);
+  } catch (error) {
+    console.error('❌ Failed to log activity:', error);
+    // Don't throw, just log error to prevent blocking main flow
+  }
+}
+
+/**
+ * Get recent activity for an organization
+ * Queries unified organizationActivities collection
+ */
+export async function getRecentOrgActivity(
+  organizationId: string,
+  limitCount: number = 10
+): Promise<RecentActivityItem[]> {
+  logFirestoreOperation('QUERY', ORGANIZATION_ACTIVITIES_COLLECTION, { organizationId, limit: limitCount });
+
+  try {
+    const q = query(
+      collection(db, ORGANIZATION_ACTIVITIES_COLLECTION),
+      where('organizationId', '==', organizationId),
+      orderBy('createdAt', 'desc'),
+      firestoreLimit(limitCount)
+    );
+
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+      return [];
+    }
+
+    return snapshot.docs.map(doc => {
+      const data = doc.data() as OrganizationActivity;
+
+      // Map OrganizationActivity to RecentActivityItem
+      return {
+        id: doc.id,
+        userId: data.actorId,
+        userName: data.actorName,
+        userAvatar: data.actorAvatar,
+        action: data.type,
+        // For campaign activities, prefer metadata.campaignId, otherwise use targetId
+        campaignId: data.metadata?.campaignId || data.targetId || '',
+        campaignTitle: data.targetName,
+        targetName: data.targetName,
+        department: data.metadata?.department,
+        timestamp: data.createdAt.toDate(),
+      };
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to fetch recent org activity:', error);
+    return [];
+  }
+}
+
+/**
  * Update enrollment status and access tracking
  */
 export async function updateEnrollmentAccess(
@@ -2012,6 +2514,27 @@ export async function updateEnrollmentAccess(
   if (enrollment.status === 'not-started') {
     updates.status = 'in-progress';
     updates.startedAt = Timestamp.now();
+
+    // Instrument: Log Started
+    try {
+      const campaign = await getCampaign(campaignId);
+      if (campaign) {
+        // Actor = User
+        let actorName = 'User';
+        if (auth.currentUser) {
+          actorName = auth.currentUser.displayName || 'User';
+        }
+
+        await logActivity(
+          enrollment.organizationId,
+          'started',
+          { id: userId, name: actorName },
+          { id: campaignId, name: campaign.title }
+        );
+      }
+    } catch (e) {
+      console.warn('Failed to log campaign start', e);
+    }
   }
 
   if (!enrollment.totalModules || enrollment.totalModules === 0) {
@@ -2068,6 +2591,7 @@ async function updateModuleProgressState(
 
     if (options.markVideoFinished) {
       updatedProgress.videoFinished = true;
+      console.log(`🎬 Video marked as FINISHED for module ${itemId}`);
     }
 
     if (options.incrementQuestions && options.incrementQuestions > 0) {
@@ -2092,6 +2616,8 @@ async function updateModuleProgressState(
     // Ensure question target stays in sync
     updatedProgress.questionTarget = questionTarget;
 
+    console.log(`📊 Module Progress Check for ${itemId}: videoFinished=${updatedProgress.videoFinished}, questionsAnswered=${updatedProgress.questionsAnswered}/${updatedProgress.questionTarget}, completed=${updatedProgress.completed}`);
+
     if (
       !updatedProgress.completed &&
       updatedProgress.videoFinished &&
@@ -2099,6 +2625,14 @@ async function updateModuleProgressState(
     ) {
       updatedProgress.completed = true;
       updatedProgress.completedAt = new Date();
+      console.log(`✅ Module ${itemId} marked as COMPLETED!`);
+    } else if (!updatedProgress.completed) {
+      const missing = [];
+      if (!updatedProgress.videoFinished) missing.push('video not finished');
+      if (updatedProgress.questionsAnswered < updatedProgress.questionTarget) {
+        missing.push(`need ${updatedProgress.questionTarget - updatedProgress.questionsAnswered} more questions`);
+      }
+      console.log(`⏳ Module ${itemId} NOT completed. Missing: ${missing.join(', ')}`);
     }
 
     moduleProgress[itemId] = updatedProgress;
@@ -2176,12 +2710,19 @@ export async function incrementModuleQuestionProgress(
 }
 
 /**
- * Mark campaign enrollment as completed
+ * Mark campaign enrollment as completed and update streak
  */
 export async function markEnrollmentCompleted(
   campaignId: string,
   userId: string
-): Promise<void> {
+): Promise<{
+  streakResult?: {
+    streak: UserStreak;
+    isNewStreak: boolean;
+    milestonesAchieved: number[];
+    streakBroken: boolean;
+  };
+}> {
   const enrollment = await checkUserEnrollment(campaignId, userId);
   if (!enrollment) {
     throw new Error('Enrollment not found');
@@ -2195,7 +2736,59 @@ export async function markEnrollmentCompleted(
     completedModules: totalModules,
   });
 
+  // Instrument: Log Completed
+  try {
+    const campaign = await getCampaign(campaignId);
+    if (campaign) {
+      let actorName = 'User';
+      if (auth.currentUser) {
+        actorName = auth.currentUser.displayName || 'User';
+      }
+
+      await logActivity(
+        enrollment.organizationId,
+        'completed',
+        { id: userId, name: actorName },
+        { id: campaignId, name: campaign.title }
+      );
+
+      // Notify Admins
+      await notifyAdmins(
+        enrollment.organizationId,
+        'organization_update',
+        'Enrollment Completed',
+        `${actorName} completed the campaign: "${campaign.title}".`,
+        `/admin/campaigns/${campaignId}`
+      );
+    }
+  } catch (e) {
+    console.warn('Failed to log campaign completion', e);
+  }
+
   console.log('✅ Enrollment marked as completed:', enrollment.id);
+  // NOTE: Streak tracking is now handled by cloud function (onEnrollmentStatusChanged)
+  // which triggers when enrollment status changes to 'completed'
+
+  return {};
+}
+
+/**
+ * Check if a campaign was just completed.
+ * NOTE: Streak tracking is now handled by cloud function (onEnrollmentStatusChanged)
+ */
+export async function checkAndRecordCampaignCompletion(
+  campaignId: string,
+  userId: string
+): Promise<{
+  wasCompleted: boolean;
+}> {
+  const enrollment = await checkUserEnrollment(campaignId, userId);
+  if (!enrollment || enrollment.status !== 'completed') {
+    return { wasCompleted: false };
+  }
+
+  // Streak tracking is now handled server-side by onEnrollmentStatusChanged cloud function
+  return { wasCompleted: true };
 }
 
 // ============================================
@@ -2411,7 +3004,15 @@ export async function saveCampaignResponse(
   userId: string,
   organizationId: string,
   answer: string | number | boolean,
-  metadata?: { questionType?: string; questionText?: string }
+  metadata?: {
+    questionType?: string;
+    questionText?: string;
+    competencyId?: string;
+    skillId?: string;
+    // Q2 SJT-specific fields
+    selectedOptionId?: string;
+    intentScore?: number;
+  }
 ): Promise<string | null> {
   logFirestoreOperation('CREATE', CAMPAIGN_RESPONSES_COLLECTION, {
     campaignId,
@@ -2421,11 +3022,13 @@ export async function saveCampaignResponse(
   });
 
   try {
-    // Check if user has already answered this question
+    // Check if user has already answered this question for this video
+    // (questions may have same IDs across different videos)
     const existingResponseQuery = query(
       collection(db, CAMPAIGN_RESPONSES_COLLECTION),
       where('campaignId', '==', campaignId),
       where('userId', '==', userId),
+      where('videoId', '==', videoId),
       where('questionId', '==', questionId)
     );
 
@@ -2435,6 +3038,7 @@ export async function saveCampaignResponse(
       console.log('⚠️ Response already exists for this question, skipping save:', {
         campaignId,
         userId,
+        videoId,
         questionId,
         existingResponseId: existingSnapshot.docs[0].id
       });
@@ -2449,8 +3053,17 @@ export async function saveCampaignResponse(
       userId,
       organizationId,
       answer,
+      // Q2 SJT-specific fields at top level for easier querying
+      ...(metadata?.selectedOptionId && { selectedOptionId: metadata.selectedOptionId }),
+      ...(metadata?.intentScore !== undefined && { intentScore: metadata.intentScore }),
       answeredAt: Timestamp.now() as any,
-      metadata,
+      metadata: {
+        // Only include defined values to avoid Firestore undefined rejection
+        ...(metadata?.questionType && { questionType: metadata.questionType as QuestionType }),
+        ...(metadata?.questionText && { questionText: metadata.questionText }),
+        ...(metadata?.competencyId && { competencyId: metadata.competencyId }),
+        ...(metadata?.skillId && { skillId: metadata.skillId }),
+      },
     };
 
     const docRef = await addDoc(collection(db, CAMPAIGN_RESPONSES_COLLECTION), responseDoc);
@@ -2812,11 +3425,15 @@ export async function getCampaignInstances(
 
 /**
  * Get user statistics for the profile page
+ * Streak is calculated based on consecutive days of completing campaigns
  */
 export async function getUserStats(userId: string): Promise<{
   averageScore: number;
   currentStreak: number;
   totalLearningHours: number;
+  completedToday: boolean;
+  streakAtRisk: boolean;
+  lastCompletionDate: string | null;
 }> {
   try {
     // 1. Calculate Total Learning Hours from CampaignProgress
@@ -2826,27 +3443,50 @@ export async function getUserStats(userId: string): Promise<{
     );
     const progressSnap = await getDocs(progressQuery);
     let totalSeconds = 0;
-    const activeDates = new Set<string>();
 
     progressSnap.forEach((doc) => {
       const data = doc.data();
       totalSeconds += data.watchedDuration || 0;
-
-      if (data.lastWatchedAt) {
-        const date = data.lastWatchedAt.toDate().toISOString().split('T')[0];
-        activeDates.add(date);
-      }
     });
 
     const totalLearningHours = Math.round((totalSeconds / 3600) * 10) / 10;
 
-    // 2. Calculate Current Streak
-    const sortedDates = Array.from(activeDates).sort().reverse();
+    // 2. Get campaign completion dates from enrollments
+    const enrollmentsQuery = query(
+      collection(db, CAMPAIGN_ENROLLMENTS_COLLECTION),
+      where('userId', '==', userId),
+      where('status', '==', 'completed')
+    );
+    const enrollmentsSnap = await getDocs(enrollmentsQuery);
+    const completionDates = new Set<string>();
+
+    enrollmentsSnap.forEach((doc) => {
+      const data = doc.data();
+      if (data.completedAt) {
+        // Handle both Firestore Timestamp and regular Date/string
+        let completedDate: Date;
+        if (data.completedAt.toDate) {
+          completedDate = data.completedAt.toDate();
+        } else {
+          completedDate = new Date(data.completedAt);
+        }
+        const dateStr = completedDate.toISOString().split('T')[0];
+        completionDates.add(dateStr);
+      }
+    });
+
+    // 3. Calculate Current Streak based on campaign completions
+    const sortedDates = Array.from(completionDates).sort().reverse();
     let currentStreak = 0;
     const today = new Date().toISOString().split('T')[0];
     const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
-    if (sortedDates.length > 0 && (sortedDates[0] === today || sortedDates[0] === yesterday)) {
+    const completedToday = sortedDates.includes(today);
+    const completedYesterday = sortedDates.includes(yesterday);
+    const lastCompletionDate = sortedDates.length > 0 ? sortedDates[0] : null;
+
+    // Streak is active if completed today or yesterday
+    if (sortedDates.length > 0 && (completedToday || completedYesterday)) {
       currentStreak = 1;
       let lastDate = new Date(sortedDates[0]);
 
@@ -2864,7 +3504,10 @@ export async function getUserStats(userId: string): Promise<{
       }
     }
 
-    // 3. Calculate Average Score from CampaignResponses
+    // Streak is "at risk" if they haven't completed today but have an active streak
+    const streakAtRisk = !completedToday && completedYesterday && currentStreak > 0;
+
+    // 4. Calculate Average Score from CampaignResponses
     const responsesQuery = query(
       collection(db, CAMPAIGN_RESPONSES_COLLECTION),
       where('userId', '==', userId)
@@ -2886,7 +3529,10 @@ export async function getUserStats(userId: string): Promise<{
     return {
       averageScore,
       currentStreak,
-      totalLearningHours
+      totalLearningHours,
+      completedToday,
+      streakAtRisk,
+      lastCompletionDate
     };
 
   } catch (error) {
@@ -2894,7 +3540,1094 @@ export async function getUserStats(userId: string): Promise<{
     return {
       averageScore: 0,
       currentStreak: 0,
-      totalLearningHours: 0
+      totalLearningHours: 0,
+      completedToday: false,
+      streakAtRisk: false,
+      lastCompletionDate: null
     };
   }
+}
+
+// ============================================================================
+// STREAK MANAGEMENT
+// ============================================================================
+
+const STREAK_MILESTONES = [3, 7, 14, 30, 60, 90, 100, 180, 365];
+
+/**
+ * Helper to get today's date as ISO string (YYYY-MM-DD)
+ */
+function getTodayDateString(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
+/**
+ * Helper to get yesterday's date as ISO string (YYYY-MM-DD)
+ */
+function getYesterdayDateString(): string {
+  return new Date(Date.now() - 86400000).toISOString().split('T')[0];
+}
+
+/**
+ * Get the user's active streak (if any)
+ */
+export async function getActiveStreak(userId: string): Promise<UserStreak | null> {
+  try {
+    const q = query(
+      collection(db, USER_STREAKS_COLLECTION),
+      where('userId', '==', userId),
+      where('status', '==', 'active')
+    );
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) {
+      return null;
+    }
+
+    const doc = snapshot.docs[0];
+    return { id: doc.id, ...doc.data() } as UserStreak;
+  } catch (error) {
+    console.error('Error getting active streak:', error);
+    return null;
+  }
+}
+
+/**
+ * Get all streaks for a user (historical data)
+ */
+export async function getUserStreakHistory(userId: string): Promise<UserStreak[]> {
+  try {
+    const q = query(
+      collection(db, USER_STREAKS_COLLECTION),
+      where('userId', '==', userId),
+      orderBy('startDate', 'desc')
+    );
+    const snapshot = await getDocs(q);
+
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserStreak));
+  } catch (error) {
+    console.error('Error getting streak history:', error);
+    return [];
+  }
+}
+
+/**
+ * Get user's streak summary (aggregated stats)
+ */
+export async function getUserStreakSummary(userId: string): Promise<UserStreakSummary> {
+  try {
+    const streaks = await getUserStreakHistory(userId);
+    const activeStreak = streaks.find(s => s.status === 'active');
+    const today = getTodayDateString();
+    const yesterday = getYesterdayDateString();
+
+    // Calculate stats
+    const longestStreak = Math.max(...streaks.map(s => s.length), 0);
+    const longestStreakRecord = streaks.find(s => s.length === longestStreak);
+    const totalActiveDays = new Set(streaks.flatMap(s => s.activeDates)).size;
+    const completedStreaks = streaks.filter(s => s.status !== 'active');
+    const averageStreakLength = completedStreaks.length > 0
+      ? Math.round(completedStreaks.reduce((sum, s) => sum + s.length, 0) / completedStreaks.length)
+      : 0;
+
+    // Check if completed today
+    const completedToday = activeStreak?.activeDates.includes(today) || false;
+    const completedYesterday = activeStreak?.activeDates.includes(yesterday) || false;
+    const streakAtRisk = !completedToday && completedYesterday && (activeStreak?.length || 0) > 0;
+
+    // Calculate achieved milestones
+    const achievedMilestones = STREAK_MILESTONES.filter(m => longestStreak >= m);
+
+    return {
+      userId,
+      currentStreakId: activeStreak?.id || null,
+      currentStreak: activeStreak?.length || 0,
+      streakAtRisk,
+      completedToday,
+      lastActivityDate: activeStreak?.activeDates.slice(-1)[0] || null,
+      longestStreak,
+      longestStreakStartDate: longestStreakRecord?.startDate || null,
+      longestStreakEndDate: longestStreakRecord?.endDate || null,
+      totalStreaks: streaks.length,
+      totalActiveDays,
+      averageStreakLength,
+      streakMilestones: achievedMilestones,
+    };
+  } catch (error) {
+    console.error('Error getting streak summary:', error);
+    return {
+      userId,
+      currentStreakId: null,
+      currentStreak: 0,
+      streakAtRisk: false,
+      completedToday: false,
+      lastActivityDate: null,
+      longestStreak: 0,
+      longestStreakStartDate: null,
+      longestStreakEndDate: null,
+      totalStreaks: 0,
+      totalActiveDays: 0,
+      averageStreakLength: 0,
+      streakMilestones: [],
+    };
+  }
+}
+
+/**
+ * @deprecated Now handled by cloud function (onEnrollmentStatusChanged)
+ * Log a streak event
+ */
+async function logStreakEvent(
+  userId: string,
+  streakId: string,
+  eventType: StreakEvent['eventType'],
+  streakLength: number,
+  campaignId?: string,
+  milestone?: number
+): Promise<void> {
+  try {
+    await addDoc(collection(db, STREAK_EVENTS_COLLECTION), {
+      userId,
+      streakId,
+      eventType,
+      eventDate: getTodayDateString(),
+      streakLength,
+      campaignId,
+      milestone,
+      createdAt: Timestamp.now(),
+    });
+  } catch (error) {
+    console.error('Error logging streak event:', error);
+  }
+}
+
+/**
+ * @deprecated This function is now handled by cloud function (onEnrollmentStatusChanged).
+ * Kept for backwards compatibility but should not be called directly.
+ * The cloud function automatically records streak data when enrollment status changes to 'completed'.
+ */
+export async function recordCampaignCompletion(
+  userId: string,
+  organizationId: string,
+  campaignId: string
+): Promise<{
+  streak: UserStreak;
+  isNewStreak: boolean;
+  milestonesAchieved: number[];
+  streakBroken: boolean;
+}> {
+  const today = getTodayDateString();
+  const yesterday = getYesterdayDateString();
+
+  // Get current active streak
+  const activeStreak = await getActiveStreak(userId);
+
+  let streak: UserStreak;
+  let isNewStreak = false;
+  let streakBroken = false;
+  const milestonesAchieved: number[] = [];
+
+  if (!activeStreak) {
+    // No active streak - start a new one
+    isNewStreak = true;
+    const docRef = await addDoc(collection(db, USER_STREAKS_COLLECTION), {
+      userId,
+      organizationId,
+      startDate: today,
+      endDate: null,
+      length: 1,
+      status: 'active' as StreakStatus,
+      activeDates: [today],
+      completedCampaignIds: [campaignId],
+      longestInHistory: false,
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    });
+
+    streak = {
+      id: docRef.id,
+      userId,
+      organizationId,
+      startDate: today,
+      endDate: null,
+      length: 1,
+      status: 'active',
+      activeDates: [today],
+      completedCampaignIds: [campaignId],
+      longestInHistory: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    await logStreakEvent(userId, streak.id, 'streak_started', 1, campaignId);
+
+  } else {
+    const lastActivityDate = activeStreak.activeDates.slice(-1)[0];
+
+    if (lastActivityDate === today) {
+      // Already completed something today - just add the campaign to the list
+      const updatedCampaignIds = [...new Set([...activeStreak.completedCampaignIds, campaignId])];
+
+      await updateDoc(doc(db, USER_STREAKS_COLLECTION, activeStreak.id), {
+        completedCampaignIds: updatedCampaignIds,
+        updatedAt: Timestamp.now(),
+      });
+
+      streak = {
+        ...activeStreak,
+        completedCampaignIds: updatedCampaignIds,
+        updatedAt: new Date(),
+      };
+
+    } else if (lastActivityDate === yesterday) {
+      // Continuing streak from yesterday
+      const newLength = activeStreak.length + 1;
+      const updatedActiveDates = [...activeStreak.activeDates, today];
+      const updatedCampaignIds = [...new Set([...activeStreak.completedCampaignIds, campaignId])];
+
+      await updateDoc(doc(db, USER_STREAKS_COLLECTION, activeStreak.id), {
+        length: newLength,
+        activeDates: updatedActiveDates,
+        completedCampaignIds: updatedCampaignIds,
+        updatedAt: Timestamp.now(),
+      });
+
+      streak = {
+        ...activeStreak,
+        length: newLength,
+        activeDates: updatedActiveDates,
+        completedCampaignIds: updatedCampaignIds,
+        updatedAt: new Date(),
+      };
+
+      await logStreakEvent(userId, streak.id, 'streak_continued', newLength, campaignId);
+
+      // Check for milestone achievements
+      for (const milestone of STREAK_MILESTONES) {
+        if (newLength >= milestone && activeStreak.length < milestone) {
+          milestonesAchieved.push(milestone);
+          await logStreakEvent(userId, streak.id, 'milestone_reached', newLength, campaignId, milestone);
+        }
+      }
+
+    } else {
+      // Gap in activity - streak was broken, end old streak and start new one
+      streakBroken = true;
+
+      // Check if old streak was the longest
+      const allStreaks = await getUserStreakHistory(userId);
+      const maxOtherLength = Math.max(...allStreaks.filter(s => s.id !== activeStreak.id).map(s => s.length), 0);
+      const wasLongest = activeStreak.length > maxOtherLength;
+
+      // End the old streak
+      await updateDoc(doc(db, USER_STREAKS_COLLECTION, activeStreak.id), {
+        status: 'broken' as StreakStatus,
+        endDate: lastActivityDate,
+        longestInHistory: wasLongest,
+        updatedAt: Timestamp.now(),
+      });
+
+      await logStreakEvent(userId, activeStreak.id, 'streak_broken', activeStreak.length);
+
+      // Start a new streak
+      isNewStreak = true;
+      const docRef = await addDoc(collection(db, USER_STREAKS_COLLECTION), {
+        userId,
+        organizationId,
+        startDate: today,
+        endDate: null,
+        length: 1,
+        status: 'active' as StreakStatus,
+        activeDates: [today],
+        completedCampaignIds: [campaignId],
+        longestInHistory: false,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+
+      streak = {
+        id: docRef.id,
+        userId,
+        organizationId,
+        startDate: today,
+        endDate: null,
+        length: 1,
+        status: 'active',
+        activeDates: [today],
+        completedCampaignIds: [campaignId],
+        longestInHistory: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      await logStreakEvent(userId, streak.id, 'streak_started', 1, campaignId);
+    }
+  }
+
+  return {
+    streak,
+    isNewStreak,
+    milestonesAchieved,
+    streakBroken,
+  };
+}
+
+/**
+ * Get streak events for a user (for activity log/timeline)
+ */
+export async function getStreakEvents(
+  userId: string,
+  limit = 50
+): Promise<StreakEvent[]> {
+  try {
+    const q = query(
+      collection(db, STREAK_EVENTS_COLLECTION),
+      where('userId', '==', userId),
+      orderBy('createdAt', 'desc')
+    );
+    const snapshot = await getDocs(q);
+
+    return snapshot.docs.slice(0, limit).map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    } as StreakEvent));
+  } catch (error) {
+    console.error('Error getting streak events:', error);
+    return [];
+  }
+}
+
+// ============================================================================
+// SUPPORT TICKETS
+// ============================================================================
+
+export type TicketPriority = 'low' | 'medium' | 'high';
+export type TicketCategory = 'bug' | 'feature' | 'question' | 'other';
+export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+
+export interface SupportTicket {
+  id: string;
+  userId: string;
+  userEmail: string;
+  userName?: string;
+  organizationId?: string;
+  organizationName?: string;
+  subject: string;
+  message: string;
+  priority: TicketPriority;
+  category: TicketCategory;
+  status: TicketStatus;
+  createdAt: Date;
+  updatedAt: Date;
+  resolvedAt?: Date;
+  assignedTo?: string;
+  notes?: string;
+}
+
+/**
+ * Create a support ticket
+ */
+export async function createSupportTicket(data: {
+  userId: string;
+  userEmail: string;
+  userName?: string;
+  organizationId?: string;
+  organizationName?: string;
+  subject: string;
+  message: string;
+  priority: TicketPriority;
+  category: TicketCategory;
+}): Promise<string> {
+  const ticketData = {
+    ...data,
+    status: 'open' as TicketStatus,
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  };
+
+  const docRef = await addDoc(collection(db, SUPPORT_TICKETS_COLLECTION), ticketData);
+  logFirestoreOperation('CREATE', SUPPORT_TICKETS_COLLECTION, { id: docRef.id });
+
+  return docRef.id;
+}
+
+// ============================================================================
+// AI CHAT HISTORY
+// ============================================================================
+
+const CHAT_SESSIONS_COLLECTION = 'chatSessions';
+
+export interface ChatMessageDoc {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: Timestamp;
+  suggestedQuestions?: string[];
+}
+
+export interface ChatSessionDoc {
+  userId: string;
+  organizationId?: string;
+  title: string;
+  messages: ChatMessageDoc[];
+  context: {
+    userRole: string;
+    currentPage?: string;
+  };
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+/**
+ * Create a new chat session
+ */
+export async function createChatSession(data: {
+  userId: string;
+  organizationId?: string;
+  title: string;
+  context: { userRole: string; currentPage?: string };
+}): Promise<string> {
+  const sessionData: ChatSessionDoc = {
+    userId: data.userId,
+    organizationId: data.organizationId,
+    title: data.title,
+    messages: [],
+    context: data.context,
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  };
+
+  const docRef = await addDoc(collection(db, CHAT_SESSIONS_COLLECTION), removeUndefined(sessionData));
+  logFirestoreOperation('CREATE', CHAT_SESSIONS_COLLECTION, { id: docRef.id });
+
+  return docRef.id;
+}
+
+/**
+ * Update chat session with new messages
+ */
+export async function updateChatSession(
+  sessionId: string,
+  messages: { id: string; role: 'user' | 'assistant' | 'system'; content: string; timestamp: Date }[],
+  title?: string
+): Promise<void> {
+  const docRef = doc(db, CHAT_SESSIONS_COLLECTION, sessionId);
+
+  const messagesDocs: ChatMessageDoc[] = messages.map(msg => ({
+    id: msg.id,
+    role: msg.role,
+    content: msg.content,
+    timestamp: Timestamp.fromDate(msg.timestamp),
+  }));
+
+  const updateData: Record<string, any> = {
+    messages: messagesDocs,
+    updatedAt: Timestamp.now(),
+  };
+
+  if (title) {
+    updateData.title = title;
+  }
+
+  await updateDoc(docRef, updateData);
+  logFirestoreOperation('UPDATE', CHAT_SESSIONS_COLLECTION, { id: sessionId });
+}
+
+/**
+ * Get chat sessions for a user
+ */
+export async function getUserChatSessions(userId: string, limit = 20): Promise<{
+  id: string;
+  title: string;
+  messageCount: number;
+  lastMessage?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}[]> {
+  const q = query(
+    collection(db, CHAT_SESSIONS_COLLECTION),
+    where('userId', '==', userId),
+    orderBy('updatedAt', 'desc')
+  );
+
+  const snapshot = await getDocs(q);
+  logFirestoreOperation('READ', CHAT_SESSIONS_COLLECTION, { userId, count: snapshot.size });
+
+  return snapshot.docs.slice(0, limit).map(doc => {
+    const data = doc.data() as ChatSessionDoc;
+    const lastMsg = data.messages[data.messages.length - 1];
+    return {
+      id: doc.id,
+      title: data.title,
+      messageCount: data.messages.length,
+      lastMessage: lastMsg?.content.slice(0, 100),
+      createdAt: timestampToDate(data.createdAt),
+      updatedAt: timestampToDate(data.updatedAt),
+    };
+  });
+}
+
+/**
+ * Get a single chat session with full messages
+ */
+export async function getChatSession(sessionId: string): Promise<{
+  id: string;
+  userId: string;
+  title: string;
+  messages: { id: string; role: 'user' | 'assistant' | 'system'; content: string; timestamp: Date }[];
+  context: { userRole: string; currentPage?: string };
+  createdAt: Date;
+  updatedAt: Date;
+} | null> {
+  const docRef = doc(db, CHAT_SESSIONS_COLLECTION, sessionId);
+  const snapshot = await getDoc(docRef);
+
+  if (!snapshot.exists()) {
+    return null;
+  }
+
+  const data = snapshot.data() as ChatSessionDoc;
+  logFirestoreOperation('READ', CHAT_SESSIONS_COLLECTION, { id: sessionId });
+
+  return {
+    id: snapshot.id,
+    userId: data.userId,
+    title: data.title,
+    messages: data.messages.map(msg => ({
+      id: msg.id,
+      role: msg.role,
+      content: msg.content,
+      timestamp: timestampToDate(msg.timestamp),
+    })),
+    context: data.context,
+    createdAt: timestampToDate(data.createdAt),
+    updatedAt: timestampToDate(data.updatedAt),
+  };
+}
+
+/**
+ * Delete a chat session
+ */
+export async function deleteChatSession(sessionId: string): Promise<void> {
+  const docRef = doc(db, CHAT_SESSIONS_COLLECTION, sessionId);
+  await deleteDoc(docRef);
+  logFirestoreOperation('DELETE', CHAT_SESSIONS_COLLECTION, { id: sessionId });
+}
+
+// ============================================
+// USER SKILL PROFILE & GAMIFICATION FUNCTIONS
+// @deprecated - XP/Level system now handled by Cloud Functions
+// Use the `userStats` collection (populated by onEnrollmentStatusChanged) instead.
+// These functions are kept for backwards compatibility only.
+// ============================================
+
+const USER_SKILL_PROFILES_COLLECTION = 'userSkillProfiles';
+
+// @deprecated - XP values now defined in cloud functions
+const XP_VALUES = {
+  watch_video: 10,
+  answer_question: 10,
+  complete_module: 25,
+  complete_campaign: 100,
+  daily_streak: 5,
+  perfect_score: 50,
+  first_completion: 25,
+};
+
+// Level thresholds
+const LEVEL_THRESHOLDS = [
+  { level: 1, minXP: 0, title: 'Beginner', tier: 'beginner' },
+  { level: 5, minXP: 500, title: 'Beginner', tier: 'beginner' },
+  { level: 6, minXP: 600, title: 'Learner', tier: 'learner' },
+  { level: 15, minXP: 2000, title: 'Learner', tier: 'learner' },
+  { level: 16, minXP: 2100, title: 'Practitioner', tier: 'practitioner' },
+  { level: 30, minXP: 5000, title: 'Practitioner', tier: 'practitioner' },
+  { level: 31, minXP: 5100, title: 'Expert', tier: 'expert' },
+  { level: 50, minXP: 10000, title: 'Expert', tier: 'expert' },
+  { level: 51, minXP: 10100, title: 'Master', tier: 'master' },
+];
+
+// Badge definitions
+const BADGE_DEFINITIONS = [
+  { id: 'first-module', name: 'First Steps', description: 'Complete your first module', icon: '🎯', criteria: { type: 'modules', threshold: 1 } },
+  { id: 'five-modules', name: 'Getting Started', description: 'Complete 5 modules', icon: '📚', criteria: { type: 'modules', threshold: 5 } },
+  { id: 'ten-modules', name: 'Dedicated Learner', description: 'Complete 10 modules', icon: '🏆', criteria: { type: 'modules', threshold: 10 } },
+  { id: 'streak-3', name: 'Consistency', description: 'Maintain a 3-day streak', icon: '🔥', criteria: { type: 'streak', threshold: 3 } },
+  { id: 'streak-7', name: 'Week Warrior', description: 'Maintain a 7-day streak', icon: '💪', criteria: { type: 'streak', threshold: 7 } },
+  { id: 'streak-30', name: 'Monthly Master', description: 'Maintain a 30-day streak', icon: '⭐', criteria: { type: 'streak', threshold: 30 } },
+  { id: 'first-campaign', name: 'Campaign Champion', description: 'Complete your first campaign', icon: '🏅', criteria: { type: 'first_completion', threshold: 1 } },
+  { id: 'perfect-score', name: 'Perfectionist', description: 'Get a perfect score on a module', icon: '💯', criteria: { type: 'perfect_score', threshold: 1 } },
+  { id: 'level-10', name: 'Rising Star', description: 'Reach level 10', icon: '🌟', criteria: { type: 'level', threshold: 10 } },
+  { id: 'level-25', name: 'Expert Path', description: 'Reach level 25', icon: '🚀', criteria: { type: 'level', threshold: 25 } },
+  { id: 'xp-1000', name: 'XP Hunter', description: 'Earn 1000 XP', icon: '💎', criteria: { type: 'xp', threshold: 1000 } },
+];
+
+/**
+ * @deprecated Use server-computed level from `userStats` collection instead.
+ * Calculate level from total XP
+ */
+export function calculateLevelFromXP(totalXP: number): { level: number; title: string; tier: string; xpForNextLevel: number; currentLevelXP: number } {
+  const xpPerLevel = 100;
+  const level = Math.floor(totalXP / xpPerLevel) + 1;
+  const currentLevelXP = totalXP % xpPerLevel;
+  const xpForNextLevel = xpPerLevel;
+
+  // Determine tier and title
+  let title = 'Beginner';
+  let tier = 'beginner';
+
+  if (level >= 51) { title = 'Master'; tier = 'master'; }
+  else if (level >= 31) { title = 'Expert'; tier = 'expert'; }
+  else if (level >= 16) { title = 'Practitioner'; tier = 'practitioner'; }
+  else if (level >= 6) { title = 'Learner'; tier = 'learner'; }
+
+  return { level, title, tier, xpForNextLevel, currentLevelXP };
+}
+
+/**
+ * Get or create a user's skill profile
+ */
+export async function getUserSkillProfile(userId: string, organizationId: string): Promise<any> {
+  logFirestoreOperation('READ', USER_SKILL_PROFILES_COLLECTION, { userId });
+
+  const docRef = doc(db, USER_SKILL_PROFILES_COLLECTION, userId);
+  const snapshot = await getDoc(docRef);
+
+  if (snapshot.exists()) {
+    const data = snapshot.data();
+    return {
+      ...data,
+      createdAt: timestampToDate(data.createdAt),
+      updatedAt: timestampToDate(data.updatedAt),
+    };
+  }
+
+  // Create default profile if doesn't exist
+  const defaultProfile = {
+    userId,
+    organizationId,
+    overallLevel: 1,
+    totalXP: 0,
+    competencies: {},
+    streak: {
+      currentStreak: 0,
+      longestStreak: 0,
+      lastCompletionDate: '',
+      streakFreezeAvailable: true,
+      weeklyGoal: 3,
+      weeklyProgress: 0,
+    },
+    badges: [],
+    badgeDetails: [],
+    stats: {
+      modulesCompleted: 0,
+      campaignsCompleted: 0,
+      questionsAnswered: 0,
+      totalWatchTime: 0,
+      averageScore: 0,
+    },
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+  };
+
+  await setDoc(docRef, defaultProfile);
+  console.log('✅ Created default skill profile for user:', userId);
+
+  return {
+    ...defaultProfile,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
+/**
+ * Update user's streak based on activity
+ */
+export async function updateStreak(userId: string): Promise<{ streakBroken: boolean; newStreak: number; longestStreak: number }> {
+  const profile = await getUserSkillProfile(userId, '');
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const lastDate = profile.streak.lastCompletionDate;
+
+  let newStreak = profile.streak.currentStreak;
+  let longestStreak = profile.streak.longestStreak;
+  let streakBroken = false;
+
+  if (!lastDate) {
+    // First activity ever
+    newStreak = 1;
+  } else {
+    const lastDateObj = new Date(lastDate);
+    const todayObj = new Date(today);
+    const diffTime = todayObj.getTime() - lastDateObj.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) {
+      // Same day, streak unchanged
+    } else if (diffDays === 1) {
+      // Consecutive day, increment streak
+      newStreak += 1;
+    } else {
+      // Streak broken
+      streakBroken = true;
+      newStreak = 1;
+    }
+  }
+
+  // Update longest streak if needed
+  if (newStreak > longestStreak) {
+    longestStreak = newStreak;
+  }
+
+  // Update in Firestore
+  const docRef = doc(db, USER_SKILL_PROFILES_COLLECTION, userId);
+  await updateDoc(docRef, {
+    'streak.currentStreak': newStreak,
+    'streak.longestStreak': longestStreak,
+    'streak.lastCompletionDate': today,
+    updatedAt: Timestamp.now(),
+  });
+
+  console.log('✅ Streak updated:', { userId, newStreak, longestStreak, streakBroken });
+
+  return { streakBroken, newStreak, longestStreak };
+}
+
+/**
+ * Check and award new badges based on current stats
+ */
+function checkNewBadges(profile: any, newStats: any): any[] {
+  const currentBadges = new Set(profile.badges || []);
+  const newBadges: any[] = [];
+
+  for (const badge of BADGE_DEFINITIONS) {
+    if (currentBadges.has(badge.id)) continue;
+
+    let earned = false;
+    const criteria = badge.criteria as { type: string; threshold: number };
+
+    switch (criteria.type) {
+      case 'modules':
+        earned = newStats.modulesCompleted >= criteria.threshold;
+        break;
+      case 'streak':
+        earned = (profile.streak?.currentStreak || 0) >= criteria.threshold;
+        break;
+      case 'level':
+        earned = newStats.level >= criteria.threshold;
+        break;
+      case 'xp':
+        earned = newStats.totalXP >= criteria.threshold;
+        break;
+      case 'perfect_score':
+        earned = newStats.hadPerfectScore;
+        break;
+      case 'first_completion':
+        earned = newStats.campaignsCompleted >= criteria.threshold;
+        break;
+    }
+
+    if (earned) {
+      newBadges.push({
+        ...badge,
+        earnedAt: new Date(),
+      });
+    }
+  }
+
+  return newBadges;
+}
+
+
+/**
+ * Get campaign completion summary for the completed campaign experience
+ */
+export async function getCampaignCompletionSummary(
+  userId: string,
+  campaignId: string,
+  organizationId: string
+): Promise<any> {
+  // Get the campaign
+  const campaign = await getCampaign(campaignId);
+  if (!campaign) {
+    throw new Error('Campaign not found');
+  }
+
+  // Get user's enrollment
+  const enrollments = await getCampaignEnrollments(campaignId, organizationId);
+  const userEnrollment = enrollments.find(e => e.userId === userId);
+
+  if (!userEnrollment || userEnrollment.status !== 'completed') {
+    return null;
+  }
+
+  // Get user's responses for this campaign
+  const responses = await getCampaignResponses(campaignId, organizationId);
+  const userResponses = responses.filter(r => r.userId === userId);
+
+  // Calculate average score
+  const scaleResponses = userResponses.filter(r => typeof r.answer === 'number');
+  const averageScore = scaleResponses.length > 0
+    ? Math.round(scaleResponses.reduce((sum, r) => sum + (r.answer as number), 0) / scaleResponses.length * 20) // Convert 1-5 scale to 0-100
+    : 0;
+
+  // Get user's skill profile for badges earned
+  const profile = await getUserSkillProfile(userId, organizationId);
+
+  // Calculate time spent (estimate based on video durations)
+  const totalModules = campaign.items.length;
+  const estimatedTimePerModule = 5 * 60; // 5 minutes in seconds
+  const timeSpent = totalModules * estimatedTimePerModule;
+
+  return {
+    campaignId,
+    campaignTitle: campaign.title,
+    completedAt: userEnrollment.completedAt || new Date(),
+    timeSpent,
+    modulesCompleted: userEnrollment.completedModules || totalModules,
+    totalModules,
+    questionsAnswered: userResponses.length,
+    averageScore,
+    xpEarned: XP_VALUES.complete_campaign + (totalModules * XP_VALUES.complete_module),
+    badgesEarned: profile.badgeDetails?.filter((b: any) => {
+      const earnedDate = new Date(b.earnedAt);
+      const completedDate = new Date(userEnrollment.completedAt || Date.now());
+      // Badges earned within 1 day of completion
+      return Math.abs(earnedDate.getTime() - completedDate.getTime()) < 24 * 60 * 60 * 1000;
+    }) || [],
+    competenciesImproved: [], // Would need historical data to track this
+    peerComparison: {
+      percentile: 75, // Mock - would need real calculation
+      averageOrgScore: averageScore - 5, // Mock
+    },
+  };
+}
+
+/**
+ * Recalculate badges for a user
+ * This calls the Cloud Function to re-evaluate all badge criteria
+ * and award any missing badges retroactively
+ */
+export async function recalculateBadges(userId?: string): Promise<{
+  success: boolean;
+  newBadges: Array<{ id: string; name: string; icon: string }>;
+  totalBadges: number;
+}> {
+  const recalculateBadgesFn = httpsCallable<
+    { userId?: string },
+    { success: boolean; newBadges: Array<{ id: string; name: string; icon: string }>; totalBadges: number }
+  >(functions, 'recalculateBadges');
+
+  const result = await recalculateBadgesFn({ userId });
+  return result.data;
+}
+
+/**
+ * Get skill assessment history for a user
+ * This queries the skillAssessments collection for all historical assessments
+ * Useful for displaying progress charts over time
+ */
+export async function getSkillAssessmentHistory(
+  userId: string,
+  organizationId: string,
+  options?: {
+    skillId?: string;
+    competencyId?: string;
+    startDate?: Date;
+    endDate?: Date;
+    limit?: number;
+  }
+): Promise<SkillAssessment[]> {
+  let q = query(
+    collection(db, 'skillAssessments'),
+    where('userId', '==', userId),
+    where('organizationId', '==', organizationId),
+    orderBy('assessedAt', 'desc')
+  );
+
+  if (options?.skillId) {
+    q = query(q, where('skillId', '==', options.skillId));
+  }
+
+  if (options?.competencyId) {
+    q = query(q, where('competencyId', '==', options.competencyId));
+  }
+
+  if (options?.limit) {
+    q = query(q, firestoreLimit(options.limit));
+  }
+
+  const snapshot = await getDocs(q);
+  const assessments = snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+    assessedAt: doc.data().assessedAt?.toDate?.() || doc.data().assessedAt,
+  })) as SkillAssessment[];
+
+  // Filter by date range in memory if provided (Firestore doesn't support multiple inequality filters)
+  if (options?.startDate || options?.endDate) {
+    return assessments.filter(a => {
+      const date = new Date(a.assessedAt);
+      if (options.startDate && date < options.startDate) return false;
+      if (options.endDate && date > options.endDate) return false;
+      return true;
+    });
+  }
+
+  return assessments;
+}
+
+/**
+ * Get skill assessments for a specific campaign
+ * Returns computed skill scores from the cloud function
+ */
+export async function getCampaignSkillAssessments(
+  campaignId: string,
+  organizationId: string
+): Promise<SkillAssessment[]> {
+  const q = query(
+    collection(db, 'skillAssessments'),
+    where('campaignId', '==', campaignId),
+    where('organizationId', '==', organizationId),
+    orderBy('assessedAt', 'desc')
+  );
+
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data(),
+    assessedAt: doc.data().assessedAt?.toDate?.() || doc.data().assessedAt,
+  })) as SkillAssessment[];
+}
+
+/**
+ * Get aggregated skill scores over time for charts
+ * Groups assessments by date and skill/competency, calculating average scores
+ */
+export async function getSkillProgressOverTime(
+  userId: string,
+  organizationId: string,
+  options?: {
+    competencyId?: string;
+    days?: number; // Default 90 days
+  }
+): Promise<{
+  dates: string[];
+  competencies: {
+    [competencyId: string]: {
+      name: string;
+      scores: (number | null)[]; // null for dates with no data
+    };
+  };
+  skills: {
+    [skillId: string]: {
+      name: string;
+      competencyId: string;
+      scores: (number | null)[];
+    };
+  };
+}> {
+  const days = options?.days || 90;
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+
+  const assessments = await getSkillAssessmentHistory(userId, organizationId, {
+    competencyId: options?.competencyId,
+    startDate,
+  });
+
+  // Generate date range
+  const dates: string[] = [];
+  const current = new Date(startDate);
+  const today = new Date();
+  while (current <= today) {
+    dates.push(current.toISOString().split('T')[0]);
+    current.setDate(current.getDate() + 1);
+  }
+
+  // Group assessments by date
+  const byDateAndSkill: { [date: string]: { [skillId: string]: number[] } } = {};
+  const byDateAndCompetency: { [date: string]: { [competencyId: string]: number[] } } = {};
+  const skillNames: { [skillId: string]: { name: string; competencyId: string } } = {};
+  const competencyNames: { [competencyId: string]: string } = {};
+
+  // Get skill and competency names from the competencies definition
+  const { COMPETENCIES } = await import('./competencies');
+  for (const comp of COMPETENCIES) {
+    competencyNames[comp.id] = comp.name;
+    for (const skill of comp.skills) {
+      skillNames[skill.id] = { name: skill.name, competencyId: comp.id };
+    }
+  }
+
+  for (const assessment of assessments) {
+    const date = new Date(assessment.assessedAt).toISOString().split('T')[0];
+
+    // Group by skill
+    if (!byDateAndSkill[date]) byDateAndSkill[date] = {};
+    if (!byDateAndSkill[date][assessment.skillId]) byDateAndSkill[date][assessment.skillId] = [];
+    byDateAndSkill[date][assessment.skillId].push(assessment.calculatedScore);
+
+    // Group by competency
+    if (!byDateAndCompetency[date]) byDateAndCompetency[date] = {};
+    if (!byDateAndCompetency[date][assessment.competencyId]) byDateAndCompetency[date][assessment.competencyId] = [];
+    byDateAndCompetency[date][assessment.competencyId].push(assessment.calculatedScore);
+  }
+
+  // Build result with daily averages and carry-forward for missing dates
+  const competencies: { [id: string]: { name: string; scores: (number | null)[] } } = {};
+  const skills: { [id: string]: { name: string; competencyId: string; scores: (number | null)[] } } = {};
+
+  // Track last known values for carry-forward
+  const lastSkillScore: { [skillId: string]: number } = {};
+  const lastCompetencyScore: { [compId: string]: number } = {};
+
+  for (const date of dates) {
+    // Calculate skill scores for this date
+    for (const skillId of Object.keys(skillNames)) {
+      if (!skills[skillId]) {
+        skills[skillId] = {
+          name: skillNames[skillId].name,
+          competencyId: skillNames[skillId].competencyId,
+          scores: []
+        };
+      }
+
+      if (byDateAndSkill[date]?.[skillId]) {
+        // Has data for this date - calculate average of day's assessments
+        const dayScores = byDateAndSkill[date][skillId];
+        const avg = Math.round(dayScores.reduce((a, b) => a + b, 0) / dayScores.length);
+        skills[skillId].scores.push(avg);
+        lastSkillScore[skillId] = avg;
+      } else if (lastSkillScore[skillId] !== undefined) {
+        // No data for this date - carry forward last known value
+        skills[skillId].scores.push(lastSkillScore[skillId]);
+      } else {
+        // No data yet for this skill
+        skills[skillId].scores.push(null);
+      }
+    }
+
+    // Calculate competency scores for this date
+    for (const compId of Object.keys(competencyNames)) {
+      if (!competencies[compId]) {
+        competencies[compId] = { name: competencyNames[compId], scores: [] };
+      }
+
+      if (byDateAndCompetency[date]?.[compId]) {
+        // Has data for this date - calculate average of day's assessments
+        const dayScores = byDateAndCompetency[date][compId];
+        const avg = Math.round(dayScores.reduce((a, b) => a + b, 0) / dayScores.length);
+        competencies[compId].scores.push(avg);
+        lastCompetencyScore[compId] = avg;
+      } else if (lastCompetencyScore[compId] !== undefined) {
+        // No data for this date - carry forward last known value
+        competencies[compId].scores.push(lastCompetencyScore[compId]);
+      } else {
+        // No data yet for this competency
+        competencies[compId].scores.push(null);
+      }
+    }
+  }
+
+  return { dates, competencies, skills };
 }

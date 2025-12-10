@@ -49,10 +49,26 @@ export const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 export const describeError = (error: unknown, fallback: string) => {
   if (error instanceof Error && error.message) return error.message;
-  if (isRecord(error) && typeof error.error === "object") {
-    const err = error.error as { message?: string };
-    if (err?.message) return err.message;
+
+  if (isRecord(error)) {
+    // Check for direct message
+    if (typeof error.message === "string" && error.message) {
+      return error.message;
+    }
+
+    // Check for { error: { message: ... } }
+    if (typeof error.error === "object" && error.error !== null) {
+      const err = error.error as { message?: string; error?: { message?: string } };
+      if (err?.message) return err.message;
+
+      // OpenAI nested error style: { error: { error: { message: ... } } }
+      if (err?.error && typeof err.error === "object") {
+        const nested = err.error as { message?: string };
+        if (nested?.message) return nested.message;
+      }
+    }
   }
+
   return fallback;
 };
 

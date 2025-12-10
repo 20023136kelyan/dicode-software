@@ -214,6 +214,8 @@ export const onCampaignPublished = functions.firestore
 /**
  * Helper function to check if user matches campaign filters
  */
+
+// Helper function to check if user matches campaign filters
 function checkUserMatchesCampaignFilters(campaign: any, user: any): boolean {
   const { allowedDepartments, allowedEmployeeIds, allowedCohortIds } = campaign;
 
@@ -703,6 +705,9 @@ export const processRecurringCampaigns = functions.pubsub
 // ============================================
 export { askCompanyBot } from './askCompanyBot';
 
+// NOTE: User streak management functions (onEnrollmentStatusChanged, getUserStatsFunction,
+// refreshDailyStreakStats) are deployed from Dicode master console only
+
 // ============================================
 // CLOUD FUNCTION: Create Employee Account
 // ============================================
@@ -712,6 +717,126 @@ export { askCompanyBot } from './askCompanyBot';
  * This prevents the client-side auth state from being affected and bypasses Firestore security rules
  * Also generates a password reset link for the employee to set their own password
  */
+/**
+ * Delete an employee account (Firebase Auth + Firestore)
+ * Only org admins can delete employees in their organization
+ */
+export const deleteEmployeeAccount = onCall(
+  {
+    cors: true,
+  },
+  async (request) => {
+    try {
+      const { userId } = request.data;
+
+      if (!userId) {
+        throw new HttpsError('invalid-argument', 'User ID is required');
+      }
+
+      // Verify caller is authenticated
+      if (!request.auth) {
+        throw new HttpsError('unauthenticated', 'Must be authenticated to delete users');
+      }
+
+      const callerUid = request.auth.uid;
+
+      // Get caller's profile to check if they're an admin
+      const callerDoc = await db.collection('users').doc(callerUid).get();
+      if (!callerDoc.exists) {
+        throw new HttpsError('permission-denied', 'Caller profile not found');
+      }
+
+      const callerData = callerDoc.data();
+      if (callerData?.role !== 'admin') {
+        throw new HttpsError('permission-denied', 'Only admins can delete employees');
+      }
+
+      // Get the target user's profile
+      const userDoc = await db.collection('users').doc(userId).get();
+      if (!userDoc.exists) {
+        throw new HttpsError('not-found', 'User not found');
+      }
+
+      const userData = userDoc.data();
+
+      // Verify target user is in same organization as caller
+      if (userData?.organization !== callerData?.organization) {
+        throw new HttpsError('permission-denied', 'Cannot delete users from other organizations');
+      }
+
+      // Prevent deleting yourself
+      if (userId === callerUid) {
+        throw new HttpsError('failed-precondition', 'Cannot delete your own account');
+      }
+
+      console.log(`[deleteEmployeeAccount] Deleting user: ${userId} (${userData?.email})`);
+
+      // Step 1: Delete Firebase Auth account
+      try {
+        await admin.auth().deleteUser(userId);
+        console.log(`✅ Firebase Auth account deleted: ${userId}`);
+      } catch (authError: any) {
+        // If user doesn't exist in Auth, continue with Firestore deletion
+        if (authError.code !== 'auth/user-not-found') {
+          throw authError;
+        }
+        console.log(`⚠️ Auth user not found, continuing with Firestore deletion`);
+      }
+
+      // Step 2: Delete Firestore user document
+      await db.collection('users').doc(userId).delete();
+      console.log(`✅ Firestore user document deleted: ${userId}`);
+
+      // Step 3: Clean up related data (enrollments, assessments, etc.)
+      const batch = db.batch();
+
+      // Delete campaign enrollments
+      const enrollments = await db.collection('campaignEnrollments')
+        .where('userId', '==', userId)
+        .get();
+      enrollments.forEach(doc => batch.delete(doc.ref));
+
+      // Delete skill assessments
+      const assessments = await db.collection('skillAssessments')
+        .where('userId', '==', userId)
+        .get();
+      assessments.forEach(doc => batch.delete(doc.ref));
+
+      // Delete user stats
+      const stats = await db.collection('userStats')
+        .where('userId', '==', userId)
+        .get();
+      stats.forEach(doc => batch.delete(doc.ref));
+
+      // Delete badges
+      const badges = await db.collection('userBadges')
+        .where('userId', '==', userId)
+        .get();
+      badges.forEach(doc => batch.delete(doc.ref));
+
+      // Delete employee notifications
+      const notifications = await db.collection('employeeNotifications')
+        .where('userId', '==', userId)
+        .get();
+      notifications.forEach(doc => batch.delete(doc.ref));
+
+      await batch.commit();
+      console.log(`✅ Related data cleaned up for user: ${userId}`);
+
+      return {
+        success: true,
+        message: `Employee ${userData?.email} deleted successfully`,
+      };
+    } catch (error: any) {
+      console.error('❌ Error deleting employee account:', error);
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      throw new HttpsError('internal', error.message || 'Failed to delete account');
+    }
+  }
+);
+
 export const createEmployeeAccount = onCall(
   {
     cors: true,
@@ -743,7 +868,7 @@ export const createEmployeeAccount = onCall(
       console.log(`✅ Firebase Auth account created: ${userRecord.uid}`);
 
       // Step 2: Generate password reset link
-      const appUrl = process.env.APP_URL || 'https://dicode-workspace.web.app';
+      const appUrl = process.env.CLIENT_APP_URL || 'https://dicode-client.web.app';
 
       // Generate Firebase password reset link
       const firebaseResetLink = await admin.auth().generatePasswordResetLink(
@@ -795,23 +920,9 @@ export const createEmployeeAccount = onCall(
       };
     } catch (error: any) {
       console.error('❌ Error creating employee account:', error);
-
-      // Handle specific Firebase Auth errors
-      if (error.code === 'auth/email-already-exists') {
-        throw new HttpsError(
-          'already-exists',
-          'An account with this email already exists'
-        );
-      }
-
-      if (error.code === 'auth/invalid-email') {
-        throw new HttpsError('invalid-argument', 'Invalid email address');
-      }
-
-      throw new HttpsError(
-        'internal',
-        error.message || 'Failed to create employee account'
-      );
+      throw new HttpsError('internal', error.message || 'Failed to create account');
     }
   }
 );
+
+

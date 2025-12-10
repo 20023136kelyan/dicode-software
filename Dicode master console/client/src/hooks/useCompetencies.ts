@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { CompetencyDefinition, COMPETENCIES } from '@/lib/competencies';
 import { getCompetencies, initializeCompetencies, subscribeToCompetencies } from '@/lib/firestore';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface UseCompetenciesOptions {
   realtime?: boolean;
@@ -23,12 +24,20 @@ interface UseCompetenciesReturn {
  */
 export function useCompetencies(options: UseCompetenciesOptions = {}): UseCompetenciesReturn {
   const { realtime = false } = options;
+  const { user } = useAuth();
   
-  const [competencies, setCompetencies] = useState<CompetencyDefinition[]>([]);
+  const [competencies, setCompetencies] = useState<CompetencyDefinition[]>(COMPETENCIES);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
   const fetchCompetencies = async () => {
+    // Don't fetch if not authenticated - use defaults
+    if (!user) {
+      setCompetencies(COMPETENCIES);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     
@@ -56,6 +65,13 @@ export function useCompetencies(options: UseCompetenciesOptions = {}): UseCompet
   };
 
   useEffect(() => {
+    // Don't setup subscriptions if not authenticated
+    if (!user) {
+      setCompetencies(COMPETENCIES);
+      setLoading(false);
+      return;
+    }
+
     if (realtime) {
       // Use real-time subscription
       let unsubscribe: (() => void) | undefined;
@@ -93,7 +109,7 @@ export function useCompetencies(options: UseCompetenciesOptions = {}): UseCompet
       // One-time fetch
       fetchCompetencies();
     }
-  }, [realtime]);
+  }, [realtime, user]);
 
   return {
     competencies,

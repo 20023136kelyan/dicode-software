@@ -12,9 +12,19 @@ import {
   List,
   Film,
   Play,
+  Download,
+  Clock,
+  Tag,
+  MessageSquareText,
+  MessageCircle,
+  BarChart3,
+  Sparkles,
+  UploadCloud,
 } from 'lucide-react';
 import { getAllVideos } from '@/lib/firestore';
 import type { Video as FirestoreVideo, Question } from '@/types';
+import { AssetGridSkeleton } from '@/components/shared/Skeleton';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface VideoAsset {
   id: string;
@@ -35,6 +45,7 @@ interface VideoAsset {
 type ViewMode = 'grid' | 'list';
 
 const AssetLibrary = () => {
+  const { user, isLoading: authLoading } = useAuth();
   const [videos, setVideos] = useState<VideoAsset[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCompetency, setSelectedCompetency] = useState<string>('all');
@@ -86,10 +97,11 @@ const AssetLibrary = () => {
     let isMounted = true;
 
     const loadVideos = async () => {
+      if (authLoading) return;
       setIsLoading(true);
       setError(null);
       try {
-        const data = await getAllVideos();
+        const data = await getAllVideos(user?.organization);
         if (isMounted) {
           setVideos(data.map(mapFirestoreVideo));
         }
@@ -110,7 +122,7 @@ const AssetLibrary = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [user?.organization, authLoading]);
 
   // Calculate missing durations as fallback
   useEffect(() => {
@@ -211,17 +223,7 @@ const AssetLibrary = () => {
   const inUseCount = videos.filter((v) => v.viewCount > 0).length;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      {/* Page Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-dark-text">Asset Library</h1>
-          <p className="text-sm text-dark-text-muted mt-1">
-            Browse and preview your shared video collection
-          </p>
-        </div>
-      </div>
-
+    <div className="space-y-6">
       {/* Stats Cards */}
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-xl border border-dark-border bg-dark-card p-4">
@@ -324,22 +326,20 @@ const AssetLibrary = () => {
           <div className="flex items-center rounded-lg border border-dark-border bg-dark-card p-1">
             <button
               onClick={() => setViewMode('grid')}
-              className={`flex h-7 w-7 items-center justify-center rounded-md transition ${
-                viewMode === 'grid'
-                  ? 'bg-dark-bg text-dark-text'
-                  : 'text-dark-text-muted hover:text-dark-text'
-              }`}
+              className={`flex h-7 w-7 items-center justify-center rounded-md transition ${viewMode === 'grid'
+                ? 'bg-dark-bg text-dark-text'
+                : 'text-dark-text-muted hover:text-dark-text'
+                }`}
               title="Grid view"
             >
               <LayoutGrid className="h-4 w-4" />
             </button>
             <button
               onClick={() => setViewMode('list')}
-              className={`flex h-7 w-7 items-center justify-center rounded-md transition ${
-                viewMode === 'list'
-                  ? 'bg-dark-bg text-dark-text'
-                  : 'text-dark-text-muted hover:text-dark-text'
-              }`}
+              className={`flex h-7 w-7 items-center justify-center rounded-md transition ${viewMode === 'list'
+                ? 'bg-dark-bg text-dark-text'
+                : 'text-dark-text-muted hover:text-dark-text'
+                }`}
               title="List view"
             >
               <List className="h-4 w-4" />
@@ -358,10 +358,7 @@ const AssetLibrary = () => {
       )}
 
       {isLoading && videos.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-20">
-          <div className="h-8 w-8 rounded-full border-2 border-dark-border border-t-primary animate-spin" />
-          <p className="mt-4 text-sm text-dark-text-muted">Loading videos...</p>
-        </div>
+        <AssetGridSkeleton />
       )}
 
       {/* Content */}
@@ -415,11 +412,11 @@ const AssetLibrary = () => {
                     <Video className="h-10 w-10" />
                   </div>
                 )}
-                
+
                 {/* Play overlay */}
-                <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-all group-hover:bg-black/20">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/90 text-dark-bg opacity-0 transition-all group-hover:opacity-100 shadow-lg">
-                    <Play className="h-5 w-5 ml-0.5" />
+                <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-all group-hover:bg-black/30">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-all group-hover:opacity-100 shadow-lg backdrop-blur-sm">
+                    <Play className="h-5 w-5 ml-0.5 fill-current" />
                   </div>
                 </div>
 
@@ -553,118 +550,212 @@ const AssetLibrary = () => {
         </div>
       )}
 
-      {/* Preview Modal */}
+      {/* Preview Modal - Dark Theme */}
       {previewVideo && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-dark-card w-full max-w-4xl rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto border border-dark-border">
-            {/* Header */}
-            <div className="sticky top-0 bg-dark-card border-b border-dark-border p-6 flex items-center justify-between z-10">
-              <div>
-                <h2 className="text-xl font-semibold text-dark-text">{previewVideo.title}</h2>
-                <p className="text-sm text-dark-text-muted mt-1">{previewVideo.description}</p>
-              </div>
-              <button
-                onClick={() => setPreviewVideo(null)}
-                className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-dark-bg transition-colors"
-              >
-                <X size={20} className="text-dark-text" />
-              </button>
-            </div>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setPreviewVideo(null);
+          }}
+        >
+          <div className="relative flex gap-4 w-full max-w-6xl mx-4 animate-in fade-in zoom-in-95 duration-200">
+            {/* Close Button - Floating */}
+            <button
+              onClick={() => setPreviewVideo(null)}
+              className="absolute -top-12 right-0 p-2 rounded-full bg-dark-card/90 hover:bg-dark-card text-dark-text-muted hover:text-dark-text shadow-lg transition-all border border-dark-border"
+            >
+              <X className="h-5 w-5" />
+            </button>
 
-            {/* Content */}
-            <div className="p-6 space-y-6">
-              {/* Video Player */}
-              <div className="relative aspect-video bg-black rounded-xl overflow-hidden">
+            {/* Main Content Card */}
+            <div className="flex-1 min-w-0 bg-dark-card rounded-2xl overflow-hidden shadow-2xl border border-dark-border">
+              {/* Video Container */}
+              <div className="relative bg-black flex items-center justify-center min-h-[300px] max-h-[65vh]">
                 <video
                   ref={videoRef}
                   key={previewVideo.videoUrl}
                   src={previewVideo.videoUrl}
                   controls
-                  className="w-full h-full"
+                  autoPlay
+                  className="max-w-full max-h-[65vh]"
                   poster={previewVideo.thumbnail}
                 >
                   Your browser does not support the video tag.
                 </video>
+
+                {/* Source Badge - Floating */}
+                <div className="absolute top-4 left-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold shadow-lg bg-primary/90 text-white">
+                  <UploadCloud className="h-3 w-3" />
+                  Video Asset
+                </div>
               </div>
 
-              {/* Video Details */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="rounded-xl border border-dark-border bg-dark-bg p-4">
-                  <h3 className="text-xs font-semibold text-dark-text-muted uppercase tracking-wider mb-3">Competencies</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {previewVideo.competencies.length > 0 ? (
-                      previewVideo.competencies.map((comp, idx) => (
-                        <span key={idx} className="px-3 py-1.5 bg-primary/10 text-primary text-sm rounded-lg font-medium">
-                          {comp}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-sm text-dark-text-muted">No competencies tagged</span>
+              {/* Info Section */}
+              <div className="p-6 space-y-4">
+                {/* Title & Actions Row */}
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <h2 className="text-xl font-semibold text-dark-text truncate">
+                      {previewVideo.title}
+                    </h2>
+                    {previewVideo.description && (
+                      <p className="mt-1 text-sm text-dark-text-muted line-clamp-2">
+                        {previewVideo.description}
+                      </p>
                     )}
                   </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <a
+                      href={previewVideo.videoUrl}
+                      download={previewVideo.title}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-white text-sm font-medium transition-colors"
+                    >
+                      <Download className="h-4 w-4" />
+                      Download
+                    </a>
+                  </div>
                 </div>
-                <div className="rounded-xl border border-dark-border bg-dark-bg p-4">
-                  <h3 className="text-xs font-semibold text-dark-text-muted uppercase tracking-wider mb-3">Metadata</h3>
-                  <div className="space-y-2 text-sm text-dark-text">
-                    <div className="flex items-center gap-2">
-                      <Calendar size={16} className="text-dark-text-muted" />
-                      <span>Updated: {formatDate(previewVideo.updatedDate)}</span>
+
+                {/* Metadata Pills */}
+                <div className="flex flex-wrap items-center gap-4 pt-4 border-t border-dark-border">
+                  {previewVideo.duration > 0 && (
+                    <div className="flex items-center gap-1.5 text-sm text-dark-text-muted">
+                      <Clock className="h-4 w-4 text-dark-text-muted/70" />
+                      <span>{formatDuration(previewVideo.duration)}</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Eye size={16} className="text-dark-text-muted" />
-                      <span>{previewVideo.viewCount} views</span>
+                  )}
+
+                  <div className="flex items-center gap-1.5 text-sm text-dark-text-muted">
+                    <Calendar className="h-4 w-4 text-dark-text-muted/70" />
+                    <span>{formatDate(previewVideo.updatedDate)}</span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-sm text-dark-text-muted">
+                    <Eye className="h-4 w-4 text-dark-text-muted/70" />
+                    <span>{previewVideo.viewCount} views</span>
+                  </div>
+
+                  {previewVideo.competencies.length > 0 && (
+                    <div className="flex items-center gap-1.5">
+                      <Tag className="h-4 w-4 text-dark-text-muted/70" />
+                      <div className="flex flex-wrap gap-1.5">
+                        {previewVideo.competencies.slice(0, 3).map((comp, i) => (
+                          <span
+                            key={i}
+                            className="px-2 py-0.5 rounded-full bg-dark-bg text-xs font-medium text-dark-text-muted"
+                          >
+                            {comp}
+                          </span>
+                        ))}
+                        {previewVideo.competencies.length > 3 && (
+                          <span className="text-xs text-dark-text-muted/70">
+                            +{previewVideo.competencies.length - 3} more
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Questions Sidebar */}
+            <div className="hidden lg:flex w-80 flex-shrink-0 flex-col bg-dark-card rounded-2xl shadow-2xl overflow-hidden max-h-[calc(65vh+180px)] border border-dark-border">
+              {/* Sidebar Header */}
+              <div className="px-5 py-4 border-b border-dark-border">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+                      <MessageSquareText className="h-4 w-4 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-dark-text text-sm">Assessment</h3>
+                      <p className="text-xs text-dark-text-muted">{previewVideo.questions?.length || 0} questions</p>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Questions Section */}
-              {previewVideo.questions.length > 0 && (
-                <div className="border-t border-dark-border pt-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <HelpCircle size={20} className="text-primary" />
-                    <h3 className="text-lg font-semibold text-dark-text">Questions ({previewVideo.questions.length})</h3>
-                  </div>
-                  <div className="space-y-3">
-                    {previewVideo.questions.map((question, idx) => (
-                      <div key={question.id} className="rounded-xl border border-dark-border bg-dark-bg p-4">
-                        <div className="flex items-start gap-3">
-                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-semibold text-sm">
-                            {idx + 1}
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="px-2 py-1 bg-dark-card text-dark-text-muted text-xs rounded-md">
-                                {question.type}
-                              </span>
-                              {question.competency && (
-                                <span className="px-2 py-1 bg-primary/10 text-primary text-xs rounded-md">
-                                  {question.competency}
-                                </span>
+              {/* Questions List */}
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                {previewVideo.questions && previewVideo.questions.length > 0 ? (
+                  previewVideo.questions.map((question, index) => {
+                    const isQuantitative = question.type !== 'qualitative';
+                    const typeLabel = question.type === 'qualitative'
+                      ? 'Open-ended'
+                      : question.type === 'behavioral-perception'
+                        ? 'Perception'
+                        : 'Intent';
+
+                    return (
+                      <div
+                        key={question.id}
+                        className="rounded-xl bg-dark-bg border border-dark-border p-3"
+                      >
+                        {/* Header Row */}
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="flex items-center justify-center w-5 h-5 rounded bg-dark-card text-[10px] font-semibold text-dark-text-muted">
+                              {index + 1}
+                            </span>
+                            <span className="flex items-center gap-1.5 text-xs text-dark-text-muted">
+                              {isQuantitative ? (
+                                <BarChart3 className="h-3 w-3" />
+                              ) : (
+                                <MessageCircle className="h-3 w-3" />
                               )}
-                              {question.isRequired && (
-                                <span className="px-2 py-1 bg-red-500/10 text-red-400 text-xs rounded-md">
-                                  Required
-                                </span>
-                              )}
-                            </div>
-                            <h4 className="font-medium text-dark-text mb-3">{question.statement}</h4>
-                            {question.scaleType && question.scaleLabels && (
-                              <div className="bg-dark-card p-3 rounded-lg">
-                                <div className="flex items-center justify-between text-sm">
-                                  <span className="text-dark-text-muted">{question.scaleLabels.low}</span>
-                                  <span className="px-3 py-1 bg-primary/10 text-primary rounded-md text-xs">{question.scaleType}</span>
-                                  <span className="text-dark-text-muted">{question.scaleLabels.high}</span>
-                                </div>
-                              </div>
-                            )}
+                              {typeLabel}
+                            </span>
                           </div>
+                          {question.isRequired && (
+                            <span className="text-[10px] text-dark-text-muted/60">
+                              Required
+                            </span>
+                          )}
                         </div>
+
+                        {/* Question Statement */}
+                        <p className="text-sm text-dark-text leading-relaxed">
+                          {question.statement}
+                        </p>
+
+                        {/* Scale Info for Quantitative */}
+                        {isQuantitative && question.scaleType && question.scaleLabels && (
+                          <div className="mt-3 pt-2 border-t border-dark-border">
+                            <div className="flex items-center justify-between text-[10px] text-dark-text-muted/70 mb-1">
+                              <span>{question.scaleLabels.low}</span>
+                              <span className="text-dark-text-muted/50">{question.scaleType}-pt</span>
+                              <span>{question.scaleLabels.high}</span>
+                            </div>
+                            <div className="flex gap-1">
+                              {Array.from({ length: parseInt(question.scaleType) || 7 }).map((_, i) => (
+                                <div
+                                  key={i}
+                                  className="flex-1 h-1 rounded-full bg-dark-card"
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    ))}
+                    );
+                  })
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="w-12 h-12 rounded-xl bg-dark-bg flex items-center justify-center mb-3">
+                      <MessageSquareText className="h-6 w-6 text-dark-text-muted/40" />
+                    </div>
+                    <p className="text-sm text-dark-text-muted">No questions</p>
+                    <p className="text-xs text-dark-text-muted/50 mt-1">
+                      No assessment questions yet
+                    </p>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         </div>

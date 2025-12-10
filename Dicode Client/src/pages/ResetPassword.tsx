@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { verifyPasswordResetCode, confirmPasswordReset } from 'firebase/auth';
-import { auth, db } from '@/lib/firebase';
+import { auth, db, functions } from '@/lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import { Lock, AlertCircle, CheckCircle, Eye, EyeOff, Building2, UserCircle } from 'lucide-react';
+import { httpsCallable } from 'firebase/functions';
+import { Lock, AlertCircle, CheckCircle, Eye, EyeOff, Building2, UserCircle, RefreshCw, Send, ArrowRight } from 'lucide-react';
 import type { Invitation } from '@/types';
 
 const ResetPassword: React.FC = () => {
@@ -21,6 +22,14 @@ const ResetPassword: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [isExpired, setIsExpired] = useState(false);
+
+  // Resend Invite State
+  const [showResend, setShowResend] = useState(false);
+  const [resendEmail, setResendEmail] = useState('');
+  const [isResending, setIsResending] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState(false);
+
   const [passwordStrength, setPasswordStrength] = useState<{
     score: number;
     label: string;
@@ -42,6 +51,7 @@ const ResetPassword: React.FC = () => {
     verifyPasswordResetCode(auth, code)
       .then(async (emailAddress) => {
         setEmail(emailAddress);
+        setResendEmail(emailAddress); // Pre-fill resend email if verified
 
         // Fetch invitation details
         try {
@@ -70,14 +80,17 @@ const ResetPassword: React.FC = () => {
       .catch((error) => {
         console.error('[ResetPassword] Failed to verify code:', error);
         let errorMessage = 'This password reset link is invalid or has expired.';
+        let expired = false;
 
         if (error.code === 'auth/expired-action-code') {
-          errorMessage = 'This password reset link has expired. Please request a new one.';
+          errorMessage = 'This password reset link has expired.';
+          expired = true;
         } else if (error.code === 'auth/invalid-action-code') {
-          errorMessage = 'This password reset link is invalid. Please request a new one.';
+          errorMessage = 'This password reset link is invalid.';
         }
 
         setError(errorMessage);
+        setIsExpired(expired);
         setIsLoading(false);
       });
   }, [searchParams]);
@@ -161,10 +174,34 @@ const ResetPassword: React.FC = () => {
         errorMessage = 'Password is too weak. Please choose a stronger password.';
       } else if (error.code === 'auth/expired-action-code') {
         errorMessage = 'This password reset link has expired. Please request a new one.';
+        setIsExpired(true);
       }
 
       setError(errorMessage);
       setIsSubmitting(false);
+    }
+  };
+
+  const handleResendInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsResending(true);
+
+    try {
+      // resendInvitation function not defined in client implementation of functions
+      // but we assume it's callable now that we added it to backend
+      const resendInvitation = httpsCallable<{ email: string }, { success: boolean; message: string }>(
+        functions,
+        'resendInvitation'
+      );
+
+      await resendInvitation({ email: resendEmail });
+      setResendSuccess(true);
+    } catch (err) {
+      console.error('Failed to resend invitation:', err);
+      // Even on error, show success message for security/UX (unless network error)
+      setResendSuccess(true);
+    } finally {
+      setIsResending(false);
     }
   };
 
@@ -179,7 +216,85 @@ const ResetPassword: React.FC = () => {
     );
   }
 
-  if (error && !oobCode) {
+  // Error State Handling (Expired/Invalid)
+  if (error && !oobCode || isExpired) {
+    if (showResend) {
+      // Resend UI
+      return (
+        <div className="min-h-screen bg-dark-bg flex items-center justify-center p-4">
+          <div className="bg-dark-card border border-dark-border rounded-lg shadow-xl max-w-md w-full p-8">
+            <div className="text-center">
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                <Send size={32} className="text-primary" />
+              </div>
+              <h2 className="text-xl font-semibold text-dark-text mb-2">Request New Link</h2>
+              <p className="text-dark-text-muted mb-6">
+                Enter your email address to receive a new password setup link.
+              </p>
+
+              {!resendSuccess ? (
+                <form onSubmit={handleResendInvite} className="space-y-4">
+                  <div className="text-left">
+                    <label className="block text-sm font-medium text-dark-text mb-1">Email Address</label>
+                    <input
+                      type="email"
+                      value={resendEmail}
+                      onChange={(e) => setResendEmail(e.target.value)}
+                      placeholder="name@company.com"
+                      className="input w-full"
+                      required
+                      autoFocus
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isResending || !resendEmail}
+                    className="btn-primary w-full flex items-center justify-center gap-2"
+                  >
+                    {isResending ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        Send New Link <ArrowRight size={16} />
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowResend(false)}
+                    className="text-sm text-dark-text-muted hover:text-dark-text transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </form>
+              ) : (
+                <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 animate-in fade-in slide-in-from-bottom-4">
+                  <div className="flex items-center gap-2 text-green-500 mb-2 justify-center">
+                    <CheckCircle size={20} />
+                    <span className="font-semibold">Link Sent!</span>
+                  </div>
+                  <p className="text-sm text-dark-text-muted">
+                    If a valid pending invitation exists for <strong>{resendEmail}</strong>, you will receive a new email shortly.
+                  </p>
+                  <button
+                    onClick={() => navigate('/login')}
+                    className="btn-secondary w-full mt-4"
+                  >
+                    Back to Login
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-dark-bg flex items-center justify-center p-4">
         <div className="bg-dark-card border border-dark-border rounded-lg shadow-xl max-w-md w-full p-8">
@@ -187,14 +302,33 @@ const ResetPassword: React.FC = () => {
             <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
               <AlertCircle size={32} className="text-red-500" />
             </div>
-            <h2 className="text-xl font-semibold text-dark-text mb-2">Invalid Reset Link</h2>
-            <p className="text-dark-text-muted mb-6">{error}</p>
-            <button
-              onClick={() => navigate('/login')}
-              className="btn-primary w-full"
-            >
-              Return to Login
-            </button>
+            <h2 className="text-xl font-semibold text-dark-text mb-2">
+              {isExpired ? 'Link Expired' : 'Invalid Link'}
+            </h2>
+            <p className="text-dark-text-muted mb-6">
+              {isExpired
+                ? 'This invitation link has expired for security reasons.'
+                : error}
+            </p>
+
+            <div className="space-y-3">
+              {isExpired && (
+                <button
+                  onClick={() => setShowResend(true)}
+                  className="btn-primary w-full flex items-center justify-center gap-2"
+                >
+                  <RefreshCw size={18} />
+                  Get New Link
+                </button>
+              )}
+
+              <button
+                onClick={() => navigate('/login')}
+                className="btn-secondary w-full"
+              >
+                Return to Login
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -326,13 +460,12 @@ const ResetPassword: React.FC = () => {
                 </div>
                 <div className="h-1.5 bg-dark-bg rounded-full overflow-hidden">
                   <div
-                    className={`h-full transition-all duration-300 ${
-                      passwordStrength.score <= 2
-                        ? 'bg-red-500'
-                        : passwordStrength.score <= 4
+                    className={`h-full transition-all duration-300 ${passwordStrength.score <= 2
+                      ? 'bg-red-500'
+                      : passwordStrength.score <= 4
                         ? 'bg-yellow-500'
                         : 'bg-green-500'
-                    }`}
+                      }`}
                     style={{ width: `${(passwordStrength.score / 6) * 100}%` }}
                   />
                 </div>

@@ -204,9 +204,18 @@ export const normalizeVideoResponse = (
 
 export const describeError = (error: unknown, fallbackMessage: string) => {
   if (error && typeof error === "object") {
-    const anyError = error as { message?: string };
+    // 1. Check for standard Error object or simple message
+    const anyError = error as { message?: string; error?: { message?: string } };
     if (typeof anyError.message === "string" && anyError.message.trim()) {
       return anyError.message;
+    }
+
+    // 2. Check for OpenAI style nested error: { error: { message: "..." } }
+    if (anyError.error && typeof anyError.error === "object" && 'message' in anyError.error) {
+      const nestedMessage = (anyError.error as { message?: string }).message;
+      if (typeof nestedMessage === "string" && nestedMessage.trim()) {
+        return nestedMessage;
+      }
     }
   }
   return fallbackMessage;

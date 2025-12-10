@@ -1,23 +1,73 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, BookOpen, Menu, Search, Play, Check, Clock, ChevronLeft, ChevronRight, Activity, Globe, Building2, Sparkles, Bot, Shield, Users, Handshake, Heart, Lightbulb, MessageCircle, Layers, Star, Home, LogOut } from 'lucide-react';
+import { ArrowRight, BookOpen, Search, Play, Check, ChevronRight, Globe, Building2, Sparkles, Bot, Shield, Users, Handshake, Heart, Lightbulb, MessageCircle, Layers, Star, Home as HomeIcon, LogOut, Flame, Trophy, Target, TrendingUp, BarChart3, Bell, Zap, Award, Inbox, X, MessageSquare } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
-import {
-  getPublishedCampaigns,
-  getVideo,
-  setModuleVideoFinished,
-  updateVideoProgress,
-  incrementModuleQuestionProgress,
-  saveCampaignResponse
-} from '@/lib/firestore';
-import { useUserEnrollmentsRealtime, useCampaignResponsesRealtime } from '@/hooks/useEnrollmentRealtime';
+import { getPublishedCampaigns, getVideo } from '@/lib/firestore';
+import { useUserEnrollmentsRealtime } from '@/hooks/useEnrollmentRealtime';
+import { useUserStatsWithFallback, updateLastCelebratedLevel, useBadgesRealtime, useSkillScoresRealtime } from '@/hooks/useUserStats';
+import { useEmployeeNotifications, convertToUINotification } from '@/hooks/useEmployeeNotifications';
+import { useLeaderboard } from '@/hooks/useLeaderboard';
 import type { Campaign, CampaignEnrollment } from '@/types';
 import AICopilot from '@/components/shared/AICopilot';
-import PeerComparison from '@/pages/employee/PeerComparison';
+import Avatar from '@/components/shared/Avatar';
 import { Skeleton } from '@/components/shared/Skeleton';
+import { DesktopSidebar, GlobalSearchOverlay } from '@/components/desktop';
+import { useGlobalSearch } from '@/contexts/GlobalSearchContext';
 import confetti from 'canvas-confetti';
+import MobileHome from './MobileHome';
+
+// User stats types for gamification
+interface UserStats {
+  level: number;
+  currentXP: number;
+  xpToNextLevel: number;
+  totalXP: number;
+  currentStreak: number;
+  longestStreak: number;
+  modulesCompleted: number;
+  averageScore: number;
+  badges: string[];
+  dailyGoal: {
+    target: number;
+    completed: number;
+  };
+}
+
+// Level titles based on XP thresholds
+const getLevelTitle = (level: number): string => {
+  if (level <= 5) return 'Beginner';
+  if (level <= 15) return 'Learner';
+  if (level <= 30) return 'Practitioner';
+  if (level <= 50) return 'Expert';
+  return 'Master';
+};
+
+// Calculate level from total XP
+const calculateLevel = (totalXP: number): { level: number; currentXP: number; xpToNextLevel: number } => {
+  // Level thresholds: each level requires progressively more XP
+  const xpPerLevel = 100; // Base XP per level
+  const level = Math.floor(totalXP / xpPerLevel) + 1;
+  const currentXP = totalXP % xpPerLevel;
+  const xpToNextLevel = xpPerLevel;
+  return { level, currentXP, xpToNextLevel };
+};
+
+// Helper to format time ago
+const formatTimeAgo = (date: Date): string => {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+};
 
 // Animation variants
 const containerVariants = {
@@ -65,31 +115,183 @@ const getCompetencyGradient = (competency: string): string => {
   return competencyStyles[competency]?.gradient || 'from-slate-500 to-slate-600';
 };
 
+// Gradient colors for competency cards (from Learn.tsx)
+const cardGradients = [
+  'from-orange-400 to-orange-500',
+  'from-blue-400 to-blue-500',
+  'from-sky-400 to-sky-500',
+  'from-purple-400 to-purple-500',
+  'from-pink-400 to-pink-500',
+  'from-green-400 to-green-500',
+];
+
+// Professional emojis for competencies
+const competencyEmojis = [
+  '📊', '💡', '🎯', '🧠', '📈', '🤝', '💬', '🏆',
+  '⚡', '🔑', '📚', '🎓', '💪', '🌟', '🧭', '🔍',
+  '📝', '🎨', '🛠️', '🌱', '🎪', '🧩', '📣', '🔬',
+];
+
+// Get consistent emoji for a skill name using hash
+const getCompetencyEmoji = (name: string): string => {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    const char = name.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  const index = Math.abs(hash) % competencyEmojis.length;
+  return competencyEmojis[index];
+};
+
 const EmployeeHome: React.FC = () => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [isLoadingCampaigns, setIsLoadingCampaigns] = useState(true);
 
+  // Global search
+  const { openSearch } = useGlobalSearch();
+
+  // Cmd+K / Ctrl+K keyboard shortcut for global search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        openSearch();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [openSearch]);
+
   // Real-time enrollments hook
   const { enrollments, isLoading: isLoadingEnrollments } = useUserEnrollmentsRealtime(user?.id || '');
+  const { stats: streakStats } = useUserStatsWithFallback(user?.id || '', enrollments);
+
+  // Real-time badges and skill scores (for feature parity with mobile)
+  const { badges: userBadges } = useBadgesRealtime(user?.id || '');
+  const { skillScores } = useSkillScoresRealtime(user?.id || '');
+
+  // Real-time notifications
+  const {
+    notifications: rawNotifications,
+    unreadCount,
+    markAsRead,
+    markAllAsRead,
+  } = useEmployeeNotifications(user?.id || '');
+
+  // Convert notifications to UI format
+  const notifications = useMemo(() =>
+    rawNotifications.map(convertToUINotification),
+    [rawNotifications]
+  );
+
+  // Leaderboard data
+  const { leaderboard } = useLeaderboard(user?.organization || '', user?.id || '');
 
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [notificationFilter, setNotificationFilter] = useState<'all' | 'unread'>('all');
+  const displayedNotifications = notificationFilter === 'unread'
+    ? notifications.filter(n => !n.read)
+    : notifications;
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
+  const [mobileNavTab, setMobileNavTab] = useState<'home' | 'progress' | 'profile'>('home');
+  const [showLevelUpModal, setShowLevelUpModal] = useState(false);
+  const [levelUpData, setLevelUpData] = useState<{ previousLevel: number; newLevel: number; xpEarned: number } | null>(null);
+  const [showBadgeModal, setShowBadgeModal] = useState(false);
+  const [newBadges, setNewBadges] = useState<any[]>([]);
+
+  // Track previous XP for calculating XP earned
+  const prevTotalXpRef = useRef(streakStats.totalXp);
+  const prevLevelRef = useRef(streakStats.level);
+
+  // Detect level-up - only show when level actually increases during session
+  useEffect(() => {
+    // Skip if stats haven't loaded yet or no user
+    if (!user?.id || streakStats.level === 0) {
+      return;
+    }
+
+    // Check session storage for levels we've already celebrated this session
+    const sessionCelebratedKey = `levelup_session_${user.id}`;
+    const sessionCelebrated = parseInt(sessionStorage.getItem(sessionCelebratedKey) || '0', 10);
+
+    // Initialize refs on first load
+    if (prevLevelRef.current === 0) {
+      prevLevelRef.current = streakStats.level;
+      prevTotalXpRef.current = streakStats.totalXp;
+
+      // Store current level in session to prevent re-showing on navigation
+      if (sessionCelebrated < streakStats.level) {
+        sessionStorage.setItem(sessionCelebratedKey, streakStats.level.toString());
+      }
+
+      // Also update Firestore if needed (but don't show modal on initial load)
+      const lastCelebratedLevel = streakStats.lastCelebratedLevel || 0;
+      if (lastCelebratedLevel < streakStats.level) {
+        updateLastCelebratedLevel(user.id, streakStats.level);
+      }
+      return;
+    }
+
+    // Real level-up detection: level increased since last render
+    if (streakStats.level > prevLevelRef.current && streakStats.level > sessionCelebrated) {
+      const xpEarned = streakStats.totalXp - prevTotalXpRef.current;
+
+      setLevelUpData({
+        previousLevel: prevLevelRef.current,
+        newLevel: streakStats.level,
+        xpEarned: xpEarned > 0 ? xpEarned : streakStats.xpInCurrentLevel + 100,
+      });
+      setShowLevelUpModal(true);
+
+      // Update both session storage and Firestore
+      sessionStorage.setItem(sessionCelebratedKey, streakStats.level.toString());
+      updateLastCelebratedLevel(user.id, streakStats.level);
+
+      confetti({
+        particleCount: 200,
+        spread: 100,
+        origin: { y: 0.5 }
+      });
+    }
+
+    prevLevelRef.current = streakStats.level;
+    prevTotalXpRef.current = streakStats.totalXp;
+  }, [streakStats.level, streakStats.totalXp, streakStats.xpInCurrentLevel, streakStats.lastCelebratedLevel, user?.id]);
+
+  // Calculate user stats from server-computed streakStats
+  const userStats: UserStats = useMemo(() => {
+    const completedModules = enrollments.reduce((acc, e) => acc + (e.completedModules || 0), 0);
+
+    // Calculate XP progress within current level
+    const xpPerLevel = streakStats.level <= 10 ? 100 : streakStats.level <= 25 ? 200 : streakStats.level <= 50 ? 400 : 800;
+    const currentXP = streakStats.xpInCurrentLevel || 0;
+
+    return {
+      level: streakStats.level,
+      currentXP,
+      xpToNextLevel: streakStats.xpToNextLevel || xpPerLevel,
+      totalXP: streakStats.totalXp,
+      currentStreak: streakStats.currentStreak,
+      longestStreak: streakStats.longestStreak,
+      modulesCompleted: completedModules,
+      averageScore: 0, // Would need to compute from responses
+      badges: [], // Badges now tracked separately
+      dailyGoal: {
+        target: 1,
+        completed: streakStats.completedToday ? 1 : 0
+      }
+    };
+  }, [streakStats, enrollments]);
   const [selectedCompetency, setSelectedCompetency] = useState<string>('All');
   const [inProgressOnly, setInProgressOnly] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<'all' | 'organization' | 'dicode'>('all');
   const [videoThumbnails, setVideoThumbnails] = useState<Record<string, string>>({});
   const [searchQuery, setSearchQuery] = useState('');
-  const [videoDurations, setVideoDurations] = useState<Record<string, number>>({});
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
-  const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
-  const [currentVideoData, setCurrentVideoData] = useState<any>(null);
-  const [videoAnswers, setVideoAnswers] = useState<Record<string, string | number | boolean>>({});
-  const [videoMetadataMap, setVideoMetadataMap] = useState<Record<string, any>>({});
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const watchProgressRef = useRef<Record<string, number>>({});
-  const [showComparisonCampaignId, setShowComparisonCampaignId] = useState<string | null>(null);
-  const autoAdvanceTimeoutRef = useRef<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Cmd+K Search Shortcut
@@ -104,19 +306,6 @@ const EmployeeHome: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
-
-  // Real-time responses hook for selected campaign (must be after selectedCampaignId declaration)
-  const { responses: savedResponses } = useCampaignResponsesRealtime(
-    selectedCampaignId || '',
-    user?.id || ''
-  );
-
-  const resetToFeedView = () => {
-    setSelectedVideoId(null);
-    setSelectedCampaignId(null);
-    setCurrentQuestionIndex(0);
-  };
-
 
   // Load published campaigns (enrollments are handled by real-time hook)
   const loadData = React.useCallback(async () => {
@@ -143,138 +332,25 @@ const EmployeeHome: React.FC = () => {
     loadData();
   }, [loadData]);
 
-  useEffect(() => {
-    return () => {
-      if (autoAdvanceTimeoutRef.current) {
-        window.clearTimeout(autoAdvanceTimeoutRef.current);
-        autoAdvanceTimeoutRef.current = null;
-      }
-    };
-  }, []);
-
-  const trackVideoProgress = async (
-    campaignId: string,
-    videoId: string,
-    watchedDuration: number,
-    totalDuration: number
-  ) => {
-    if (!user || !totalDuration) return;
-    try {
-      await updateVideoProgress(
-        campaignId,
-        user.id,
-        videoId,
-        user.organization || '',
-        watchedDuration,
-        totalDuration
-      );
-    } catch (error) {
-      console.error('Failed to record video watch progress:', error);
-    }
-  };
-
-  const handleVideoCompleted = async (
-    campaignId: string,
-    itemId: string,
-    questionTarget: number,
-    watchedDuration?: number,
-    totalDuration?: number,
-    videoId?: string
-  ) => {
-    if (!user) return;
-    try {
-      if (videoId && watchedDuration !== undefined && totalDuration !== undefined) {
-        await trackVideoProgress(campaignId, videoId, watchedDuration, totalDuration);
-      }
-
-      await setModuleVideoFinished(campaignId, user.id, itemId, {
-        questionTarget,
-        watchedDuration,
-        totalDuration,
-      });
-
-      // Trigger confetti after marking video as finished
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 }
-      });
-
-      // Progress will update automatically via real-time listener
-    } catch (error) {
-      console.error('Failed to mark video as finished:', error);
-    }
-  };
-
-  const handleAnswerSubmit = async (
-    campaignId: string,
-    videoId: string,
-    itemId: string,
-    answers: Record<string, string | number | boolean>
-  ) => {
-    if (!user) return;
-
-    try {
-      // Save each answer
-      const questions = currentVideoData?.questions || [];
-      const entriesToSave = Object.entries(answers).filter(
-        ([questionId]) => !savedResponses[questionId]
-      );
-      const promises = entriesToSave.map(async ([questionId, answer]) => {
-        const question = questions.find((q: any) => (q.id || `q-${questions.indexOf(q)}`) === questionId);
-
-        // Save response
-        await saveCampaignResponse(
-          campaignId,
-          videoId,
-          questionId,
-          user.id,
-          user.organization || '',
-          answer,
-          {
-            questionType: question?.type || 'text',
-            questionText: question?.text || 'Question'
-          }
-        );
-
-        // Increment progress
-        await incrementModuleQuestionProgress(
-          campaignId,
-          user.id,
-          itemId,
-          questions.length,
-          1,
-          questionId
-        );
-      });
-
-      await Promise.all(promises);
-
-      // Progress will update automatically via real-time listener
-      setShowComparisonCampaignId(campaignId);
-      // Close video player after short delay
-      setTimeout(() => {
-        setSelectedVideoId(null);
-      }, 500);
-
-    } catch (error) {
-      console.error('Failed to submit answers:', error);
-    }
-  };
-
   // Convert campaigns to module format
   const campaignModules = useMemo(() => {
-    return campaigns.map((campaign) => ({
-      id: campaign.id,
-      title: campaign.title,
-      description: campaign.description,
-      duration: `${campaign.items.length} videos`,
-      competencies: campaign.metadata.tags || [campaign.skillFocus],
-      totalVideos: campaign.items.length,
-      source: campaign.source || 'organization',
-      items: campaign.items, // Include items for thumbnail access
-      endDate: campaign.schedule?.endDate, // Include end date for display
-    }));
+    return campaigns.map((campaign) => {
+      const totalVideos = campaign.metadata.computed?.totalItems ?? campaign.items?.length ?? 0;
+      return {
+        id: campaign.id,
+        title: campaign.title,
+        description: campaign.description,
+        duration: `${totalVideos} videos`,
+        competencies: campaign.metadata.tags || [campaign.skillFocus],
+        totalVideos,
+        source: campaign.source || 'organization',
+        items: campaign.items, // Include items for thumbnail access
+        endDate: campaign.schedule?.endDate, // Include end date for display
+        // Include computed metrics for display
+        estimatedMinutes: campaign.metadata.computed?.estimatedMinutes ?? 0,
+        totalXP: campaign.metadata.computed?.totalXP ?? 0,
+      };
+    });
   }, [campaigns]);
 
   // Use real campaigns only - no mock fallback
@@ -333,6 +409,7 @@ const EmployeeHome: React.FC = () => {
         completed,
         status,
         nextVideoIndex,
+        completedAt: enrollment?.completedAt,
       };
     });
   }, [modules, enrollments]);
@@ -343,98 +420,35 @@ const EmployeeHome: React.FC = () => {
     }
   }, [competencyFilters, selectedCompetency]);
 
-  // Fetch video thumbnails and durations for campaigns
+  // Fetch video thumbnails for in-progress campaigns (only fetch next video's thumbnail)
   useEffect(() => {
-    setShowComparisonCampaignId(null);
-  }, [selectedCampaignId]);
-
-  useEffect(() => {
-    const fetchVideoData = async () => {
+    const fetchThumbnails = async () => {
       const thumbnailMap: Record<string, string> = {};
-      const durationMap: Record<string, number> = {};
-      const metadataMap: Record<string, any> = {};
 
       for (const module of modulesWithProgress) {
-        if (module.items) {
-          let totalDuration = 0;
-
-          // Fetch all videos for duration calculation
-          for (const item of module.items) {
-            if (item.videoId) {
-              try {
-                const videoData = await getVideo(item.videoId);
-                if (videoData) {
-                  // Store video metadata
-                  metadataMap[item.videoId] = videoData;
-
-                  // Calculate duration: video seconds + 1 min per question (assume 3 questions)
-                  const videoDuration = videoData.duration || 0;
-                  const questionCount = Array.isArray(videoData.questions) ? videoData.questions.length : 0;
-                  totalDuration += videoDuration + (questionCount * 60);
-
-                  // Store thumbnail for in-progress next video
-                  if (module.status === 'in-progress' && !module.completed &&
-                    module.items[module.nextVideoIndex]?.videoId === item.videoId &&
-                    videoData.thumbnailUrl) {
-                    thumbnailMap[module.id] = videoData.thumbnailUrl;
-                  }
-                }
-              } catch (error) {
-                console.error(`Failed to fetch video data for ${item.videoId}:`, error);
+        // Only fetch thumbnail for in-progress modules
+        if (module.status === 'in-progress' && !module.completed && module.items) {
+          const nextVideoId = module.items[module.nextVideoIndex]?.videoId;
+          if (nextVideoId) {
+            try {
+              const videoData = await getVideo(nextVideoId);
+              if (videoData?.thumbnailUrl) {
+                thumbnailMap[module.id] = videoData.thumbnailUrl;
               }
+            } catch (error) {
+              // Silent fail for thumbnail fetch
             }
           }
-
-          durationMap[module.id] = totalDuration;
         }
       }
 
       setVideoThumbnails(thumbnailMap);
-      setVideoDurations(durationMap);
-      setVideoMetadataMap(metadataMap);
     };
 
     if (modulesWithProgress.length > 0) {
-      fetchVideoData();
+      fetchThumbnails();
     }
   }, [modulesWithProgress]);
-
-  // Fetch current video data when video is selected
-  useEffect(() => {
-    const fetchCurrentVideo = async () => {
-      if (!selectedVideoId || !selectedCampaignId) {
-        setCurrentVideoData(null);
-        setVideoAnswers({});
-        return;
-      }
-
-      try {
-        const videoData = await getVideo(selectedVideoId);
-        console.log('Fetched video data:', videoData);
-        console.log('Video has questions:', videoData?.questions);
-        setCurrentVideoData(videoData);
-
-        // Pre-fill answers from saved responses
-        const preFilledAnswers: Record<string, string | number | boolean> = {};
-        if (videoData?.questions && Array.isArray(videoData.questions)) {
-          videoData.questions.forEach((question: any, index: number) => {
-            const questionId = question.id || `q-${index}`;
-            const savedResponse = savedResponses[questionId];
-            if (savedResponse) {
-              preFilledAnswers[questionId] = savedResponse.answer;
-            }
-          });
-        }
-        setVideoAnswers(preFilledAnswers);
-      } catch (error) {
-        console.error('Failed to fetch video:', error);
-        setCurrentVideoData(null);
-        setVideoAnswers({});
-      }
-    };
-
-    fetchCurrentVideo();
-  }, [selectedVideoId, selectedCampaignId, savedResponses]);
 
   const filteredModulesWithProgress = useMemo(() => {
     let filtered = modulesWithProgress;
@@ -478,33 +492,66 @@ const EmployeeHome: React.FC = () => {
     [filteredModulesWithProgress]
   );
 
-  // Keyboard Navigation
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if typing in an input
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  const completedModules = useMemo(
+    () => filteredModulesWithProgress.filter((module) => module.completed || module.status === 'completed'),
+    [filteredModulesWithProgress]
+  );
 
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        e.preventDefault();
-        const modules = filteredModulesWithProgress;
-        if (modules.length === 0) return;
+  const notStartedModules = useMemo(
+    () => filteredModulesWithProgress.filter((module) =>
+      module.status !== 'in-progress' &&
+      module.status !== 'completed' &&
+      !module.completed &&
+      module.completionPercentage === 0
+    ),
+    [filteredModulesWithProgress]
+  );
 
-        const currentIndex = modules.findIndex(m => m.id === selectedCampaignId);
-        let nextIndex = 0;
+  // Extract competencies with campaign counts (from Learn.tsx)
+  const competencies = useMemo(() => {
+    const startedCampaignIds = new Set(enrollments.map(e => e.campaignId));
+    const skillMap = new Map<string, { campaignIds: Set<string>; notStartedCount: number }>();
 
-        if (e.key === 'ArrowDown') {
-          nextIndex = currentIndex === -1 ? 0 : Math.min(currentIndex + 1, modules.length - 1);
-        } else {
-          nextIndex = currentIndex === -1 ? modules.length - 1 : Math.max(currentIndex - 1, 0);
+    campaigns.forEach(campaign => {
+      const campaignCompetencies = campaign.metadata?.tags?.length
+        ? campaign.metadata.tags
+        : campaign.skillFocus
+          ? [campaign.skillFocus]
+          : [];
+
+      const isNotStarted = !startedCampaignIds.has(campaign.id);
+
+      campaignCompetencies.forEach(competency => {
+        if (competency) {
+          if (!skillMap.has(competency)) {
+            skillMap.set(competency, { campaignIds: new Set(), notStartedCount: 0 });
+          }
+          const data = skillMap.get(competency)!;
+          data.campaignIds.add(campaign.id);
+          if (isNotStarted) {
+            data.notStartedCount++;
+          }
         }
+      });
+    });
 
-        setSelectedCampaignId(modules[nextIndex].id);
-      }
-    };
+    return Array.from(skillMap.entries())
+      .map(([name, data]) => ({
+        name,
+        count: data.campaignIds.size,
+        notStartedCount: data.notStartedCount,
+      }))
+      .sort((a, b) => {
+        if (a.notStartedCount !== b.notStartedCount) {
+          return b.notStartedCount - a.notStartedCount;
+        }
+        return b.count - a.count;
+      });
+  }, [campaigns, enrollments]);
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [filteredModulesWithProgress, selectedCampaignId]);
+  const handleCompetencyClick = (competencyName: string) => {
+    navigate(`/employee/learn/competency/${encodeURIComponent(competencyName)}`);
+  };
 
   const inProgressIds = useMemo(() => new Set(inProgressModules.map((module) => module.id)), [inProgressModules]);
 
@@ -530,14 +577,9 @@ const EmployeeHome: React.FC = () => {
     { title: 'DI Code Collections', data: dicodeModules, layout: 'grid' as const },
   ].filter((section) => section.data.length > 0);
 
-  const handleModuleCardClick = (moduleId: string, forceNavigate = false) => {
-    const isDesktop = typeof window !== 'undefined' ? window.innerWidth >= 1024 : false;
-    if (forceNavigate || !isDesktop) {
-      navigate(`/employee/campaign/${moduleId}`);
-      return;
-    }
-    setSelectedCampaignId(moduleId);
-    setSelectedVideoId(null);
+  const handleModuleCardClick = (moduleId: string, _forceNavigate = false) => {
+    // Always navigate to the module player page
+    navigate(`/employee/module/${moduleId}`);
   };
 
   const renderModuleCard = (
@@ -559,8 +601,8 @@ const EmployeeHome: React.FC = () => {
 
     const endDateFormatted = module.source === 'organization' ? formatEndDate(module.endDate) : null;
 
-    const totalSeconds = videoDurations[module.id] || 0;
-    const durationMinutes = Math.ceil(totalSeconds / 60);
+    // Use precomputed estimatedMinutes from campaign metadata
+    const durationMinutes = module.estimatedMinutes || 0;
     const durationText = durationMinutes > 0 ? `${durationMinutes} mins` : '';
 
     return (
@@ -644,28 +686,117 @@ const EmployeeHome: React.FC = () => {
   };
 
   const renderDesktopHomeFeed = () => {
+    // Determine hero card state (like mobile ContinueLearningCard)
+    type HeroState = 'continue' | 'jump-in' | 'completed' | 'empty';
+
+    const getHeroCardData = (): {
+      state: HeroState;
+      module: typeof inProgressModules[0] | null;
+      thumbnail: string | null;
+    } => {
+      // Priority 1: In-progress campaign
+      if (inProgressModules.length > 0) {
+        const module = inProgressModules[0];
+        return {
+          state: 'continue',
+          module,
+          thumbnail: videoThumbnails[module.id] || null,
+        };
+      }
+
+      // Priority 2: Not-started campaign (jump-in)
+      const notStartedModules = modulesWithProgress.filter(m => m.status === 'not-started');
+      if (notStartedModules.length > 0) {
+        const module = notStartedModules[0];
+        return {
+          state: 'jump-in',
+          module,
+          thumbnail: videoThumbnails[module.id] || null,
+        };
+      }
+
+      // Priority 3: Completed campaign (most recent)
+      const completedModules = modulesWithProgress
+        .filter(m => m.status === 'completed')
+        .sort((a, b) => {
+          const aDate = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+          const bDate = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+          return bDate - aDate;
+        });
+      if (completedModules.length > 0) {
+        const module = completedModules[0];
+        return {
+          state: 'completed',
+          module,
+          thumbnail: videoThumbnails[module.id] || null,
+        };
+      }
+
+      // No campaigns
+      return { state: 'empty', module: null, thumbnail: null };
+    };
+
+    const heroData = getHeroCardData();
+    const { state: heroState, module: heroModule, thumbnail: heroThumbnail } = heroData;
+
+    // Get state-specific content for hero card
+    const getHeroContent = () => {
+      switch (heroState) {
+        case 'continue':
+          return {
+            label: 'IN PROGRESS',
+            labelIcon: <Play size={12} fill="currentColor" />,
+            labelColor: 'text-blue-400',
+            subtitle: `Module ${(heroModule?.nextVideoIndex || 0) + 1} of ${heroModule?.totalVideos || 0}`,
+            buttonText: 'Continue',
+            showProgress: true,
+          };
+        case 'jump-in':
+          return {
+            label: 'NEW CAMPAIGN',
+            labelIcon: <BookOpen size={12} />,
+            labelColor: 'text-emerald-400',
+            subtitle: `${heroModule?.totalVideos || 0} modules to complete`,
+            buttonText: 'Start',
+            showProgress: false,
+          };
+        case 'completed':
+          return {
+            label: 'COMPLETED',
+            labelIcon: <Check size={12} />,
+            labelColor: 'text-emerald-400',
+            subtitle: `All ${heroModule?.totalVideos || 0} modules finished`,
+            buttonText: 'Review',
+            showProgress: true,
+          };
+        default:
+          return {
+            label: '',
+            labelIcon: null,
+            labelColor: '',
+            subtitle: '',
+            buttonText: '',
+            showProgress: false,
+          };
+      }
+    };
+
+    const heroContent = getHeroContent();
+
     if (isLoadingCampaigns || isLoadingEnrollments) {
       return (
-        <div className="flex-1 overflow-y-auto custom-scrollbar pr-4 py-6">
-          <div className="space-y-8">
-            {[1, 2].map((i) => (
-              <div key={i} className="space-y-4">
-                <Skeleton className="h-8 w-48 bg-white/10" />
-                <div className="grid gap-4 md:grid-cols-2">
-                  {[1, 2, 3, 4].map((j) => (
-                    <div key={j} className="bg-[#090909] rounded-2xl border border-white/5 p-4 space-y-4">
-                      <div className="flex gap-4">
-                        <Skeleton className="w-24 h-16 rounded-lg flex-shrink-0" />
-                        <div className="flex-1 space-y-2">
-                          <Skeleton className="h-4 w-3/4" />
-                          <Skeleton className="h-3 w-1/2" />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          <div className="space-y-6">
+            <Skeleton className="h-48 w-full rounded-2xl bg-white/5" />
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {[1, 2, 3, 4, 5, 6].map((j) => (
+                <div key={j} className="bg-white/5 rounded-2xl border border-white/5 p-4 space-y-4">
+                  <Skeleton className="h-32 w-full rounded-xl" />
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-3 w-1/2" />
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       );
@@ -675,9 +806,13 @@ const EmployeeHome: React.FC = () => {
       return (
         <div className="flex-1 flex items-center justify-center text-center px-8">
           <div>
-            <BookOpen size={48} className="text-white/20 mx-auto mb-4" />
-            <h3 className="text-white text-2xl font-semibold mb-2">No campaigns available</h3>
-            <p className="text-white/60">Adjust your filters or check back later for new learning programs.</p>
+            <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-4">
+              <BookOpen size={32} className="text-white/30" />
+            </div>
+            <h3 className="text-white text-xl font-semibold mb-2">No campaigns available</h3>
+            <p className="text-white/50 max-w-md">
+              Your learning campaigns will appear here once assigned. Check back soon!
+            </p>
           </div>
         </div>
       );
@@ -688,65 +823,184 @@ const EmployeeHome: React.FC = () => {
         variants={containerVariants}
         initial="hidden"
         animate="visible"
-        className="flex-1 overflow-y-auto custom-scrollbar pr-4 py-6"
+        className="space-y-6"
       >
-        {/* Continue Learning Hero */}
-        {inProgressModules.length > 0 && !searchQuery && !selectedCompetency && sourceFilter === 'all' && (
-          <div className="mb-8">
-            <div className="relative overflow-hidden rounded-3xl bg-[#090909] border border-white/10 p-6 md:p-8">
-              <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 to-purple-600/20 opacity-50" />
-              <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-                <div className="space-y-2 max-w-2xl">
-                  <div className="flex items-center gap-2 text-blue-400 text-xs font-bold uppercase tracking-wider">
-                    <Activity size={14} />
-                    <span>Continue Learning</span>
-                  </div>
-                  <h2 className="text-2xl md:text-3xl font-bold text-white">
-                    {inProgressModules[0].title}
-                  </h2>
-                  <p className="text-white/60 line-clamp-1">
-                    {inProgressModules[0].description}
-                  </p>
-                  <div className="flex items-center gap-4 pt-2">
-                    <div className="flex-1 max-w-xs h-2 rounded-full bg-white/10 overflow-hidden">
+        {/* Hero Card - Works like mobile ContinueLearningCard */}
+        {!searchQuery && heroState !== 'empty' && heroModule && (
+          <motion.div
+            variants={itemVariants}
+            whileHover={{ scale: 1.005 }}
+            onClick={() => navigate(`/employee/module/${heroModule.id}`)}
+            className="relative overflow-hidden rounded-2xl cursor-pointer group min-h-[240px]"
+          >
+            {/* Background */}
+            {heroThumbnail ? (
+              <>
+                <div
+                  className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105"
+                  style={{ backgroundImage: `url(${heroThumbnail})` }}
+                />
+                <div className="absolute inset-0 bg-gradient-to-r from-black via-black/80 to-black/60" />
+              </>
+            ) : (
+              <>
+                <div className={`absolute inset-0 ${heroState === 'completed'
+                  ? 'bg-gradient-to-br from-emerald-600 to-emerald-800'
+                  : heroState === 'jump-in'
+                    ? 'bg-gradient-to-br from-purple-600 to-purple-800'
+                    : 'bg-gradient-to-br from-blue-600 to-blue-800'
+                  }`} />
+                {/* Decorative icon when no thumbnail */}
+                <div className="absolute inset-0 flex items-center justify-center opacity-[0.08]">
+                  <BookOpen size={200} className="text-white" />
+                </div>
+              </>
+            )}
+
+            {/* Content */}
+            <div className="relative p-8 flex items-center justify-between h-full">
+              <div className="space-y-3 max-w-xl">
+                <div className={`flex items-center gap-2 ${heroContent.labelColor} text-xs font-bold uppercase tracking-widest`}>
+                  {heroContent.labelIcon}
+                  <span>{heroContent.label}</span>
+                </div>
+                <h2 className="text-2xl font-bold text-white">
+                  {heroModule.title}
+                </h2>
+                <p className="text-white/60 text-sm line-clamp-2">
+                  {heroContent.subtitle}
+                </p>
+                {heroContent.showProgress && (
+                  <div className="flex items-center gap-4 pt-1">
+                    <div className="flex-1 max-w-xs h-2 rounded-full bg-white/20 overflow-hidden">
                       <div
-                        className="h-full bg-blue-500 rounded-full"
-                        style={{ width: `${inProgressModules[0].completionPercentage}%` }}
+                        className="h-full bg-white rounded-full"
+                        style={{ width: `${heroModule.completionPercentage}%` }}
                       />
                     </div>
-                    <span className="text-sm text-white/60">{inProgressModules[0].completionPercentage}% complete</span>
+                    <span className="text-sm text-white/70 font-medium">{heroModule.completionPercentage}%</span>
                   </div>
+                )}
+              </div>
+              <div className="flex-shrink-0">
+                <div className="w-14 h-14 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center group-hover:scale-110 group-hover:bg-white/30 transition-all">
+                  {heroState === 'completed' ? (
+                    <Check size={24} className="text-white" />
+                  ) : heroState === 'jump-in' ? (
+                    <ArrowRight size={24} className="text-white" />
+                  ) : (
+                    <Play size={24} fill="white" className="text-white" />
+                  )}
                 </div>
-                <button
-                  onClick={() => setSelectedCampaignId(inProgressModules[0].id)}
-                  className="flex-shrink-0 flex items-center gap-2 px-6 py-3 rounded-full bg-white text-black font-bold hover:bg-white/90 transition-all active:scale-95"
-                >
-                  <Play size={18} fill="currentColor" />
-                  <span>Jump back in</span>
-                </button>
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
 
+        {/* Empty State - No campaigns */}
+        {!searchQuery && heroState === 'empty' && (
+          <motion.div
+            variants={itemVariants}
+            className="relative overflow-hidden rounded-2xl bg-white/5 border border-white/10 p-8"
+          >
+            <div className="flex flex-col items-center justify-center text-center py-4">
+              <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center mb-4">
+                <Inbox size={28} className="text-white/40" />
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-1">Looking empty here</h3>
+              <p className="text-sm text-white/50 max-w-[300px]">
+                Your organization hasn't assigned you any learning campaigns yet.
+              </p>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Competencies Section - like mobile Learn page */}
+        {!searchQuery && competencies.length > 0 && (
+          <motion.div variants={itemVariants}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-white text-lg font-semibold">Competencies</h2>
+              <button
+                onClick={() => navigate('/employee/learn/competencies')}
+                className="text-blue-400 text-sm font-medium flex items-center gap-1 hover:text-blue-300"
+              >
+                See all
+                <ChevronRight size={16} />
+              </button>
+            </div>
+            <div className="grid grid-cols-4 gap-3">
+              {competencies.slice(0, 4).map((competency, index) => (
+                <motion.button
+                  key={competency.name}
+                  onClick={() => handleCompetencyClick(competency.name)}
+                  className={`w-full aspect-[2.2/1] rounded-2xl bg-gradient-to-br ${cardGradients[index % cardGradients.length]} p-5 flex flex-col justify-between text-left relative overflow-hidden`}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: index * 0.05 }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  {/* Background Emoji */}
+                  <span className="absolute -bottom-6 -right-4 text-9xl opacity-20 select-none pointer-events-none">
+                    {getCompetencyEmoji(competency.name)}
+                  </span>
+
+                  {/* Favorite button */}
+                  <div className="flex justify-end relative z-10">
+                    <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
+                      <Heart size={20} className="text-white" />
+                    </div>
+                  </div>
+
+                  {/* Content */}
+                  <div className="relative z-10">
+                    <h3 className="text-white font-bold text-2xl leading-tight mb-1.5">
+                      {competency.name}
+                    </h3>
+                    <p className="text-white/90 text-base font-medium">
+                      {competency.count} {competency.count === 1 ? 'campaign' : 'campaigns'}
+                    </p>
+                  </div>
+                </motion.button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Campaign Sections */}
         <div className="space-y-8">
           {sections.map((section) => {
             const isCarousel = section.layout === 'carousel';
+            // Skip "In Progress" section if we already show continue hero
+            if (section.title === 'In Progress' && heroModule && heroState === 'continue' && !searchQuery) return null;
+
             return (
-              <div key={section.title} className="space-y-3">
+              <div key={section.title} className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h2 className="text-white text-lg font-semibold">{section.title}</h2>
+                  {section.data.length > 3 && (
+                    <button
+                      onClick={() => {
+                        if (section.title === 'In Progress') navigate('/employee/learn?status=in-progress');
+                        else if (section.title === 'Your Organization') navigate('/employee/learn?source=organization');
+                        else if (section.title === 'DI Code Collections') navigate('/employee/learn?source=dicode');
+                      }}
+                      className="text-white/50 text-sm hover:text-white/70 transition-colors"
+                    >
+                      See all →
+                    </button>
+                  )}
                 </div>
                 <motion.div
                   layout
                   className={
                     isCarousel
-                      ? 'flex gap-6 overflow-x-auto overflow-visible scrollbar-hide pb-2'
-                      : 'grid gap-6 md:grid-cols-2 xl:grid-cols-3'
+                      ? 'flex gap-4 overflow-x-auto scrollbar-hide pb-2 -mx-2 px-2'
+                      : 'grid gap-4 md:grid-cols-4'
                   }
                 >
                   {section.data.map((module) => (
-                    <div className={isCarousel ? 'min-w-[320px] flex-shrink-0' : ''} key={module.id}>
+                    <div className={isCarousel ? 'min-w-[300px] flex-shrink-0' : ''} key={module.id}>
                       {renderModuleCard(module, isCarousel)}
                     </div>
                   ))}
@@ -780,7 +1034,7 @@ const EmployeeHome: React.FC = () => {
       }
 
       return (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
+        <div className="flex-1 flex flex-col items-center justify-center py-20 text-center min-h-[60vh]">
           <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-6">
             <Search size={32} className="text-white/40" />
           </div>
@@ -812,7 +1066,7 @@ const EmployeeHome: React.FC = () => {
             className={
               isCarousel
                 ? 'flex gap-4 overflow-x-auto overflow-visible scrollbar-hide -mx-4 px-4'
-                : 'grid gap-4 md:grid-cols-2'
+                : 'grid gap-4 md:grid-cols-4'
             }
           >
             {section.data.map((module) => (
@@ -826,1052 +1080,673 @@ const EmployeeHome: React.FC = () => {
     });
   };
 
-  const renderLearningArea = () => {
-    const showFilters = modulesWithProgress.length > 0;
-    const navItemClasses = (isActive: boolean) =>
-      `w-full flex items-center gap-3 px-3 py-2 rounded-2xl transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[#090909] ${isActive ? 'bg-white/15 text-white' : 'text-white/60 hover:text-white hover:bg-white/5'
-      }`;
 
-    const filterSidebar = showFilters ? (
-      <div className="w-64 flex-shrink-0 sticky top-2 self-start pl-2">
-        <nav className="space-y-6 text-white">
+  // Mobile view (redesigned - clean light style like reference)
+  // NOTE: This function is deprecated - MobileHome component is used instead
+  const renderMobileView = () => {
+    // Card colors matching the reference image
+    const cardColors = [
+      { bg: 'bg-orange-400', text: 'text-white' },
+      { bg: 'bg-blue-500', text: 'text-white' },
+      { bg: 'bg-indigo-600', text: 'text-white' },
+      { bg: 'bg-emerald-500', text: 'text-white' },
+      { bg: 'bg-rose-500', text: 'text-white' },
+      { bg: 'bg-violet-500', text: 'text-white' },
+    ];
 
+    // Get modules that haven't been started
+    const localNotStartedModules = filteredModulesWithProgress.filter((module) =>
+      module.status !== 'in-progress' &&
+      module.status !== 'completed' &&
+      !module.completed &&
+      module.completionPercentage === 0
+    );
 
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.35em] text-white/40">Competencies</p>
-            <div className="mt-3 space-y-1">
-              {competencyFilters.map((competency) => {
-                const isActive = selectedCompetency === competency;
-                const Icon = competencyStyles[competency]?.icon || Shield;
-                return (
-                  <button
-                    key={competency}
-                    onClick={() => {
-                      setSelectedCompetency(competency);
-                      resetToFeedView();
-                    }}
-                    className={navItemClasses(isActive)}
-                  >
-                    <Icon size={16} className={isActive ? 'text-white' : 'text-white/40'} />
-                    <span className={`truncate text-sm font-medium ${isActive ? 'text-white' : 'text-white/60'}`}>
-                      {competency || 'Unnamed'}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+    // Get all modules for featured section (not started ones)
+    const featuredModules = localNotStartedModules.length > 0
+      ? localNotStartedModules.slice(0, 6)
+      : modules.slice(0, 6);
 
-          <div className="h-px bg-white/10" />
-
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.35em] text-white/40">Status</p>
-            <div className="mt-3 space-y-1">
-              <button
-                onClick={() => {
-                  setInProgressOnly((prev) => !prev);
-                  resetToFeedView();
-                }}
-                className={navItemClasses(inProgressOnly)}
-              >
-                <Activity size={16} className={inProgressOnly ? 'text-white' : 'text-white/40'} />
-                <span className={`text-sm font-medium ${inProgressOnly ? 'text-white' : 'text-white/60'}`}>
-                  In Progress
-                </span>
-              </button>
-            </div>
-          </div>
-
-          <div className="h-px bg-white/10" />
-
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.35em] text-white/40">Source</p>
-            <div className="mt-3 space-y-1">
-              {sourceFilterOptions.map((option) => {
-                const isActive = sourceFilter === option.value;
-                const Icon = option.icon;
-                return (
-                  <button
-                    key={option.value}
-                    onClick={() => {
-                      setSourceFilter(option.value);
-                      resetToFeedView();
-                    }}
-                    className={navItemClasses(isActive)}
-                  >
-                    <Icon size={16} className={isActive ? 'text-white' : 'text-white/40'} />
-                    <span className={`text-sm font-medium ${isActive ? 'text-white' : 'text-white/60'}`}>
-                      {option.label}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="h-px bg-white/10" />
-
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.35em] text-white/40">Assistant</p>
-            <div className="mt-3">
-              <button
-                onClick={() => setIsCopilotOpen(true)}
-                className="w-full flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-white/5 text-sm font-semibold text-white hover:bg-white/10 transition-all"
-              >
-                <Bot size={18} className="text-white" />
-                <span>DiCode Copilot</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="h-px bg-white/10" />
-
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.35em] text-white/40">Account</p>
-            <div className="mt-3">
-              <button
-                onClick={() => logout()}
-                className={navItemClasses(false)}
-              >
-                <LogOut size={16} className="text-white/40" />
-                <span className="truncate text-sm font-medium text-white/60">
-                  Log Out
-                </span>
-              </button>
-            </div>
-          </div>
-        </nav>
-      </div>
-    ) : null;
-
-    if (!selectedCampaignId) {
-      const feedContent = renderDesktopHomeFeed();
-      if (!filterSidebar) {
-        return (
-          <AnimatePresence mode="wait">
-            <motion.div
-              key="feed-no-sidebar"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="flex-1 bg-[#090909] rounded-3xl border border-white/5 p-4 overflow-hidden"
-            >
-              {feedContent}
-            </motion.div>
-          </AnimatePresence>
-        );
-      }
-      return (
-        <AnimatePresence mode="wait">
-          <motion.div
-            key="feed-with-sidebar"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="flex-1 bg-[#090909] rounded-3xl border border-white/5 p-4 overflow-hidden"
-          >
-            <div className="h-full flex gap-6 overflow-hidden">
-              {filterSidebar}
-              {feedContent}
-            </div>
-          </motion.div>
-        </AnimatePresence>
-      );
-    }
-
-    const content = (() => {
-      if (showComparisonCampaignId === selectedCampaignId) {
-        return (
-          <motion.div
-            key="peer-comparison"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.3 }}
-            className="flex-1 bg-[#090909] rounded-3xl border border-white/5 overflow-hidden p-4 flex flex-col gap-4"
-          >
-            <div className="flex items-center justify-between">
+    return (
+      <div className="min-h-screen flex flex-col lg:hidden" style={{ backgroundColor: '#0a0a0a' }}>
+        {/* Dark Header */}
+        <div className="px-5 pt-6 pb-8">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {/* Avatar with gradient border */}
+              <div className="w-12 h-12 rounded-full p-0.5 bg-gradient-to-br from-blue-400 to-cyan-400">
+                <div className="w-full h-full rounded-full bg-slate-700 flex items-center justify-center overflow-hidden">
+                  {user?.avatar ? (
+                    <img src={user.avatar} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-white font-semibold">{user?.name?.charAt(0) || 'U'}</span>
+                  )}
+                </div>
+              </div>
               <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-white/60">Peer comparison</p>
-                <h3 className="text-white text-lg font-semibold">See how your answers stack up</h3>
-              </div>
-              <button
-                onClick={() => setShowComparisonCampaignId(null)}
-                className="inline-flex items-center gap-2 px-3 h-10 rounded-full bg-white/10 text-white font-medium hover:bg-white/20 transition-colors"
-              >
-                Back to modules
-              </button>
-            </div>
-            <PeerComparison campaignIdOverride={selectedCampaignId} embedded />
-          </motion.div>
-        );
-      }
-
-      if (selectedVideoId && currentVideoData) {
-        const questions =
-          (currentVideoData.questions && Array.isArray(currentVideoData.questions) && currentVideoData.questions.length > 0)
-            ? currentVideoData.questions
-            : (videoMetadataMap[selectedVideoId]?.questions && Array.isArray(videoMetadataMap[selectedVideoId].questions))
-              ? videoMetadataMap[selectedVideoId].questions
-              : [];
-        const questionCount = questions.length;
-        const handleTimeUpdate = (event: React.SyntheticEvent<HTMLVideoElement, Event>) => {
-          if (!selectedVideoId) return;
-          const current = (event.currentTarget.currentTime || 0);
-          watchProgressRef.current[selectedVideoId] = Math.max(
-            watchProgressRef.current[selectedVideoId] || 0,
-            current
-          );
-        };
-
-        const getQuestionText = (q: any) => q.text || q.statement || q.question || 'Untitled Question';
-        const getQuestionType = (q: any, index: number) => {
-          const type = (q.type || '').toLowerCase();
-          if (index < 2 && !type) return 'scale';
-          if (type.includes('choice') || type.includes('select') || q.options?.length) return 'multiple-choice';
-          if (type.includes('scale') || type.includes('likert') || q.scaleMax) return 'scale';
-          if (index < 2) return 'scale';
-          return 'text';
-        };
-
-        return (
-          <motion.div
-            key="video-module"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.3 }}
-            className="flex-1 flex flex-col space-y-1 overflow-hidden"
-          >
-            <div className="space-y-1 flex-shrink-0">
-              <div className="relative aspect-video bg-black rounded-3xl overflow-hidden">
-                {currentVideoData.storageUrl ? (
-                  <video
-                    src={currentVideoData.storageUrl}
-                    controls
-                    className="w-full h-full object-contain bg-black"
-                    poster={currentVideoData.thumbnailUrl}
-                    onTimeUpdate={handleTimeUpdate}
-                    onEnded={(event) => {
-                      if (selectedCampaignId && selectedVideoId) {
-                        const campaign = campaigns.find(c => c.id === selectedCampaignId);
-                        const item = campaign?.items.find(i => i.videoId === selectedVideoId);
-                        if (item) {
-                          const totalDuration =
-                            event.currentTarget.duration ||
-                            currentVideoData?.duration ||
-                            0;
-                          const watchedDuration = Math.max(
-                            watchProgressRef.current[selectedVideoId] || 0,
-                            event.currentTarget.currentTime || 0
-                          );
-
-                          handleVideoCompleted(
-                            selectedCampaignId,
-                            item.id,
-                            questionCount,
-                            watchedDuration,
-                            totalDuration,
-                            selectedVideoId
-                          );
-                          if (questionCount === 0) {
-                            setShowComparisonCampaignId(selectedCampaignId);
-                          }
-                        }
-                      }
-                    }}
-                  >
-                    Your browser does not support the video tag.
-                  </video>
-                ) : (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="text-center">
-                      <Play size={64} className="text-white/20 mx-auto mb-4" />
-                      <p className="text-white/40">Video not available</p>
-                    </div>
-                  </div>
-                )}
+                <h1 className="text-white font-semibold text-lg">{user?.name || 'User'}</h1>
+                <p className="text-gray-400 text-sm">{getLevelTitle(userStats.level)}</p>
               </div>
             </div>
-
-            {questions.length > 0 && (
-              <div className="rounded-3xl p-6 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
-                <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-white text-xl font-bold">
-                      Question {currentQuestionIndex + 1} of {questions.length}
-                    </h3>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          if (currentQuestionIndex > 0) {
-                            setCurrentQuestionIndex(prev => prev - 1);
-                          } else {
-                            setSelectedVideoId(null);
-                          }
-                        }}
-                        className="flex items-center gap-2 px-4 h-10 rounded-full bg-white/10 text-white font-medium hover:bg-white/15 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[#090909]"
-                        title={currentQuestionIndex === 0 ? 'Back to modules' : 'Previous'}
-                      >
-                        <ChevronLeft size={18} />
-                        <span className="uppercase tracking-wide text-xs">
-                          {currentQuestionIndex === 0 ? 'Back' : 'Previous'}
-                        </span>
-                      </button>
-
-                      {currentQuestionIndex < questions.length - 1 ? (
-                        <button
-                          onClick={() => setCurrentQuestionIndex(prev => prev + 1)}
-                          disabled={(() => {
-                            const q = questions[currentQuestionIndex];
-                            return q.isRequired && !videoAnswers[q.id || `q-${currentQuestionIndex}`];
-                          })()}
-                          className="flex items-center gap-2 px-4 h-10 rounded-full bg-white text-black font-semibold uppercase tracking-wide text-xs hover:bg-white/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[#090909]"
-                        >
-                          <span>Next</span>
-                          <ChevronRight size={18} />
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => {
-                            if (selectedCampaignId && selectedVideoId) {
-                              const campaign = campaigns.find(c => c.id === selectedCampaignId);
-                              const item = campaign?.items.find(i => i.videoId === selectedVideoId);
-                              if (item) {
-                                handleAnswerSubmit(selectedCampaignId, selectedVideoId, item.id, videoAnswers);
-                              }
-                            }
-                          }}
-                          disabled={questions.some((q: any) => q.isRequired && !videoAnswers[q.id || `q-${questions.indexOf(q)}`])}
-                          className="flex items-center gap-2 px-4 h-10 rounded-full bg-white text-black font-semibold uppercase tracking-wide text-xs hover:bg-white/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[#090909]"
-                        >
-                          <span>Submit</span>
-                          <ChevronRight size={18} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div className="w-full h-px bg-white/10 rounded-full mb-6">
-                    <div
-                      className="h-full bg-white rounded-full transition-all duration-300"
-                      style={{ width: `${((currentQuestionIndex + 1) / questions.length) * 100}%` }}
-                    />
-                  </div>
-                </div>
-
-                {(() => {
-                  const question = questions[currentQuestionIndex];
-                  const questionId = question.id || `q-${currentQuestionIndex}`;
-                  const savedResponse = savedResponses[questionId];
-                  const isReadOnly = !!savedResponse;
-                  const userAnswer = videoAnswers[questionId];
-                  const questionText = getQuestionText(question);
-                  const answered = !!savedResponse;
-                  const questionType = getQuestionType(question, currentQuestionIndex);
-
-                  return (
-                    <div key={questionId} className="space-y-6">
-                      <div className="flex items-start gap-3 mb-4">
-                        <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0">
-                          <span className="text-white text-sm font-semibold">{currentQuestionIndex + 1}</span>
-                        </div>
-                        <div className="flex-1 flex items-start gap-2">
-                          <h4 className="text-white font-semibold text-lg flex items-center gap-2">
-                            {questionText} {question.isRequired && <span className="text-red-400">*</span>}
-                            {answered && (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-1 text-xs text-white/70">
-                                <Check size={12} />
-                                Answered
-                              </span>
-                            )}
-                          </h4>
-                        </div>
-                      </div>
-
-                      {questionType === 'multiple-choice' && question.options && (
-                        <div className={`space-y-2 ml-11 ${answered ? 'opacity-50' : ''}`}>
-                          {question.options.map((option: string, oIndex: number) => (
-                            <label
-                              key={oIndex}
-                              className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${userAnswer === option
-                                ? 'bg-white/15 border-2 border-white/30'
-                                : 'bg-white/5 border-2 border-transparent hover:bg-white/10'
-                                }`}
-                            >
-                              <input
-                                type="radio"
-                                name={questionId}
-                                value={option}
-                                checked={userAnswer === option}
-                                disabled={isReadOnly}
-                                onChange={(e) => {
-                                  if (isReadOnly) return;
-                                  setVideoAnswers(prev => ({ ...prev, [questionId]: e.target.value }));
-                                }}
-                                className="w-4 h-4 text-primary"
-                              />
-                              <span className="text-white text-sm">{option}</span>
-                            </label>
-                          ))}
-                        </div>
-                      )}
-
-                      {questionType === 'scale' && (
-                        <div className={`ml-11 ${answered ? 'opacity-50' : ''}`}>
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-white/60 text-xs">{question.scaleMin || 1}</span>
-                            <span className="text-white/60 text-xs">{question.scaleMax || 5}</span>
-                          </div>
-                          <div className="flex gap-2">
-                            {Array.from({ length: (question.scaleMax || 5) - (question.scaleMin || 1) + 1 }, (_, i) => {
-                              const value = (question.scaleMin || 1) + i;
-                              return (
-                                <button
-                                  key={value}
-                                  disabled={isReadOnly}
-                                  onClick={() => {
-                                    if (isReadOnly) return;
-                                    setVideoAnswers(prev => ({ ...prev, [questionId]: value }));
-                                    if (currentQuestionIndex < questions.length - 1) {
-                                      if (autoAdvanceTimeoutRef.current) {
-                                        window.clearTimeout(autoAdvanceTimeoutRef.current);
-                                      }
-                                      autoAdvanceTimeoutRef.current = window.setTimeout(() => {
-                                        setCurrentQuestionIndex((prev) =>
-                                          Math.min(prev + 1, questions.length - 1)
-                                        );
-                                        autoAdvanceTimeoutRef.current = null;
-                                      }, 400);
-                                    }
-                                  }}
-                                  className={`flex-1 py-3 rounded-xl font-semibold transition-all ${userAnswer === value
-                                    ? 'bg-white text-black'
-                                    : 'bg-white/10 text-white hover:bg-white/20'
-                                    }`}
-                                >
-                                  {value}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {questionType === 'text' && (
-                        <div className={`ml-11 ${answered ? 'opacity-50' : ''}`}>
-                          <textarea
-                            value={(userAnswer as string) || ''}
-                            onChange={(e) => {
-                              if (isReadOnly) return;
-                              setVideoAnswers(prev => ({ ...prev, [questionId]: e.target.value }));
-                            }}
-                            placeholder="Type your answer here..."
-                            rows={4}
-                            disabled={isReadOnly}
-                            className="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/20 resize-none"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-            )}
-          </motion.div>
-        );
-      }
-
-      return (
-        <motion.div
-          key="campaign-details"
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          transition={{ duration: 0.3 }}
-          className="flex-1 flex items-end justify-center text-center px-6 pb-10"
-        >
-          {(() => {
-            const campaign = selectedCampaignId
-              ? campaigns.find((c) => c.id === selectedCampaignId)
-              : null;
-            const totalSeconds = campaign ? videoDurations[selectedCampaignId] || 0 : 0;
-            const durationMinutes = totalSeconds > 0 ? Math.ceil(totalSeconds / 60) : null;
-            const endDate = campaign?.schedule?.endDate
-              ? new Date(campaign.schedule.endDate)
-              : null;
-            const endDateLabel = endDate
-              ? endDate.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-              : 'No end date';
-            const modulesCount = campaign?.items?.length ?? 0;
-            return (
-              <div className="relative max-w-5xl w-full overflow-hidden min-h-[82vh] flex items-end bg-transparent rounded-[32px]">
-                {(() => {
-                  const firstVideoId = campaign?.items?.[0]?.videoId;
-                  const heroThumb =
-                    (firstVideoId && videoMetadataMap[firstVideoId]?.thumbnailUrl) ||
-                    (selectedCampaignId ? videoThumbnails[selectedCampaignId] : undefined);
-                  return heroThumb ? (
-                    <>
-                      <div
-                        className="absolute inset-0 bg-cover bg-center filter blur-xl scale-110 opacity-50 pointer-events-none"
-                        style={{ backgroundImage: `url(${heroThumb})` }}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/50 to-black/65 pointer-events-none" />
-                    </>
-                  ) : (
-                    <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/50 to-black/65 pointer-events-none" />
-                  );
-                })()}
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <BookOpen size={96} className="text-white/10" />
-                </div>
-                <div className="relative p-10 md:p-14 space-y-5 text-left w-full">
-                  <div className="flex items-center gap-3 text-white/70 text-xs uppercase tracking-[0.35em]">
-                    <BookOpen size={18} />
-                    <span>{selectedCampaignId ? 'Campaign ready' : 'Select a campaign to begin'}</span>
-                  </div>
-                  <h3 className="text-white text-4xl md:text-5xl font-semibold leading-tight">
-                    {campaign?.title || 'Pick a module to begin'}
-                  </h3>
-                  {campaign?.description && (
-                    <p className="text-white/70 text-base md:text-lg leading-relaxed max-w-3xl">
-                      {campaign.description}
-                    </p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-3 text-xs md:text-sm text-white/70">
-                    <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
-                      <span className="text-white/60">End date</span>
-                      <span className="text-white">{endDateLabel}</span>
-                    </span>
-                    {durationMinutes !== null && (
-                      <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
-                        <span className="text-white/60">Est. time</span>
-                        <span className="text-white">{durationMinutes} min</span>
-                      </span>
-                    )}
-                    {modulesCount > 0 && (
-                      <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
-                        <span className="text-white/60">Modules</span>
-                        <span className="text-white">{modulesCount}</span>
-                      </span>
-                    )}
-                  </div>
-                  <div className="pt-2">
-                    <p className="text-white/80 text-sm md:text-base font-medium">
-                      {selectedCampaignId
-                        ? 'Choose a module from the sidebar to load its video lesson and assessment.'
-                        : 'Choose a campaign from the sidebar to see its modules and start learning.'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-        </motion.div>
-      );
-    })();
-
-    if (!filterSidebar) {
-      return (
-        <AnimatePresence mode="wait">
-          <motion.div
-            key="split-view-no-sidebar"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            transition={{ duration: 0.3 }}
-            className="flex-1 bg-[#090909] rounded-3xl border border-white/5 p-4 overflow-hidden"
-          >
-            <AnimatePresence mode="wait">
-              {content}
-            </AnimatePresence>
-          </motion.div>
-        </AnimatePresence>
-      );
-    }
-
-    return (
-      <AnimatePresence mode="wait">
-        <motion.div
-          key="split-view-with-sidebar"
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
-          transition={{ duration: 0.3 }}
-          className="flex-1 bg-[#090909] rounded-3xl border border-white/5 p-4 overflow-hidden"
-        >
-          <div className="h-full flex gap-4 overflow-hidden">
-            {filterSidebar}
-            <AnimatePresence mode="wait">
-              {content}
-            </AnimatePresence>
-          </div>
-        </motion.div>
-      </AnimatePresence>
-    );
-  };
-  const renderCampaignSidebar = () => {
-    const renderLoadingState = (
-      <div className="p-4 space-y-4">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="rounded-2xl border border-white/5 p-4 space-y-3">
-            <div className="flex items-center gap-4">
-              <Skeleton className="w-12 h-12 rounded-lg" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-3 w-32" />
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-
-    const renderEmptyState = (
-      <div className="p-6 text-center text-white/50 text-sm">
-        No campaigns match your filters yet.
-      </div>
-    );
-
-    const sidebarContent = () => {
-      if (isLoadingCampaigns || isLoadingEnrollments) return renderLoadingState;
-      if (filteredModulesWithProgress.length === 0) return renderEmptyState;
-
-      return (
-        <div className="p-4 space-y-4">
-          {filteredModulesWithProgress.map((module) => {
-            const isSelected = selectedCampaignId === module.id;
-
-            const thumbnail = videoThumbnails[module.id];
-            const campaignData = campaigns.find((c) => c.id === module.id);
-            if (!campaignData) return null;
-
-            const enrollment = enrollments.find(e => e.campaignId === module.id);
-            const moduleProgressMap = enrollment?.moduleProgress || {};
-            const completedModules =
-              enrollment?.completedModules ??
-              Object.values(moduleProgressMap).filter((m) => m.completed).length;
-            const progress =
-              module.totalVideos === 0 ? 0 : Math.round((completedModules / module.totalVideos) * 100);
-            const hasStarted =
-              Object.keys(moduleProgressMap).length > 0 ||
-              enrollment?.status === 'in-progress' ||
-              enrollment?.status === 'completed';
-            const isComplete = module.totalVideos > 0 && completedModules >= module.totalVideos;
-            const firstIncompleteIndex = campaignData.items.findIndex(
-              (item) => !moduleProgressMap[item.id]?.completed
-            );
-            const totalSeconds = videoDurations[module.id] || 0;
-            const durationMinutes = Math.ceil(totalSeconds / 60);
-
-            const hasProgress = module.completionPercentage > 0;
-
-            return (
-              <motion.div
-                layout
-                key={module.id}
-                className="overflow-hidden rounded-3xl"
-              >
-                <AnimatePresence mode="wait" initial={false}>
-                  {isSelected ? (
-                    <motion.div
-                      key="expanded"
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.3, ease: "easeInOut" }}
-                      className="space-y-4"
-                    >
-                      <div className="relative overflow-hidden rounded-3xl text-white shadow-2xl">
-                        {thumbnail ? (
-                          <>
-                            <div
-                              className="absolute inset-0 bg-cover bg-center"
-                              style={{ backgroundImage: `url(${thumbnail})` }}
-                            />
-                            <div className="absolute inset-0 bg-gradient-to-t from-[#0b1324] via-[#0b1324]/80 to-transparent" />
-                          </>
-                        ) : (
-                          <div className="absolute inset-0 bg-gradient-to-br from-[#0b1324] via-[#152b55] to-[#1d4ed8]" />
-                        )}
-                        <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.7),_transparent_60%)] pointer-events-none" />
-                        <div className="relative p-6 space-y-6">
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.35em] text-white/60 mb-2">Campaign</p>
-                            <h2 className="text-2xl font-semibold leading-tight">{module.title}</h2>
-                          </div>
-
-                          <div className="w-full">
-                            <div className="flex items-baseline justify-between text-white gap-4">
-                              <p className="text-sm text-white/70">
-                                {isComplete ? 'Completed' : hasStarted ? 'In progress' : 'Not started'}
-                              </p>
-                              {hasStarted && <span className="text-2xl font-semibold">{progress}%</span>}
-                            </div>
-                            {hasStarted && (
-                              <div className="mt-3 h-2 rounded-full bg-white/20 overflow-hidden w-full">
-                                <div
-                                  className="h-full rounded-full bg-white"
-                                  style={{ width: `${progress}%` }}
-                                />
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-4 text-white/80">
-                            <div className="flex items-center gap-2 text-sm font-medium uppercase tracking-[0.3em]">
-                              <BookOpen size={16} />
-                              <span className="text-white">{module.totalVideos}</span>
-                            </div>
-                            {durationMinutes > 0 && (
-                              <div className="flex items-center gap-2 text-sm font-medium uppercase tracking-[0.3em]">
-                                <Clock size={16} />
-                                <span className="text-white">{durationMinutes} mins</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <motion.div
-                        initial={{ opacity: 0, y: -10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.2, duration: 0.3 }}
-                        className="space-y-1 pl-2"
-                      >
-                        {campaignData.items.map((item, index) => {
-                          const moduleState = moduleProgressMap[item.id];
-                          const completed = !!moduleState?.completed;
-                          const videoMeta = videoMetadataMap[item.videoId];
-                          const moduleTitle = videoMeta?.title || `Module ${index + 1}`;
-                          const moduleDescription = videoMeta?.description || 'Video Lesson';
-                          const questionCount = videoMeta?.questions
-                            ? Array.isArray(videoMeta.questions)
-                              ? videoMeta.questions.length
-                              : 0
-                            : 3;
-                          const moduleDurationMinutes = videoMeta?.duration
-                            ? Math.ceil(videoMeta.duration / 60) + questionCount
-                            : 5 + questionCount;
-                          const moduleDurationLabel = `${moduleDurationMinutes} mins`;
-                          const progressRatio = moduleState
-                            ? ((moduleState.videoFinished ? 1 : 0) +
-                              Math.min(moduleState.questionsAnswered, moduleState.questionTarget)) /
-                            (moduleState.questionTarget + 1)
-                            : 0;
-                          const moduleProgressPercent = Math.round(progressRatio * 100);
-                          const isCurrent = !completed && firstIncompleteIndex === index && !isComplete;
-                          const isLocked = !completed && firstIncompleteIndex !== -1 && index > firstIncompleteIndex;
-
-                          const isSelectedVideo = selectedVideoId === item.videoId;
-
-                          const CircularProgress = () => (
-                            <div className="relative w-10 h-10">
-                              <svg className="transform -rotate-90" viewBox="0 0 36 36">
-                                <path
-                                  className={isSelectedVideo ? "text-black/10" : "text-white/20"}
-                                  strokeWidth="4"
-                                  stroke="currentColor"
-                                  fill="none"
-                                  strokeLinecap="round"
-                                  d="M18 2.0845
-                                     a 15.9155 15.9155 0 0 1 0 31.831
-                                     a 15.9155 15.9155 0 0 1 0 -31.831"
-                                />
-                                <path
-                                  className={isSelectedVideo ? "text-black" : "text-white"}
-                                  strokeWidth="4"
-                                  strokeDasharray={`${moduleProgressPercent}, 100`}
-                                  stroke="currentColor"
-                                  fill="none"
-                                  strokeLinecap="round"
-                                  d="M18 2.0845
-                                     a 15.9155 15.9155 0 0 1 0 31.831
-                                     a 15.9155 15.9155 0 0 1 0 -31.831"
-                                />
-                              </svg>
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <span className={`text-xs font-semibold ${isSelectedVideo ? 'text-black' : 'text-white'}`}>{moduleProgressPercent}%</span>
-                              </div>
-                            </div>
-                          );
-
-                          if (isCurrent) {
-                            return (
-                              <div
-                                key={item.id}
-                                onClick={() => setSelectedVideoId(item.videoId)}
-                                className={`border rounded-3xl p-5 cursor-pointer active:scale-[0.98] transition-all ${isSelectedVideo
-                                  ? 'bg-white border-white text-black shadow-lg scale-[1.02]'
-                                  : 'bg-white/10 border-white/20 text-white hover:bg-white/15'
-                                  }`}
-                              >
-                                <div className="flex items-start gap-3 mb-3">
-                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${isSelectedVideo ? 'bg-black/10 text-black' : 'bg-white/10 text-white'
-                                    }`}>
-                                    {index + 1}
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <p className={`text-xs uppercase tracking-[0.3em] mb-1 ${isSelectedVideo ? 'text-black/50' : 'text-white/50'
-                                      }`}>In Progress</p>
-                                    <h3 className="text-lg font-semibold truncate">{moduleTitle}</h3>
-                                    <p className={`text-sm truncate ${isSelectedVideo ? 'text-black/60' : 'text-white/60'
-                                      }`}>{moduleDescription} • {moduleDurationLabel}</p>
-                                  </div>
-                                  <CircularProgress />
-                                </div>
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <div
-                              key={item.id}
-                              onClick={() => !isLocked && setSelectedVideoId(item.videoId)}
-                              className={`py-4 flex items-center justify-between gap-4 px-4 rounded-xl transition-all ${isSelectedVideo
-                                ? 'bg-white text-black shadow-lg scale-[1.02]'
-                                : `${completed ? 'text-white' : 'text-white/60'} ${isLocked ? 'cursor-not-allowed' : 'cursor-pointer hover:bg-white/5 active:scale-[0.98]'
-                                } ${index % 2 === 0 ? 'bg-white/5' : 'bg-transparent'}`
-                                }`}
-                            >
-                              <div className="flex items-center gap-3 flex-1 min-w-0">
-                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold ${isSelectedVideo ? 'bg-black/10 text-black' : 'bg-white/10 text-white'
-                                  }`}>
-                                  {index + 1}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <h3 className={`text-sm font-semibold truncate ${isSelectedVideo ? 'text-black' : 'text-white'
-                                    }`}>{moduleTitle}</h3>
-                                  <p className={`text-xs truncate ${isSelectedVideo ? 'text-black/40' : 'text-white/40'
-                                    }`}>{moduleDescription} • {moduleDurationLabel}</p>
-                                </div>
-                              </div>
-                              <div className="flex-shrink-0">
-                                {completed ? (
-                                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${isSelectedVideo ? 'bg-green-600 text-white' : 'bg-green-500 text-white'
-                                    }`}>
-                                    <Check size={18} />
-                                  </div>
-                                ) : (
-                                  <CircularProgress />
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </motion.div>
-                    </motion.div>
-                  ) : (
-                    <motion.button
-                      key="collapsed"
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.3, ease: "easeInOut" }}
-                      onClick={() => {
-                        setSelectedCampaignId(module.id);
-                        setSelectedVideoId(null);
-                        setShowComparisonCampaignId(null);
-                      }}
-                      className="relative overflow-hidden rounded-2xl border border-white/10 bg-transparent p-4 hover:border-white/30 active:scale-[0.98] transition-all cursor-pointer w-full text-left block"
-                    >
-                      {thumbnail ? (
-                        <>
-                          <div
-                            className="absolute inset-0 bg-cover bg-center opacity-40"
-                            style={{ backgroundImage: `url(${thumbnail})` }}
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-[#0b1324] via-[#0b1324]/80 to-transparent" />
-                        </>
-                      ) : (
-                        <div className="absolute inset-0 bg-gradient-to-br from-[#0b1324] via-[#152b55] to-[#1d4ed8]" />
-                      )}
-                      <div className="relative z-10 flex items-center gap-4">
-                        <div className="flex-1">
-                          <p className="text-xs uppercase tracking-[0.35em] text-white/60 mb-1">Campaign</p>
-                          <h2 className="text-lg font-semibold text-white leading-tight">{module.title}</h2>
-                        </div>
-                        <div className="flex-shrink-0">
-                          {hasProgress && (
-                            <div>
-                              <div className="flex justify-between text-xs text-white/60 mb-1.5">
-                                <span>Progress</span>
-                                <span>{module.completionPercentage}%</span>
-                              </div>
-                              <div className="h-1.5 rounded-full bg-white/15 overflow-hidden">
-                                <div
-                                  className="h-full rounded-full bg-white"
-                                  style={{ width: `${module.completionPercentage}%` }}
-                                />
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </motion.button>
-                  )}
-                </AnimatePresence>
-              </motion.div>
-            );
-          })}
-        </div >
-      );
-    };
-
-    return (
-      <div className="w-96 flex flex-col">
-        <div className="flex-1 overflow-y-auto">{sidebarContent()}</div>
-      </div>
-    );
-  };
-
-  // Mobile view (existing)
-  const renderMobileView = () => (
-    <div className="min-h-screen bg-[#050608] flex flex-col lg:hidden">
-      {/* Header */}
-      <div className="employee-header pt-6 px-6 pb-10">
-        <div className="flex items-center justify-between mb-0 relative">
-          <div className="flex items-center gap-4">
-            <img src="/dicode_logo.png" alt="DiCode" className="h-16 w-auto" />
-            <div>
-              <p className="text-sm text-white/60">Hello, {user?.name.split(' ')[0]}</p>
-              <h1 className="text-2xl font-semibold text-white leading-tight">
-                Your Campaigns
-              </h1>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate('/employee/profile')}
-              className="p-2 hover:bg-white/10 rounded-lg transition-colors"
-            >
-              <span className="sr-only">Open profile menu</span>
-              <Menu size={24} className="text-white" />
+            {/* Bell icon */}
+            <button className="w-10 h-10 rounded-full flex items-center justify-center text-white">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
             </button>
           </div>
         </div>
 
-        {modules.length > 0 && (
-          <div className="mt-6">
-            <div className="relative mb-3">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  resetToFeedView();
-                }}
-                placeholder="Search campaigns..."
-                className="pl-9 pr-4 py-2 rounded-full bg-white/5 border border-white/15 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/20 w-full"
-              />
-            </div>
-            <div className="-mx-6 mb-6">
-              <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide py-4 px-6">
-                {competencyFilters.map((competency) => (
+        {/* White Content Card */}
+        <div className="flex-1 bg-gray-50 rounded-t-[32px] overflow-hidden">
+          <div className="h-full overflow-y-auto pb-24">
+            {/* Search Section */}
+            <div className="px-5 pt-6">
+              <div className="flex gap-3">
+                <div className="flex-1 relative">
+                  <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search campaigns"
+                    className="w-full h-12 pl-11 pr-4 rounded-xl bg-white border border-gray-200 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-[15px]"
+                  />
+                </div>
+                <button className="w-12 h-12 rounded-xl bg-white border border-gray-200 flex items-center justify-center text-gray-500">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="4" x2="20" y1="6" y2="6" />
+                    <circle cx="8" cy="6" r="2" fill="currentColor" stroke="none" />
+                    <line x1="4" x2="20" y1="12" y2="12" />
+                    <circle cx="16" cy="12" r="2" fill="currentColor" stroke="none" />
+                    <line x1="4" x2="20" y1="18" y2="18" />
+                    <circle cx="10" cy="18" r="2" fill="currentColor" stroke="none" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Recent Tags */}
+              <div className="flex items-center gap-3 mt-4 overflow-x-auto scrollbar-hide">
+                <span className="text-gray-400 text-sm flex-shrink-0">Recent</span>
+                {['design', 'economy', 'art'].map((tag) => (
                   <button
-                    key={competency}
-                    onClick={() => setSelectedCompetency(competency)}
-                    className={`px-5 py-2.5 rounded-full text-sm font-semibold transition-all whitespace-nowrap flex-shrink-0 ${selectedCompetency === competency
-                      ? 'bg-white text-gray-900'
-                      : 'bg-white/10 text-white hover:bg-white/20'
-                      }`}
+                    key={tag}
+                    className="px-4 py-1.5 rounded-full bg-gray-800 text-white text-sm font-medium flex-shrink-0"
                   >
-                    {competency}
+                    {tag}
                   </button>
                 ))}
               </div>
             </div>
-          </div>
-        )}
-      </div>
 
-      {/* Modules List */}
-      <div className="px-6 pb-20 flex-1 flex flex-col">
-        {isLoadingCampaigns || isLoadingEnrollments ? (
-          <div className="flex flex-1 items-center justify-center">
-            <div className="text-white/70 text-sm">Loading your campaigns...</div>
-          </div>
-        ) : modules.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center">
-            <div className="card card--no-border text-center py-12">
-              <div className="w-16 h-16 bg-blue-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <BookOpen size={32} className="text-blue-primary" />
+            {isLoadingCampaigns || isLoadingEnrollments ? (
+              <div className="flex items-center justify-center py-20">
+                <div className="w-6 h-6 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
               </div>
-              <h3 className="text-xl font-semibold text-dark-text mb-2">No Campaigns Available</h3>
-              <p className="text-dark-text-muted">
-                No learning campaigns have been assigned to you yet. Check back later or contact your administrator.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-8 flex-1 -mt-12">
-            {renderSections()}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const renderDesktopView = () => {
-    return (
-      <div className="hidden lg:flex flex-col h-screen overflow-hidden bg-[#050608]">
-        {/* Top Bar */}
-        <div className="h-20 flex-shrink-0 flex items-center justify-between px-6 bg-[#050608]">
-          <div className="flex-1 flex justify-start">
-            <div className="flex items-center gap-6">
-              <div className="flex items-center gap-3">
-                <img src="/dicode_logo.png" alt="DiCode" className="h-10 w-auto" />
-                <div className="h-6 w-px bg-white/10 mx-2"></div>
-                <div>
-                  <p className="text-sm text-white/70">Hello, {user?.name.split(' ')[0]}</p>
-                  <h1 className="text-lg font-bold text-white tracking-wide">Your Campaigns</h1>
+            ) : modules.length === 0 ? (
+              <div className="flex items-center justify-center py-20 px-5">
+                <div className="text-center">
+                  <div className="w-16 h-16 bg-gray-200 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                    <BookOpen size={28} className="text-gray-400" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-1">No Campaigns Yet</h3>
+                  <p className="text-gray-500 text-sm">Your campaigns will appear here once assigned.</p>
                 </div>
               </div>
-            </div>
-          </div>
+            ) : (
+              <>
+                {/* Featured Campaigns */}
+                {featuredModules.length > 0 && (
+                  <div className="mt-6">
+                    <div className="flex items-center justify-between px-5 mb-4">
+                      <h2 className="text-[22px] font-bold text-gray-900">Featured campaigns</h2>
+                      <button className="text-blue-500 text-sm font-medium">See all</button>
+                    </div>
+                    <div className="flex gap-3 overflow-x-auto scrollbar-hide px-5 pb-2">
+                      {featuredModules.map((module, idx) => {
+                        const color = cardColors[idx % cardColors.length];
+                        const thumbnail = videoThumbnails[module.id];
 
-          <div className="flex-1 max-w-xl mx-4 flex justify-center items-center gap-3">
-            {(selectedCampaignId || selectedVideoId) && (
-              <button
-                onClick={resetToFeedView}
-                className="p-2.5 rounded-full bg-white/10 text-white hover:bg-white/20 transition-all flex-shrink-0"
-                title="Back to feed"
-              >
-                <Home size={18} />
-              </button>
+                        return (
+                          <motion.div
+                            key={module.id}
+                            whileTap={{ scale: 0.97 }}
+                            onClick={() => navigate(`/employee/campaign/${module.id}`)}
+                            className={`flex-shrink-0 w-[140px] h-[180px] ${color.bg} rounded-[20px] p-3.5 cursor-pointer relative overflow-hidden`}
+                          >
+                            {/* Favorite */}
+                            <button
+                              className="absolute top-3 right-3 w-7 h-7 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Heart size={14} className="text-white" />
+                            </button>
+
+                            <div className="h-full flex flex-col">
+                              <div className="flex-1">
+                                <h3 className="text-white font-bold text-[15px] leading-tight pr-6">
+                                  {module.title.length > 15 ? module.title.slice(0, 15) + '...' : module.title}
+                                </h3>
+                                <p className="text-white/70 text-xs mt-1">
+                                  {module.totalVideos} lessons
+                                </p>
+                              </div>
+
+                              {/* Bottom image */}
+                              <div className="flex justify-end mt-2">
+                                {thumbnail ? (
+                                  <img src={thumbnail} alt="" className="w-14 h-14 rounded-xl object-cover" />
+                                ) : (
+                                  <div className="w-14 h-14 rounded-xl bg-white/20 flex items-center justify-center">
+                                    <BookOpen size={20} className="text-white/80" />
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Ongoing */}
+                {inProgressModules.length > 0 && (
+                  <div className="mt-6 px-5">
+                    <h2 className="text-[22px] font-bold text-gray-900 mb-4">Ongoing</h2>
+                    <div className="space-y-3">
+                      {inProgressModules.map((module, idx) => {
+                        const thumbnail = videoThumbnails[module.id];
+                        const color = cardColors[idx % cardColors.length];
+
+                        return (
+                          <motion.div
+                            key={module.id}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => navigate(`/employee/campaign/${module.id}`)}
+                            className="bg-white rounded-2xl p-4 cursor-pointer shadow-sm"
+                          >
+                            <div className="flex gap-3.5">
+                              {/* Circle thumbnail */}
+                              <div className={`w-12 h-12 rounded-full ${color.bg} flex-shrink-0 overflow-hidden flex items-center justify-center`}>
+                                {thumbnail ? (
+                                  <img src={thumbnail} alt="" className="w-full h-full object-cover" />
+                                ) : (
+                                  <BookOpen size={20} className="text-white" />
+                                )}
+                              </div>
+
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-start justify-between">
+                                  <div className="min-w-0 pr-2">
+                                    <h3 className="font-semibold text-gray-900 text-[15px] truncate">
+                                      {module.title}
+                                    </h3>
+                                    <p className="text-gray-400 text-sm truncate">
+                                      Module {(module.nextVideoIndex || 0) + 1} of {module.totalVideos}
+                                    </p>
+                                  </div>
+                                  <button
+                                    className="text-gray-300 p-0.5 flex-shrink-0"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                      <circle cx="12" cy="5" r="2" />
+                                      <circle cx="12" cy="12" r="2" />
+                                      <circle cx="12" cy="19" r="2" />
+                                    </svg>
+                                  </button>
+                                </div>
+
+                                <div className="mt-2.5">
+                                  <div className="flex items-center justify-between text-xs text-gray-400 mb-1.5">
+                                    <span>{module.totalVideos} lessons</span>
+                                    <span>{module.completionPercentage}% complete</span>
+                                  </div>
+                                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                    <div
+                                      className="h-full bg-gray-900 rounded-full"
+                                      style={{ width: `${module.completionPercentage}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Completed */}
+                {completedModules.length > 0 && (
+                  <div className="mt-6 px-5 pb-4">
+                    <h2 className="text-[22px] font-bold text-gray-900 mb-4">Completed</h2>
+                    <div className="space-y-3">
+                      {completedModules.slice(0, 3).map((module) => {
+                        const thumbnail = videoThumbnails[module.id];
+
+                        return (
+                          <motion.div
+                            key={module.id}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => navigate(`/employee/campaign/${module.id}`)}
+                            className="bg-white rounded-2xl p-4 cursor-pointer shadow-sm"
+                          >
+                            <div className="flex items-center gap-3.5">
+                              <div className="w-12 h-12 rounded-full bg-emerald-100 flex-shrink-0 flex items-center justify-center">
+                                <Check size={20} className="text-emerald-600" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <h3 className="font-semibold text-gray-900 text-[15px] truncate">{module.title}</h3>
+                                <p className="text-gray-400 text-sm">{module.totalVideos} lessons</p>
+                              </div>
+                              <ArrowRight size={18} className="text-gray-300 flex-shrink-0" />
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
-            <div className="relative w-full">
-              <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40" />
-              <input
-                type="text"
-                placeholder="Search your learning content..."
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  resetToFeedView();
-                }}
-                className="w-full pl-11 pr-4 py-2.5 rounded-full bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-white/10 focus:bg-white/10 transition-all"
-              />
-            </div>
-          </div>
-
-          <div className="flex-1 flex justify-end items-center gap-4">
-            <button
-              onClick={() => navigate('/employee/profile')}
-              className="p-2 hover:bg-white/10 rounded-lg transition-colors"
-            >
-              <span className="sr-only">Open profile menu</span>
-              <Menu size={24} className="text-white" />
-            </button>
           </div>
         </div>
 
-        {/* Main Content Area */}
-        <div className="flex-1 flex overflow-hidden p-1 gap-1">
-          {renderLearningArea()}
-          {selectedCampaignId && renderCampaignSidebar()}
+        {/* Bottom Nav */}
+        <div className="fixed bottom-0 left-0 right-0 bg-white px-4 py-2.5 lg:hidden safe-area-bottom">
+          <div className="flex items-center justify-around">
+            <button
+              onClick={() => setMobileNavTab('home')}
+              className={`flex items-center gap-2 h-10 px-4 rounded-full transition-colors ${mobileNavTab === 'home' ? 'bg-gray-900 text-white' : 'text-gray-400'
+                }`}
+            >
+              <HomeIcon size={20} />
+              {mobileNavTab === 'home' && <span className="text-sm font-medium">Home</span>}
+            </button>
+            <button onClick={() => navigate('/employee/comparison')} className="h-10 px-3 text-gray-400">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <path d="M16 2v4M8 2v4M3 10h18" />
+              </svg>
+            </button>
+            <button onClick={() => navigate('/employee/analytics')} className="h-10 px-3 text-gray-400">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+              </svg>
+            </button>
+            <button onClick={() => navigate('/employee/profile')} className="h-10 px-3 text-gray-400">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Stats sidebar for desktop
+  const renderStatsSidebar = () => {
+    const progressPercent = userStats.xpToNextLevel > 0
+      ? Math.round((userStats.currentXP / userStats.xpToNextLevel) * 100)
+      : 0;
+
+    return (
+      <div className="w-72 flex-shrink-0 bg-[#090909] rounded-3xl border border-white/5 p-5 overflow-y-auto">
+        {/* User Level Card */}
+        <div className="mb-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
+              <span className="text-white text-xl font-bold">{userStats.level}</span>
+            </div>
+            <div>
+              <p className="text-white font-semibold">Level {userStats.level}</p>
+              <p className="text-white/50 text-sm">{getLevelTitle(userStats.level)}</p>
+            </div>
+          </div>
+
+          {/* XP Progress */}
+          <div className="space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-white/50">XP Progress</span>
+              <span className="text-white font-medium">{userStats.currentXP}/{userStats.xpToNextLevel}</span>
+            </div>
+            <div className="h-2.5 rounded-full bg-white/10 overflow-hidden">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${progressPercent}%` }}
+                transition={{ duration: 0.8, ease: "easeOut" }}
+                className="h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-400"
+              />
+            </div>
+            <p className="text-white/40 text-xs">{userStats.xpToNextLevel - userStats.currentXP} XP to next level</p>
+          </div>
+        </div>
+
+        {/* Streak */}
+        <div className="bg-gradient-to-br from-orange-500/10 to-red-500/10 rounded-2xl p-4 border border-orange-500/20 mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Flame size={20} className="text-orange-400" />
+              <span className="text-white font-semibold">Streak</span>
+            </div>
+            <span className="text-2xl font-bold text-orange-400">{userStats.currentStreak}</span>
+          </div>
+          <p className="text-white/50 text-sm">
+            {userStats.currentStreak > 0
+              ? `Keep it up! Best: ${userStats.longestStreak} days`
+              : 'Complete a module to start your streak!'}
+          </p>
+        </div>
+
+        {/* Today's Goal */}
+        <div className="bg-gradient-to-br from-emerald-500/10 to-teal-500/10 rounded-2xl p-4 border border-emerald-500/20 mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Target size={20} className="text-emerald-400" />
+              <span className="text-white font-semibold">Today's Goal</span>
+            </div>
+          </div>
+          <p className="text-white/70 text-sm mb-3">Complete {userStats.dailyGoal.target} module</p>
+          <div className="flex gap-2">
+            {Array.from({ length: userStats.dailyGoal.target }, (_, i) => (
+              <div
+                key={i}
+                className={`flex-1 h-2 rounded-full ${i < userStats.dailyGoal.completed
+                  ? 'bg-emerald-400'
+                  : 'bg-white/20'
+                  }`}
+              />
+            ))}
+          </div>
+          <p className="text-white/40 text-xs mt-2">
+            {userStats.dailyGoal.completed >= userStats.dailyGoal.target
+              ? '✓ Goal achieved!'
+              : `${userStats.dailyGoal.target - userStats.dailyGoal.completed} more to go`}
+          </p>
+        </div>
+
+        {/* Top Competencies (from skill scores) */}
+        {skillScores?.competencyScores && Object.keys(skillScores.competencyScores).length > 0 && (
+          <div className="mb-6 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-white/50 text-xs uppercase tracking-wider font-medium">Top Competencies</h3>
+              <button
+                onClick={() => navigate('/employee/profile')}
+                className="text-blue-400 text-xs hover:text-blue-300 transition-colors"
+              >
+                View All
+              </button>
+            </div>
+            <div className="space-y-2">
+              {Object.entries(skillScores.competencyScores)
+                .sort(([, a], [, b]) => (b.level || 1) - (a.level || 1))
+                .slice(0, 3)
+                .map(([name, data]) => {
+                  const level = data.level || 1;
+                  const maxLevel = 5;
+                  const progress = ((level - 1) / (maxLevel - 1)) * 100;
+                  return (
+                    <div key={name} className="bg-white/5 rounded-xl p-3 border border-white/5">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-white text-sm font-medium truncate flex-1 mr-2">{name}</span>
+                        <span className="text-white/60 text-xs px-2 py-0.5 rounded-full bg-white/10">
+                          Lv.{level}
+                        </span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-500"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        )}
+
+        {/* Quick Stats Grid */}
+        <div className="space-y-3">
+          <h3 className="text-white/50 text-xs uppercase tracking-wider font-medium">Your Stats</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-white/5 rounded-xl p-3 border border-white/5">
+              <div className="flex items-center gap-2 mb-1">
+                <BookOpen size={14} className="text-white/40" />
+                <span className="text-white/50 text-xs">Modules</span>
+              </div>
+              <p className="text-white text-xl font-bold">{userStats.modulesCompleted}</p>
+            </div>
+            <div className="bg-white/5 rounded-xl p-3 border border-white/5">
+              <div className="flex items-center gap-2 mb-1">
+                <TrendingUp size={14} className="text-white/40" />
+                <span className="text-white/50 text-xs">Avg Score</span>
+              </div>
+              <p className="text-white text-xl font-bold">{userStats.averageScore}%</p>
+            </div>
+            <button
+              onClick={() => navigate('/employee/badges')}
+              className="bg-white/5 rounded-xl p-3 border border-white/5 hover:bg-white/10 transition-colors text-left"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <Award size={14} className="text-white/40" />
+                <span className="text-white/50 text-xs">Badges</span>
+              </div>
+              <p className="text-white text-xl font-bold">{userBadges.length}</p>
+            </button>
+            <div className="bg-white/5 rounded-xl p-3 border border-white/5">
+              <div className="flex items-center gap-2 mb-1">
+                <Zap size={14} className="text-white/40" />
+                <span className="text-white/50 text-xs">Total XP</span>
+              </div>
+              <p className="text-white text-xl font-bold">{userStats.totalXP}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Leaderboard Preview */}
+        <div className="mt-6 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-white/50 text-xs uppercase tracking-wider font-medium">Leaderboard</h3>
+            <button
+              onClick={() => navigate('/employee/rank')}
+              className="text-blue-400 text-xs hover:text-blue-300 transition-colors"
+            >
+              View All
+            </button>
+          </div>
+          <div className="space-y-2">
+            {leaderboard.slice(0, 5).map((entry, index) => {
+              const isCurrentUser = entry.userId === user?.id;
+              return (
+                <div
+                  key={entry.userId}
+                  className={`flex items-center gap-3 p-2 rounded-xl ${isCurrentUser ? 'bg-blue-500/10 border border-blue-500/20' : 'bg-white/5'
+                    }`}
+                >
+                  <span className={`w-6 text-center font-bold ${index === 0 ? 'text-yellow-400' :
+                    index === 1 ? 'text-gray-300' :
+                      index === 2 ? 'text-orange-400' :
+                        'text-white/50'
+                    }`}>
+                    {index + 1}
+                  </span>
+                  <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center overflow-hidden">
+                    {entry.avatar ? (
+                      <img src={entry.avatar} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-white/60 text-xs font-medium">
+                        {entry.name?.charAt(0) || '?'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-medium truncate ${isCurrentUser ? 'text-blue-400' : 'text-white'}`}>
+                      {isCurrentUser ? 'You' : entry.name}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 text-white/60">
+                    <Zap size={12} />
+                    <span className="text-xs font-medium">{entry.totalXp || 0}</span>
+                  </div>
+                </div>
+              );
+            })}
+            {leaderboard.length === 0 && (
+              <p className="text-white/40 text-sm text-center py-4">No leaderboard data yet</p>
+            )}
+          </div>
+        </div>
+
+        {/* Navigation */}
+        <div className="mt-6 pt-6 border-t border-white/10 space-y-2">
+          <button
+            onClick={() => navigate('/employee/comparison')}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white/70 hover:bg-white/5 hover:text-white transition-all"
+          >
+            <BarChart3 size={18} />
+            <span className="text-sm font-medium">View Analytics</span>
+          </button>
+          <button
+            onClick={() => setIsCopilotOpen(true)}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-all border border-blue-500/20"
+          >
+            <Bot size={18} />
+            <span className="text-sm font-medium">AI Copilot</span>
+          </button>
+          <button
+            onClick={() => logout()}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white/50 hover:bg-white/5 hover:text-white/70 transition-all"
+          >
+            <LogOut size={18} />
+            <span className="text-sm font-medium">Sign Out</span>
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDesktopView = () => {
+    return (
+      <div className="hidden lg:flex h-screen overflow-hidden bg-[#0a0a0a]">
+        {/* Left Navigation Sidebar */}
+        <DesktopSidebar
+          activePage="home"
+          onHomeClick={() => navigate('/employee/home')}
+          onAICopilotClick={() => setIsCopilotOpen(true)}
+          isExpanded={isSidebarExpanded}
+          onToggleExpand={setIsSidebarExpanded}
+        />
+
+        {/* Main Area with curved corner */}
+        <div className="flex-1 flex flex-col overflow-hidden bg-[#050608] rounded-tl-3xl">
+          {/* Top Bar */}
+          <div className="h-16 flex-shrink-0 flex items-center justify-between px-6 bg-[#050608]/80 backdrop-blur-xl border-b border-white/5 z-20">
+            <div className="flex items-center gap-4">
+            </div>
+
+            <div className="flex-1 max-w-lg mx-8 flex items-center gap-3">
+              <div className="relative flex-1">
+                <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40" />
+                <input
+                  type="text"
+                  placeholder="Search campaigns..."
+                  value={searchQuery}
+                  onClick={openSearch}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-11 pr-16 py-2.5 rounded-full bg-white/5 border border-white/10 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-white/10 focus:bg-white/10 transition-all"
+                />
+                {/* Cmd+K hint */}
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-0.5 text-white/30 text-xs pointer-events-none">
+                  <kbd className="px-1.5 py-0.5 rounded bg-white/10 font-sans">⌘</kbd>
+                  <kbd className="px-1.5 py-0.5 rounded bg-white/10 font-sans">K</kbd>
+                </div>
+              </div>
+              {/* Notifications bell */}
+              <button
+                onClick={() => setIsNotificationsOpen(true)}
+                className="relative p-2 hover:bg-white/10 rounded-lg transition-colors flex-shrink-0"
+              >
+                <Bell size={20} className="text-white/70" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* User stats container - clickable to profile */}
+            <button
+              onClick={() => navigate('/employee/profile')}
+              className="flex items-center gap-3 px-3 py-1.5 rounded-full hover:bg-white/5 transition-all"
+            >
+              {/* Streak indicator */}
+              <div className="flex items-center gap-1.5">
+                <Flame size={16} className="text-orange-400" />
+                <span className="text-orange-300 font-bold text-sm">{userStats.currentStreak}</span>
+              </div>
+              {/* Level badge */}
+              <span className="text-blue-400 font-bold text-sm">Lv {userStats.level}</span>
+              {/* Avatar with circular progress ring */}
+              <div className="relative">
+                <svg className="w-10 h-10 -rotate-90" viewBox="0 0 36 36">
+                  {/* Background circle */}
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="16"
+                    fill="none"
+                    stroke="rgba(255,255,255,0.1)"
+                    strokeWidth="2"
+                  />
+                  {/* Progress circle */}
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="16"
+                    fill="none"
+                    stroke="#60a5fa"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeDasharray={`${(userStats.currentXP / userStats.xpToNextLevel) * 100.5} 100.5`}
+                  />
+                </svg>
+                <div className="absolute inset-1">
+                  <Avatar
+                    src={user?.avatar}
+                    name={user?.name}
+                    size="sm"
+                  />
+                </div>
+              </div>
+            </button>
+          </div>
+
+          {/* Main Learning Area */}
+          <div className="flex-1 flex overflow-hidden p-2 gap-2">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key="feed-content"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="flex-1 overflow-y-auto custom-scrollbar px-6 pb-6"
+              >
+                {renderDesktopHomeFeed()}
+              </motion.div>
+            </AnimatePresence>
+          </div>
         </div>
       </div>
     );
@@ -1881,17 +1756,332 @@ const EmployeeHome: React.FC = () => {
 
   return (
     <>
-      {renderMobileView()}
+      {/* Mobile View - New Duolingo-inspired UI */}
+      <div className="lg:hidden">
+        <MobileHome />
+      </div>
+
+      {/* Desktop View */}
       {renderDesktopView()}
+
+      {/* Global Search Overlay */}
+      <GlobalSearchOverlay />
 
       {/* AI Copilot */}
       {isCopilotOpen && (
         <AICopilot
           isOpen={isCopilotOpen}
           onClose={() => setIsCopilotOpen(false)}
-          context={{ userRole: 'employee' }}
+          context={{
+            userRole: 'employee',
+            learningContext: {
+              currentCampaign: undefined,
+              currentCampaignTitle: undefined,
+              currentModule: undefined,
+              currentModuleTitle: undefined,
+              streakStatus: {
+                current: userStats.currentStreak,
+                atRisk: userStats.dailyGoal.completed < userStats.dailyGoal.target,
+              },
+              weakCompetencies: [],
+              strongCompetencies: [],
+            }
+          }}
         />
       )}
+
+      {/* Level Up Celebration Modal */}
+      <AnimatePresence>
+        {showLevelUpModal && levelUpData && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+            onClick={() => setShowLevelUpModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.5, opacity: 0 }}
+              transition={{ type: "spring", damping: 15 }}
+              className="relative bg-gradient-to-br from-blue-600 to-purple-600 rounded-3xl p-8 max-w-sm mx-4 text-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Decorative elements */}
+              <div className="absolute -top-6 left-1/2 -translate-x-1/2">
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+                  className="w-20 h-20 rounded-full bg-yellow-400 flex items-center justify-center shadow-lg shadow-yellow-400/50"
+                >
+                  <Trophy size={40} className="text-yellow-900" />
+                </motion.div>
+              </div>
+
+              <div className="mt-8 mb-6">
+                <motion.p
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.2 }}
+                  className="text-white/80 text-sm uppercase tracking-widest mb-2"
+                >
+                  Congratulations!
+                </motion.p>
+                <motion.h2
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.3 }}
+                  className="text-4xl font-bold text-white mb-2"
+                >
+                  Level Up!
+                </motion.h2>
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ delay: 0.4, type: "spring" }}
+                  className="flex items-center justify-center gap-4 my-6"
+                >
+                  <div className="text-white/60 text-2xl font-bold">
+                    {levelUpData.previousLevel}
+                  </div>
+                  <ArrowRight size={24} className="text-white/40" />
+                  <div className="text-white text-5xl font-bold">
+                    {levelUpData.newLevel}
+                  </div>
+                </motion.div>
+                <motion.p
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.5 }}
+                  className="text-white/70"
+                >
+                  You earned <span className="text-yellow-300 font-bold">+{levelUpData.xpEarned} XP</span>
+                </motion.p>
+                <motion.p
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.6 }}
+                  className="text-white/60 text-sm mt-2"
+                >
+                  {getLevelTitle(levelUpData.newLevel)}
+                </motion.p>
+              </div>
+
+              <motion.button
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.7 }}
+                onClick={() => setShowLevelUpModal(false)}
+                className="px-8 py-3 rounded-full bg-white text-blue-600 font-bold hover:bg-white/90 transition-all"
+              >
+                Awesome!
+              </motion.button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Badge Earned Modal */}
+      <AnimatePresence>
+        {showBadgeModal && newBadges.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+            onClick={() => setShowBadgeModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.5, opacity: 0 }}
+              transition={{ type: "spring", damping: 15 }}
+              className="relative bg-gradient-to-br from-amber-500 to-orange-600 rounded-3xl p-8 max-w-sm mx-4 text-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <motion.p
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.1 }}
+                className="text-white/80 text-sm uppercase tracking-widest mb-4"
+              >
+                Badge{newBadges.length > 1 ? 's' : ''} Unlocked!
+              </motion.p>
+
+              <div className="flex flex-wrap justify-center gap-4 my-6">
+                {newBadges.map((badge, index) => (
+                  <motion.div
+                    key={badge.id}
+                    initial={{ scale: 0, rotate: -180 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    transition={{ delay: 0.2 + index * 0.1, type: "spring" }}
+                    className="flex flex-col items-center"
+                  >
+                    <div className="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center text-4xl mb-2">
+                      {badge.icon}
+                    </div>
+                    <p className="text-white font-bold text-sm">{badge.name}</p>
+                    <p className="text-white/60 text-xs max-w-[100px]">{badge.description}</p>
+                  </motion.div>
+                ))}
+              </div>
+
+              <motion.button
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.5 }}
+                onClick={() => {
+                  setShowBadgeModal(false);
+                  setNewBadges([]);
+                }}
+                className="px-8 py-3 rounded-full bg-white text-orange-600 font-bold hover:bg-white/90 transition-all"
+              >
+                Collect
+              </motion.button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Desktop Notifications Side Panel */}
+      <AnimatePresence>
+        {isNotificationsOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsNotificationsOpen(false)}
+              className="fixed inset-0 bg-black/50 z-40"
+            />
+            {/* Side Panel */}
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="fixed right-0 top-0 h-full w-[420px] bg-[#141414] border-l border-white/10 z-50 flex flex-col"
+            >
+              {/* Header */}
+              <div className="px-6 pt-6 pb-4">
+                <div className="flex items-center justify-between mb-5">
+                  <h2 className="text-2xl font-bold text-white">Notifications</h2>
+                  <div className="flex items-center gap-3">
+                    {notifications.some(n => !n.read) && (
+                      <button
+                        onClick={markAllAsRead}
+                        className="text-sm text-white/60 hover:text-white underline underline-offset-2 transition-colors"
+                      >
+                        Mark all as read
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setIsNotificationsOpen(false)}
+                      className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+                    >
+                      <X size={20} className="text-white/50" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Tabs */}
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setNotificationFilter('all')}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${notificationFilter === 'all'
+                      ? 'bg-white/10 text-white'
+                      : 'text-white/50 hover:bg-white/5'
+                      }`}
+                  >
+                    All
+                    {notifications.length > 0 && (
+                      <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${notificationFilter === 'all' ? 'bg-white/20' : 'bg-white/10'
+                        }`}>
+                        {notifications.length}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setNotificationFilter('unread')}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${notificationFilter === 'unread'
+                      ? 'bg-white/10 text-white'
+                      : 'text-white/50 hover:bg-white/5'
+                      }`}
+                  >
+                    Unread
+                    {unreadCount > 0 && (
+                      <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${notificationFilter === 'unread' ? 'bg-white/20' : 'bg-white/10'
+                        }`}>
+                        {unreadCount}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Notifications List */}
+              <div className="flex-1 overflow-y-auto">
+                {displayedNotifications.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full text-white/40">
+                    <Bell size={48} className="mb-3 opacity-50" />
+                    <p>{notificationFilter === 'unread' ? 'No unread notifications' : 'No notifications yet'}</p>
+                  </div>
+                ) : (
+                  <div>
+                    {displayedNotifications.map((notification) => (
+                      <button
+                        key={notification.id}
+                        onClick={() => {
+                          markAsRead(notification.id);
+                          setIsNotificationsOpen(false);
+                        }}
+                        className={`w-full px-6 py-4 text-left hover:bg-white/5 transition-colors border-b border-white/5 ${!notification.read ? 'bg-blue-500/5' : ''
+                          }`}
+                      >
+                        <div className="flex gap-3">
+                          {/* Icon/Avatar */}
+                          <div className="relative flex-shrink-0">
+                            <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${notification.type === 'achievement' ? 'bg-gradient-to-br from-amber-400 to-orange-500' :
+                              notification.type === 'reminder' ? 'bg-gradient-to-br from-blue-400 to-blue-600' :
+                                notification.type === 'streak' ? 'bg-gradient-to-br from-orange-400 to-red-500' :
+                                  notification.type === 'campaign' ? 'bg-gradient-to-br from-purple-400 to-purple-600' :
+                                    'bg-gradient-to-br from-gray-400 to-gray-600'
+                              }`}>
+                              {notification.type === 'achievement' ? <Trophy size={20} className="text-white" /> :
+                                notification.type === 'reminder' ? <Target size={20} className="text-white" /> :
+                                  notification.type === 'streak' ? <TrendingUp size={20} className="text-white" /> :
+                                    notification.type === 'campaign' ? <Star size={20} className="text-white" /> :
+                                      <MessageSquare size={20} className="text-white" />}
+                            </div>
+                            {!notification.read && (
+                              <div className="absolute -top-0.5 -left-0.5 w-3 h-3 rounded-full bg-green-500 border-2 border-[#141414]" />
+                            )}
+                          </div>
+
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[15px] text-white leading-snug">
+                              <span className="font-semibold">{notification.title}</span>
+                            </p>
+                            <p className="text-[15px] text-white/70 mt-0.5 line-clamp-2">
+                              {notification.message}
+                            </p>
+                            <p className="text-sm text-white/40 mt-1.5">
+                              {formatTimeAgo(notification.timestamp)}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </>
   );
 };
@@ -1905,3 +2095,4 @@ function SectionHeading({ title }: { title: string }) {
     </div>
   );
 }
+

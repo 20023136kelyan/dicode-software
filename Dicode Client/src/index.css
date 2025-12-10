@@ -77,6 +77,12 @@
     line-height: 1.6;
   }
 
+  /* Light mode for mobile employee UI */
+  body.light-mode {
+    background-color: #F8FAFC;
+    color: #0F172A;
+  }
+
   #root {
     min-height: 100vh;
   }
@@ -600,6 +606,16 @@
    ========================================================================== */
 
 @layer utilities {
+  /* Hide scrollbar utility */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
   .text-gradient {
     background: linear-gradient(to right, var(--color-blue-light), var(--color-primary));
     background-clip: text;

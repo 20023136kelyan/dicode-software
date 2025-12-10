@@ -125,16 +125,28 @@ export type QuestionRole = 'perception' | 'intent' | 'qualitative';
 export type ScaleType = '4-point' | '5-point' | '7-point';
 export type VideoSource = 'generated' | 'uploaded';
 
+// SJT (Situational Judgment Test) option for Q2 behavioral-intent questions
+export interface IntentOption {
+  id: string;
+  text: string;
+  intentScore: number; // 1-7, hidden from learners, used for analytics
+}
+
 export interface Question {
   id: string;
   type: QuestionType;
   role?: QuestionRole;
   statement: string;
-  scaleType?: ScaleType; // Only for quantitative questions
+  // Q1 (behavioral-perception): Likert scale settings
+  scaleType?: ScaleType; // Only for Q1
   scaleLabels?: {
     low: string;
     high: string;
   };
+  benchmarkScore?: number; // Q1 only: Expert/control answer (1-7) for comparison
+  // Q2 (behavioral-intent): SJT multiple choice options
+  options?: IntentOption[]; // Q2 only: Multiple choice options with hidden scores
+  // Competency/skill tagging (required for Q1 and Q2)
   competency?: string; // For behavioral questions
   competencyId?: string;
   skillId?: string;
@@ -159,6 +171,7 @@ export interface Video {
     sequenceId?: string;
     usedAssets?: string[]; // Asset IDs used to generate this video
   };
+  allowedOrganizations?: string[]; // Empty or undefined = accessible to all (Global)
   metadata: {
     createdAt: Date;
     updatedAt: Date;
@@ -191,6 +204,47 @@ export interface User {
   avatar?: string;
   createdAt?: any;
   lastLogin?: any;
+}
+
+// User Profile for DiCode staff (stored in Firestore)
+export interface UserProfile {
+  id: string;
+  displayName: string;
+  email: string;
+  photoURL?: string;
+  notificationPreferences: NotificationPreferences;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface NotificationPreferences {
+  campaign_updates: boolean;
+  video_generation: boolean;
+  team_activity: boolean;
+  system_alerts: boolean;
+  browser_notifications: boolean;
+}
+
+// Support Tickets
+export type TicketPriority = 'low' | 'medium' | 'high';
+export type TicketCategory = 'bug' | 'feature' | 'question' | 'other';
+export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+
+export interface SupportTicket {
+  id: string;
+  userId: string;
+  userEmail: string;
+  userName?: string;
+  subject: string;
+  message: string;
+  priority: TicketPriority;
+  category: TicketCategory;
+  status: TicketStatus;
+  assignedTo?: string;
+  resolution?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  resolvedAt?: Date;
 }
 
 export interface Campaign {
@@ -253,6 +307,13 @@ export interface Campaign {
     version: number;
     isPublished: boolean;
     tags?: string[];
+    computed?: {
+      totalItems: number;
+      totalQuestions: number;
+      durationSeconds: number;
+      estimatedMinutes: number;
+      totalXP: number;
+    };
   };
 }
 
@@ -280,11 +341,16 @@ export interface QuestionFormData {
   role: QuestionRole;
   type: QuestionType;
   statement: string;
+  // Q1 (behavioral-perception): Likert scale settings
   scaleType?: ScaleType;
   scaleLabels?: {
     low: string;
     high: string;
   };
+  benchmarkScore?: number; // Q1 only: Expert/control answer (1-7)
+  // Q2 (behavioral-intent): SJT multiple choice options
+  options?: IntentOption[]; // Q2 only: Multiple choice options with hidden scores
+  // Competency/skill tagging
   competency?: string;
   competencyId?: string;
   skillId?: string;
@@ -430,7 +496,10 @@ export type ActivityAction =
   | 'campaign_deleted'
   | 'video_generated'
   | 'video_uploaded'
+  | 'video_updated'
   | 'video_deleted'
+  | 'access_updated'
+  | 'bulk_access_updated'
   | 'asset_created'
   | 'asset_updated'
   | 'asset_deleted'
@@ -448,6 +517,7 @@ export interface Activity {
   resourceName: string;
   resourceType: ActivityResourceType;
   metadata?: Record<string, any>;
+  userAvatar?: string;
   createdAt: any; // Timestamp
 }
 
@@ -471,8 +541,8 @@ export interface AppNotification {
   title: string;
   message: string;
   priority: NotificationPriority;
-  read: boolean;
-  userId: string; // Who should see this notification
+  readBy: string[]; // Array of user IDs who have read this notification
+  staffOnly?: boolean; // If true, only DiCode staff can see this notification
   actorId?: string; // Who triggered this (for team activity)
   actorName?: string;
   actorEmail?: string;

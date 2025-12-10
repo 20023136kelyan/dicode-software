@@ -62,17 +62,21 @@ export function validateQuestion(question: QuestionFormData): string[] {
     );
   }
 
-  // Quantitative question validations
-  if (
-    question.type === 'behavioral-perception' ||
-    question.type === 'behavioral-intent'
-  ) {
+  // Q1 - Behavioral Perception (Likert scale) validations
+  if (question.type === 'behavioral-perception') {
     if (!question.scaleType) {
-      errors.push('Scale type is required for quantitative questions');
+      errors.push('Scale type is required for perception questions');
     }
 
     if (!question.scaleLabels?.low || !question.scaleLabels?.high) {
-      errors.push('Scale labels (low and high) are required for quantitative questions');
+      errors.push('Scale labels (low and high) are required for perception questions');
+    }
+
+    // Optional: Validate benchmark score if provided
+    if (question.benchmarkScore !== undefined) {
+      if (question.benchmarkScore < 1 || question.benchmarkScore > 7) {
+        errors.push('Benchmark score must be between 1 and 7');
+      }
     }
 
     if (!question.competency) {
@@ -87,12 +91,48 @@ export function validateQuestion(question: QuestionFormData): string[] {
       errors.push('Select a specific skill for this question');
     }
 
-    // Check for question mark (behavioral questions should be statements)
+    // Check for question mark (behavioral statements should not be questions)
     if (statement.includes('?')) {
       errors.push(
-        'Behavioral questions should be statements, not questions. Remove the question mark.'
+        'Behavioral perception should be a statement, not a question. Remove the question mark.'
       );
     }
+  }
+
+  // Q2 - Behavioral Intent (SJT multiple choice) validations
+  if (question.type === 'behavioral-intent') {
+    // Validate options
+    if (!question.options || question.options.length < 2) {
+      errors.push('At least 2 response options are required for situational judgment questions');
+    } else {
+      // Validate each option
+      const hasEmptyText = question.options.some(opt => !opt.text.trim());
+      if (hasEmptyText) {
+        errors.push('All response options must have text');
+      }
+
+      const hasInvalidScore = question.options.some(
+        opt => opt.intentScore < 1 || opt.intentScore > 7
+      );
+      if (hasInvalidScore) {
+        errors.push('All option scores must be between 1 and 7');
+      }
+    }
+
+    if (!question.competency) {
+      errors.push('Competency tag is required for behavioral questions');
+    }
+
+    if (!question.competencyId) {
+      errors.push('Select a competency from the library');
+    }
+
+    if (!question.skillId) {
+      errors.push('Select a specific skill for this question');
+    }
+
+    // Q2 CAN be phrased as a question (e.g., "What would you do if...?")
+    // So we don't enforce the no-question-mark rule here
   }
 
   // Qualitative question validations
@@ -145,7 +185,7 @@ export function getQuestionTypeLabel(type: QuestionFormData['type']): string {
     case 'behavioral-perception':
       return 'Q1: Behavioral Perception';
     case 'behavioral-intent':
-      return 'Q2: Behavioral Intent/Application';
+      return 'Q2: Situational Judgment';
     case 'qualitative':
       return 'Q3: Qualitative Insight';
     default:

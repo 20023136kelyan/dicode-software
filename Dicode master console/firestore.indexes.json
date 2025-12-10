@@ -1,6 +1,20 @@
 {
   "indexes": [
     {
+      "collectionGroup": "organizationActivities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "organizationId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "assets",
       "queryScope": "COLLECTION",
       "fields": [
@@ -51,7 +65,39 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "organizationId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lastAccessedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "campaignEnrollments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
           "fieldPath": "campaignId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "enrolledAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "campaignEnrollments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "campaignId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "organizationId",
           "order": "ASCENDING"
         },
         {
@@ -220,6 +266,24 @@
         },
         {
           "fieldPath": "instanceNumber",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "skillAssessments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "campaignId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "organizationId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "assessedAt",
           "order": "DESCENDING"
         }
       ]

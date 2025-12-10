@@ -1,0 +1,32 @@
+[debug] [2025-12-05T06:03:17.228Z] ----------------------------------------------------------------------
+[debug] [2025-12-05T06:03:17.229Z] Command:       /Users/kelyan/.nvm/versions/node/v22.18.0/bin/node /Users/kelyan/.nvm/versions/node/v22.18.0/bin/firebase deploy --only firestore:rules
+[debug] [2025-12-05T06:03:17.230Z] CLI Version:   14.14.0
+[debug] [2025-12-05T06:03:17.230Z] Platform:      darwin
+[debug] [2025-12-05T06:03:17.230Z] Node Version:  v22.18.0
+[debug] [2025-12-05T06:03:17.230Z] Time:          Fri Dec 05 2025 14:03:17 GMT+0800 (Malaysia Time)
+[debug] [2025-12-05T06:03:17.230Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2025-12-05T06:03:17.304Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2025-12-05T06:03:17.304Z] > authorizing via signed-in user (erick.xu@di-code.de)
+[debug] [2025-12-05T06:03:17.304Z] [iam] checking project dicode-software for permissions ["datastore.indexes.create","datastore.indexes.delete","datastore.indexes.list","datastore.indexes.update","firebase.projects.get"]
+[debug] [2025-12-05T06:03:17.305Z] Checked if tokens are valid: false, expires at: 1764910347747
+[debug] [2025-12-05T06:03:17.305Z] Checked if tokens are valid: false, expires at: 1764910347747
+[debug] [2025-12-05T06:03:17.305Z] > refreshing access token with scopes: []
+[debug] [2025-12-05T06:03:17.305Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2025-12-05T06:03:17.305Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2025-12-05T06:03:17.412Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2025-12-05T06:03:17.412Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2025-12-05T06:03:17.429Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/dicode-software:testIamPermissions [none]
+[debug] [2025-12-05T06:03:17.430Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/dicode-software:testIamPermissions x-goog-quota-user=projects/dicode-software
+[debug] [2025-12-05T06:03:17.430Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/dicode-software:testIamPermissions {"permissions":["datastore.indexes.create","datastore.indexes.delete","datastore.indexes.list","datastore.indexes.update","firebase.projects.get"]}
+[debug] [2025-12-05T06:03:18.516Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/dicode-software:testIamPermissions 200
+[debug] [2025-12-05T06:03:18.516Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/dicode-software:testIamPermissions {"permissions":["datastore.indexes.create","datastore.indexes.delete","datastore.indexes.list","datastore.indexes.update","firebase.projects.get"]}
+[info] 
+[info] === Deploying to 'dicode-software'...
+[info] 
+[info] i  deploying firestore 
+[info] i  cloud.firestore: checking firestore.rules for compilation errors... 
+[debug] [2025-12-05T06:03:18.520Z] Checked if tokens are valid: true, expires at: 1764918196412
+[debug] [2025-12-05T06:03:18.520Z] Checked if tokens are valid: true, expires at: 1764918196412
+[debug] [2025-12-05T06:03:18.521Z] >>> [apiv2][query] POST https://firebaserules.googleapis.com/v1/projects/dicode-software:test [none]
+[debug] [2025-12-05T06:03:18.521Z] >>> [apiv2][body] POST https://firebaserules.googleapis.com/v1/projects/dicode-software:test [omitted]

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNotification } from '@/contexts/NotificationContext';
 import { Asset, AssetType } from '@/lib/types';
 import { getAssetsByUser, incrementAssetUsage, createAsset } from '@/lib/firestore';
 import { ChevronDownIcon, BookmarkIcon, PlusIcon } from '@heroicons/react/24/outline';
@@ -26,6 +27,7 @@ export default function AssetSelector({
   className = '',
 }: AssetSelectorProps) {
   const { user } = useAuth();
+  const { error: showError, success: showSuccess } = useNotification();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -80,9 +82,10 @@ export default function AssetSelector({
       await loadAssets();
       setShowSaveDialog(false);
       setAssetName('');
+      showSuccess('Asset Saved', 'New asset has been created successfully.');
     } catch (error) {
       console.error('Error saving asset:', error);
-      alert('Failed to save asset');
+      showError('Save Failed', 'Failed to save asset. Please try again.');
     } finally {
       setSaving(false);
     }

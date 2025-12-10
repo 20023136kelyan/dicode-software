@@ -1,18 +1,21 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  TrendingUp, 
-  Users, 
-  Target, 
-  Award, 
-  ArrowUpRight, 
+import Avatar from '../../components/shared/Avatar';
+import {
+  TrendingUp,
+  Users,
+  Target,
+  Award,
+  ArrowUpRight,
   Clock,
   Megaphone,
   BarChart3,
-  UserPlus,
-  Plus,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useOrganizationAnalyticsRealtime } from '@/hooks/useOrganizationAnalytics';
+import { getRecentOrgActivity, type RecentActivityItem } from '@/lib/firestore';
 
 interface Tool {
   id: string;
@@ -63,57 +66,75 @@ const tools: Tool[] = [
   },
 ];
 
-const quickActions = [
-  { label: 'New Campaign', path: '/admin/campaigns', icon: <Plus className="h-4 w-4" /> },
-  { label: 'Invite Employee', path: '/admin/employees', icon: <UserPlus className="h-4 w-4" /> },
-  { label: 'View Analytics', path: '/admin/analytics', icon: <TrendingUp className="h-4 w-4" /> },
-];
 
-const metrics = [
-  {
-    label: 'Total Employees',
-    value: '247',
-    change: '+12%',
-    trend: 'up' as const,
-    icon: Users,
-  },
-  {
-    label: 'Avg Leadership Score',
-    value: '76',
-    change: '+3.03%',
-    trend: 'up' as const,
-    icon: TrendingUp,
-  },
-  {
-    label: 'Completion Rate',
-    value: '78%',
-    change: '+5%',
-    trend: 'up' as const,
-    icon: Target,
-  },
-  {
-    label: 'Engagement Level',
-    value: '85',
-    change: '+2%',
-    trend: 'up' as const,
-    icon: Award,
-  },
-];
+function formatRelativeTime(timestamp: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - timestamp.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-const recentActivity = [
-  { employee: 'Sarah Johnson', action: 'completed Module 8', time: '2 hours ago', department: 'Marketing' },
-  { employee: 'Mike Chen', action: 'started Onboarding Assessment', time: '5 hours ago', department: 'Technology' },
-  { employee: 'Emily Davis', action: 'completed Module 9', time: '1 day ago', department: 'Operations' },
-  { employee: 'James Wilson', action: 'joined the platform', time: '2 days ago', department: 'Sales' },
-];
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins} min ago`;
+  if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+  if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+  return timestamp.toLocaleDateString();
+}
 
-function formatRelativeTime(time: string): string {
-  return time;
+function formatActionText(action: RecentActivityItem['action'], campaignTitle: string): string {
+  switch (action) {
+    case 'completed':
+      return `completed ${campaignTitle}`;
+    case 'started':
+      return `started ${campaignTitle}`;
+    case 'in_progress':
+      return `is working on ${campaignTitle}`;
+    case 'enrolled':
+      return `enrolled in ${campaignTitle}`;
+    case 'invitation_sent':
+      return `invited ${campaignTitle}`;
+    case 'invitation_accepted':
+      return `joined the organization`;
+    case 'cohort_created':
+      return `created cohort ${campaignTitle}`;
+    case 'campaign_published':
+      return `published ${campaignTitle}`;
+    case 'campaign_assigned':
+      return `assigned ${campaignTitle}`;
+    default:
+      return `activity: ${campaignTitle}`;
+  }
 }
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+
+  // Real-time analytics data
+  const { analytics, isLoading: analyticsLoading } = useOrganizationAnalyticsRealtime(user?.organization || null);
+
+  // Recent activity state
+  const [recentActivity, setRecentActivity] = useState<RecentActivityItem[]>([]);
+  const [activityLoading, setActivityLoading] = useState(true);
+
+  // Fetch recent activity
+  useEffect(() => {
+    const fetchActivity = async () => {
+      if (!user?.organization) {
+        setActivityLoading(false);
+        return;
+      }
+      try {
+        const activities = await getRecentOrgActivity(user.organization, 5);
+        setRecentActivity(activities);
+      } catch (error) {
+        console.error('Failed to fetch recent activity:', error);
+      } finally {
+        setActivityLoading(false);
+      }
+    };
+    fetchActivity();
+  }, [user?.organization]);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -124,53 +145,76 @@ const Dashboard: React.FC = () => {
 
   const firstName = user?.name?.split(' ')[0] || 'there';
 
+  // Build metrics from real data
+  const metrics = [
+    {
+      label: 'Total Employees',
+      value: analytics?.totalEmployees?.toString() || '—',
+      change: analytics ? `${analytics.activeUsersLast30Days} active` : '',
+      trend: 'up' as const,
+      icon: Users,
+      isLoading: analyticsLoading,
+    },
+    {
+      label: 'Avg Leadership Score',
+      value: analytics?.overallScore ? Math.round(analytics.overallScore).toString() : '—',
+      change: '',
+      trend: 'up' as const,
+      icon: TrendingUp,
+      isLoading: analyticsLoading,
+    },
+    {
+      label: 'Completion Rate',
+      value: analytics?.completionRate ? `${Math.round(analytics.completionRate)}%` : '—',
+      change: '',
+      trend: 'up' as const,
+      icon: Target,
+      isLoading: analyticsLoading,
+    },
+    {
+      label: 'Engagement Rate',
+      value: analytics?.engagementRate ? Math.round(analytics.engagementRate).toString() : '—',
+      change: '',
+      trend: 'up' as const,
+      icon: Award,
+      isLoading: analyticsLoading,
+    },
+  ];
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="space-y-6">
       {/* Welcome Hero */}
-      <section className="card bg-gradient-to-br from-dark-card to-dark-bg border-dark-border">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-dark-text">
-              {getGreeting()}, {firstName}
-            </h1>
-            <p className="text-dark-text-muted text-sm mt-1">
-              Here's what's happening with your behavioral coaching platform.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            {quickActions.map((action) => (
-              <button
-                key={action.path}
-                onClick={() => navigate(action.path)}
-                className="btn-secondary flex items-center gap-2"
-              >
-                {action.icon}
-                <span className="hidden sm:inline">{action.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+      <section>
+        <h1 className="text-xl font-semibold text-dark-text">
+          {getGreeting()}, {firstName}
+        </h1>
+        <p className="text-dark-text-muted text-sm mt-1">
+          Here's what's happening with your behavioral coaching platform.
+        </p>
       </section>
 
       {/* Metrics Grid */}
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {metrics.map((metric) => (
-          <div 
-            key={metric.label} 
+          <div
+            key={metric.label}
             className="card group"
           >
             <div className="flex items-start justify-between mb-4">
               <div className="p-2.5 bg-primary/10 rounded-xl">
                 <metric.icon size={20} className="text-primary" />
               </div>
-              <div className={`flex items-center gap-1 text-sm font-medium ${
-                metric.trend === 'up' ? 'text-emerald-400' : 'text-rose-400'
-              }`}>
-                <TrendingUp size={14} className={metric.trend === 'down' ? 'rotate-180' : ''} />
-                {metric.change}
-              </div>
+              {metric.change && (
+                <div className="text-xs text-dark-text-muted">
+                  {metric.change}
+                </div>
+              )}
             </div>
-            <div className="text-3xl font-bold text-dark-text mb-1">{metric.value}</div>
+            {metric.isLoading ? (
+              <div className="h-9 w-16 bg-dark-card-hover rounded animate-pulse mb-1" />
+            ) : (
+              <div className="text-3xl font-bold text-dark-text mb-1">{metric.value}</div>
+            )}
             <div className="text-sm text-dark-text-muted">{metric.label}</div>
           </div>
         ))}
@@ -220,7 +264,19 @@ const Dashboard: React.FC = () => {
           </div>
 
           <div className="card p-0 overflow-hidden">
-            {recentActivity.length === 0 ? (
+            {activityLoading ? (
+              <div className="divide-y divide-dark-border">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex items-start gap-3 p-4">
+                    <div className="h-10 w-10 rounded-full bg-dark-card-hover animate-pulse flex-shrink-0" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-4 w-3/4 bg-dark-card-hover rounded animate-pulse" />
+                      <div className="h-3 w-1/2 bg-dark-card-hover rounded animate-pulse" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : recentActivity.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center px-4">
                 <div className="h-10 w-10 rounded-full bg-dark-card flex items-center justify-center mb-3">
                   <Clock className="h-5 w-5 text-dark-text-muted" />
@@ -230,20 +286,23 @@ const Dashboard: React.FC = () => {
               </div>
             ) : (
               <div className="divide-y divide-dark-border">
-                {recentActivity.map((activity, idx) => (
-                  <div key={idx} className="flex items-start gap-3 p-4 transition hover:bg-dark-card-hover">
-                    <div className="avatar avatar--md avatar--gradient flex-shrink-0">
-                      {activity.employee.charAt(0)}
-                    </div>
+                {recentActivity.map((activity) => (
+                  <div key={activity.id} className="flex items-start gap-3 p-4 transition hover:bg-dark-card-hover">
+                    <Avatar
+                      src={activity.userAvatar}
+                      name={activity.userName}
+                      size="md"
+                      className="flex-shrink-0"
+                    />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-dark-text leading-snug">
                         <span className="font-medium">
-                          {activity.employee}
+                          {activity.userName}
                         </span>
-                        {' '}{activity.action}
+                        {' '}{formatActionText(activity.action, activity.campaignTitle)}
                       </p>
                       <p className="text-xs text-dark-text-muted mt-1">
-                        {activity.department} • {formatRelativeTime(activity.time)}
+                        {activity.department || 'Team'} • {formatRelativeTime(activity.timestamp)}
                       </p>
                     </div>
                   </div>

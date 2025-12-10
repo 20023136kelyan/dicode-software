@@ -3,14 +3,27 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import OrganizationOnboarding, { OrganizationData } from '@/components/OrganizationOnboarding';
 import { createOrganization, upsertUserProfile, createInvitation } from '@/lib/firestore';
+import PrivacyPolicy from '@/pages/employee/PrivacyPolicy';
 
 const AdminOnboarding: React.FC = () => {
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, logout } = useAuth();
   const navigate = useNavigate();
+  const [hasAcceptedPrivacy, setHasAcceptedPrivacy] = React.useState(false);
 
   if (!user) {
     navigate('/login');
     return null;
+  }
+
+  if (!hasAcceptedPrivacy) {
+    return (
+      <div className="fixed inset-0 z-50 bg-[#04060A]">
+        <PrivacyPolicy
+          isPublic={false}
+          onAccept={() => setHasAcceptedPrivacy(true)}
+        />
+      </div>
+    );
   }
 
   const handleComplete = async (data: OrganizationData) => {
@@ -77,6 +90,7 @@ const AdminOnboarding: React.FC = () => {
     <OrganizationOnboarding
       onComplete={handleComplete}
       onSuccess={handleSuccess}
+      onLogout={logout}
       userEmail={user.email}
       userName={user.name}
     />

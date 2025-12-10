@@ -92,17 +92,71 @@ export const askCompanyBot = onCall({ cors: true }, async (request) => {
         // 4. Build Prompt
         const contextText = relevantDocs.map((doc, index) => `Source ${index + 1}:\n${doc.text}`).join("\n\n---\n\n");
 
-        const systemPrompt = `You are the official company assistant for DiCode.
+        const systemPrompt = `You are the official company assistant for DiCode, called DI Copilot.
 You answer using ONLY the provided company knowledge sources.
 If the answer is not in the sources, say you don't know.
-Keep answers professional, concise, and helpful.`;
+Keep answers professional, concise, and helpful.
+
+## FORMATTING INSTRUCTIONS
+You can use rich markdown formatting in your responses:
+- Use **bold** and *italic* for emphasis
+- Use bullet points and numbered lists for clarity
+- Use \`inline code\` for technical terms
+- Use code blocks with language specification for code examples
+- Use tables when presenting comparative data
+- Use > blockquotes for important callouts
+
+## CHART VISUALIZATION
+When presenting numerical data that would benefit from visualization, output a chart using this special format:
+
+\`\`\`chart
+{"type": "bar|line|pie|area", "data": [{"name": "Label", "value": 100}], "xKey": "name", "yKey": "value", "title": "Chart Title"}
+\`\`\`
+
+Chart types:
+- "bar" - for comparing categories
+- "line" - for trends over time
+- "area" - for cumulative trends
+- "pie" - for showing proportions (use sparingly)
+
+Multiple data series: use yKey as an array: "yKey": ["value1", "value2"]
+
+Example:
+\`\`\`chart
+{"type": "bar", "data": [{"department": "Marketing", "score": 85}, {"department": "Tech", "score": 72}, {"department": "HR", "score": 90}], "xKey": "department", "yKey": "score", "title": "Department Performance Scores"}
+\`\`\`
+
+Only use charts when data visualization adds value. For simple numbers, plain text is fine.`;
 
         const userPrompt = `CONTEXT:\n${contextText}\n\nQUESTION: ${userQuestion}`;
 
         // 5. Call Responses API (Chat Completions)
         if (openai.apiKey === 'mock-key') {
+            // Return a demo response showcasing formatting capabilities
+            const demoAnswer = `I'm currently running in **demo mode** without an OpenAI API key.
+
+Here's what I can do when properly configured:
+
+### Features
+- Answer questions using your company's knowledge base
+- Provide *contextual insights* from your data
+- Generate visualizations for numerical data
+
+### Sample Data Visualization
+
+\`\`\`chart
+{"type": "bar", "data": [{"department": "Marketing", "score": 85}, {"department": "Technology", "score": 72}, {"department": "HR", "score": 90}, {"department": "Operations", "score": 78}], "xKey": "department", "yKey": "score", "title": "Department Inclusion Scores"}
+\`\`\`
+
+### Next Steps
+1. Add your OpenAI API key to enable real responses
+2. Connect your vector database for company knowledge
+3. Start asking questions!
+
+> **Tip:** I retrieved ${relevantDocs.length} documents from the mock knowledge base to demonstrate the RAG pipeline.`;
+
             return {
-                answer: "I am currently running in mock mode because no OpenAI API key was provided. However, I successfully simulated the RAG flow! I retrieved 5 documents from the mock vector store. Once you add a valid key, I will generate real answers based on them.",
+                answer: demoAnswer,
                 sources: relevantDocs
             };
         }

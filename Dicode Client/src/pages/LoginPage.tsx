@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Eye, EyeOff, UserCheck, Users, CheckCircle } from 'lucide-react';
 import type { UserRole } from '@/types';
@@ -40,6 +40,7 @@ const GoogleGlyph = () => (
 
 const LoginPage: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -69,7 +70,7 @@ const LoginPage: React.FC = () => {
     setLoginError(null);
     setIsLoading(true);
     try {
-      await login(email, password, selectedRole, rememberMe);
+      await login(email, password, selectedRole);
     } catch (error: any) {
       console.error('Login failed:', error);
       setLoginError(error.message || 'Failed to sign in. Please check your credentials.');
@@ -88,7 +89,7 @@ const LoginPage: React.FC = () => {
     setLoginError(null);
     setIsLoading(true);
     try {
-      await loginWithGoogle(selectedRole, rememberMe);
+      await loginWithGoogle(selectedRole);
     } catch (error: any) {
       if (error.code === 'auth/popup-closed-by-user') return;
       console.error('Google login failed:', error);
@@ -104,29 +105,29 @@ const LoginPage: React.FC = () => {
       <div className="flex w-full flex-col justify-between px-8 py-10 lg:w-1/2 lg:px-16 xl:px-24">
         {/* Logo */}
         <div className="flex items-center gap-4">
-            <img
-              src="/dicode_logo.png"
+          <img
+            src="/dicode_logo.png"
             alt="DiCode logo"
             className="h-14 w-14 object-contain"
-            />
+          />
           <div className="flex items-baseline gap-2">
             <span className="text-2xl font-semibold text-white">DiCode</span>
             <span className="text-xl font-light text-white/50">Client</span>
           </div>
-          </div>
+        </div>
 
         {/* Form Section */}
         <div className="mx-auto w-full max-w-md">
           <div className="mb-8">
             <h1 className="text-3xl font-semibold text-white">Welcome Back</h1>
             <p className="mt-2 text-white/60">
-              Enter your credentials to access your coaching platform.
+              Enter your credentials to access your dicode workspace
             </p>
-              </div>
+          </div>
 
-              {successMessage && (
+          {successMessage && (
             <div className="mb-6 rounded-xl border border-green-500/20 bg-green-500/10 p-4 flex items-start gap-3">
-                  <CheckCircle size={18} className="text-green-400 flex-shrink-0 mt-0.5" />
+              <CheckCircle size={18} className="text-green-400 flex-shrink-0 mt-0.5" />
               <p className="text-sm text-green-400">{successMessage}</p>
             </div>
           )}
@@ -134,65 +135,64 @@ const LoginPage: React.FC = () => {
           {loginError && (
             <div className="mb-6 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">
               {loginError}
-                </div>
-              )}
+            </div>
+          )}
 
           {/* Role Selection */}
           <div className="mb-6">
             <label className="block text-sm font-medium text-white/80 mb-2">Workspace</label>
-                  <div className="grid grid-cols-2 gap-2 bg-white/5 p-1 rounded-full border border-white/10">
-                    {roleOptions.map((option) => (
-                      <button
-                        type="button"
-                        key={option.value}
-                        onClick={() => {
-                          setSelectedRole(option.value);
-                          setRoleError(null);
-                        }}
-                  className={`flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition-all ${
-                          selectedRole === option.value
-                            ? 'bg-white text-[#04060A] shadow-[0_10px_30px_rgba(255,255,255,0.2)]'
-                      : 'text-white/70 hover:text-white'
-                        }`}
-                      >
-                        <span>{option.icon}</span>
-                        <span>{option.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                  {roleError && <p className="text-xs text-red-400 mt-2">{roleError}</p>}
-                </div>
+            <div className="grid grid-cols-2 gap-2 bg-white/5 p-1 rounded-full border border-white/10">
+              {roleOptions.map((option) => (
+                <button
+                  type="button"
+                  key={option.value}
+                  onClick={() => {
+                    setSelectedRole(option.value);
+                    setRoleError(null);
+                  }}
+                  className={`flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition-all ${selectedRole === option.value
+                    ? 'bg-white text-[#04060A] shadow-[0_10px_30px_rgba(255,255,255,0.2)]'
+                    : 'text-white/70 hover:text-white'
+                    }`}
+                >
+                  <span>{option.icon}</span>
+                  <span>{option.label}</span>
+                </button>
+              ))}
+            </div>
+            {roleError && <p className="text-xs text-red-400 mt-2">{roleError}</p>}
+          </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-1.5">
               <label htmlFor="email" className="block text-sm font-medium text-white/80">
-                    Email
-                  </label>
-                  <input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 required
                 className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder:text-white/40 transition-colors focus:border-[#F7B500] focus:ring-2 focus:ring-[#F7B500]/30 focus:outline-none"
-                    placeholder="you@company.com"
-                  />
-                </div>
+                placeholder="you@company.com"
+              />
+            </div>
 
             <div className="space-y-1.5">
               <label htmlFor="password" className="block text-sm font-medium text-white/80">
-                    Password
-                  </label>
+                Password
+              </label>
               <div className="relative">
-                  <input
-                    id="password"
+                <input
+                  id="password"
                   type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   required
                   minLength={6}
                   className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 pr-12 text-white placeholder:text-white/40 transition-colors focus:border-[#F7B500] focus:ring-2 focus:ring-[#F7B500]/30 focus:outline-none"
-                    placeholder="••••••••"
+                  placeholder="••••••••"
                 />
                 <button
                   type="button"
@@ -214,38 +214,42 @@ const LoginPage: React.FC = () => {
                 />
                 <span className="text-sm text-white/60">Remember Me</span>
               </label>
-              <button type="button" className="text-sm font-medium text-white/60 hover:text-white">
+              <button
+                type="button"
+                onClick={() => navigate('/forgot-password')}
+                className="text-sm font-medium text-white/60 hover:text-white transition-colors"
+              >
                 Forgot Your Password?
               </button>
-                </div>
+            </div>
 
-                <button
-                  type="submit"
-                  disabled={isLoading}
+            <button
+              type="submit"
+              disabled={isLoading}
               className="w-full rounded-full bg-[#F7B500] py-3.5 text-base font-semibold text-[#04060A] transition-all hover:bg-[#E5A500] disabled:cursor-not-allowed disabled:opacity-70 shadow-[0_15px_45px_rgba(247,181,0,0.25)]"
-                >
+            >
               {isLoading ? 'Please wait...' : 'Log In'}
-                </button>
-              </form>
+            </button>
+          </form>
 
-              {loginWithGoogle && selectedRole === 'admin' && (
-                <>
+          {loginWithGoogle && selectedRole === 'admin' && (
+            <>
               <div className="my-6 flex items-center gap-3">
                 <span className="h-px flex-1 bg-white/10" />
                 <span className="text-sm text-white/40">Or Login With</span>
                 <span className="h-px flex-1 bg-white/10" />
-                    </div>
+              </div>
 
-                  <button
-                    onClick={handleGoogleLogin}
-                    disabled={isLoading}
+              <button
+                onClick={handleGoogleLogin}
+                disabled={isLoading}
                 className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white px-4 py-3 font-medium text-[#202124] transition-colors hover:bg-white/95 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <GoogleGlyph />
+              >
+                <GoogleGlyph />
                 <span>Google</span>
-                  </button>
-                </>
-              )}
+              </button>
+            </>
+          )}
 
           <p className="mt-8 text-center text-sm text-white/50">
             Don't Have An Account?{' '}
@@ -258,7 +262,7 @@ const LoginPage: React.FC = () => {
         {/* Footer */}
         <div className="flex items-center justify-between text-sm text-white/40">
           <span>Copyright © 2025 DiCode Software GmbH.</span>
-          <button className="hover:text-white/60">Privacy Policy</button>
+          <button onClick={() => navigate('/privacy-policy')} className="hover:text-white/60">Privacy Policy</button>
         </div>
       </div>
 
@@ -275,18 +279,18 @@ const LoginPage: React.FC = () => {
           {/* Content */}
           <div className="relative z-10 max-w-xl">
             <h2 className="text-4xl font-semibold leading-tight text-white xl:text-5xl">
-              Your behavioral coaching platform.
+              Your behavioral talent management platform.
             </h2>
             <p className="mt-4 text-lg text-white/60">
-              Track progress, complete assessments, and develop your leadership skills. All in one place.
+              Complete assessments, track progress, and develop leadership skills. All in one place.
             </p>
           </div>
 
           {/* Illustration */}
           <div className="relative z-10 mt-8 flex items-center justify-center">
-            <img 
-              src="/assets/illustration_login.png" 
-              alt="Person working on laptop" 
+            <img
+              src="/assets/illustration_login.png"
+              alt="Person working on laptop"
               className="h-auto w-full max-w-xs object-contain animate-float-subtle"
             />
           </div>

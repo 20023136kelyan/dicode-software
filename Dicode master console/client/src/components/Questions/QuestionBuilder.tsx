@@ -60,9 +60,28 @@ export default function QuestionBuilder({
   const updateQuestion = (type: QuestionType, next: QuestionFormData) => {
     if (disabled) return;
     const fixedQuestion = withFixedQuestionSettings(next);
-    const updated = orderedQuestions.map((question) =>
+
+    let updated = orderedQuestions.map((question) =>
       question.type === type ? fixedQuestion : question,
     );
+
+    // Option 2: Propagate competency/skill from Q1 (perception) to Q2 (intent)
+    // When Q1's competency or skill changes, automatically copy to Q2
+    if (type === 'behavioral-perception') {
+      const q1 = fixedQuestion;
+      updated = updated.map((question) => {
+        if (question.type === 'behavioral-intent') {
+          return {
+            ...question,
+            competencyId: q1.competencyId,
+            skillId: q1.skillId,
+            competency: q1.competency,
+          };
+        }
+        return question;
+      });
+    }
+
     onChange(updated);
   };
 
@@ -93,6 +112,7 @@ export default function QuestionBuilder({
             onGenerate={handleGenerate ? () => handleGenerate(index) : undefined}
             onValidate={handleValidate ? () => handleValidate(index) : undefined}
             onApplySuggestion={handleApplySuggestion ? () => handleApplySuggestion(index) : undefined}
+            competencyLocked={question.type === 'behavioral-intent'}
           />
         ))}
           </div>

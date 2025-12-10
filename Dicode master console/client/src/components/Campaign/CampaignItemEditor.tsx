@@ -6,6 +6,7 @@ import QuestionBuilder from '../Questions/QuestionBuilder';
 import Modal from '../Layout/Modal';
 import { validateQuestionSet } from '@/lib/questionValidation';
 import { useCompetencies } from '@/hooks/useCompetencies';
+import { useNotification } from '@/contexts/NotificationContext';
 import { normalizeQuestionSet } from '@/lib/questionDefaults';
 
 interface CampaignItemEditorProps {
@@ -38,6 +39,7 @@ export default function CampaignItemEditor({
   onSelectVideo,
 }: CampaignItemEditorProps) {
   const { competencies } = useCompetencies();
+  const { warning: showWarning } = useNotification();
   const [showQuestionEditor, setShowQuestionEditor] = useState(false);
   const [draftQuestions, setDraftQuestions] = useState<QuestionFormData[]>([]);
 
@@ -61,7 +63,7 @@ export default function CampaignItemEditor({
   const handleSaveQuestions = () => {
     const errors = validateQuestionSet(draftQuestions);
     if (errors.length > 0) {
-      alert('Please fix validation errors before saving:\n' + errors.join('\n'));
+      showWarning('Validation Errors', 'Please fix validation errors before saving:\n' + errors.join('\n'));
       return;
     }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import MainLayout from '@/components/Layout/MainLayout';
@@ -27,6 +27,7 @@ import {
   MoveUp,
   MoveDown,
   X,
+  RefreshCw,
 } from 'lucide-react';
 import type { Organization, Video } from '@/lib/types';
 
@@ -91,6 +92,340 @@ const formatVideoDuration = (seconds?: number) => {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
+
+// Competency Card Grid Component
+interface CompetencyCardGridProps {
+  competencies: Competency[];
+  selectedCompetencies: string[];
+  selectedSkills: Record<string, string[]>;
+  onUpdate: (targetCompetencies: string[], selectedSkills: Record<string, string[]>) => void;
+}
+
+const CompetencyCardGrid: React.FC<CompetencyCardGridProps> = ({
+  competencies,
+  selectedCompetencies,
+  selectedSkills,
+  onUpdate,
+}) => {
+  const [activeCardIndex, setActiveCardIndex] = useState<number | null>(null);
+  const [popoverStep, setPopoverStep] = useState<'competencies' | 'skills'>('competencies');
+  const [tempSelectedCompetency, setTempSelectedCompetency] = useState<Competency | null>(null);
+  const [tempSelectedSkills, setTempSelectedSkills] = useState<string[]>([]);
+  const popoverRef = React.useRef<HTMLDivElement>(null);
+
+  const filledCount = selectedCompetencies.length;
+  const emptySlots = Math.max(0, 3 - filledCount);
+  const totalCards = filledCount + emptySlots;
+
+  const availableCompetencies = competencies.filter(
+    comp => !selectedCompetencies.includes(comp.name)
+  );
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
+        handleClosePopover();
+      }
+    };
+    if (activeCardIndex !== null) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [activeCardIndex]);
+
+  const handleOpenCard = (index: number, existingCompetency?: string) => {
+    setActiveCardIndex(index);
+    if (existingCompetency) {
+      const comp = competencies.find(c => c.name === existingCompetency);
+      if (comp) {
+        setTempSelectedCompetency(comp);
+        setTempSelectedSkills(selectedSkills[comp.id] || []);
+        setPopoverStep('skills');
+      }
+    } else {
+      setTempSelectedCompetency(null);
+      setTempSelectedSkills([]);
+      setPopoverStep('competencies');
+    }
+  };
+
+  const handleSelectCompetency = (comp: Competency) => {
+    setTempSelectedCompetency(comp);
+    setTempSelectedSkills([]);
+    setPopoverStep('skills');
+  };
+
+  const handleToggleSkill = (skillId: string) => {
+    setTempSelectedSkills(prev =>
+      prev.includes(skillId)
+        ? prev.filter(id => id !== skillId)
+        : [...prev, skillId]
+    );
+  };
+
+  const handleDone = () => {
+    if (!tempSelectedCompetency) return;
+
+    const newSelectedCompetencies = [...selectedCompetencies];
+    const newSelectedSkills = { ...selectedSkills };
+
+    const cardIndex = activeCardIndex!;
+    const existingCompName = cardIndex < filledCount ? selectedCompetencies[cardIndex] : null;
+
+    if (existingCompName) {
+      const existingComp = competencies.find(c => c.name === existingCompName);
+      if (existingComp) {
+        delete newSelectedSkills[existingComp.id];
+      }
+      newSelectedCompetencies[cardIndex] = tempSelectedCompetency.name;
+    } else {
+      newSelectedCompetencies.push(tempSelectedCompetency.name);
+    }
+
+    newSelectedSkills[tempSelectedCompetency.id] = tempSelectedSkills;
+    onUpdate(newSelectedCompetencies, newSelectedSkills);
+    handleClosePopover();
+  };
+
+  const handleClosePopover = () => {
+    setActiveCardIndex(null);
+    setPopoverStep('competencies');
+    setTempSelectedCompetency(null);
+    setTempSelectedSkills([]);
+  };
+
+  const handleRemoveCard = (index: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const compName = selectedCompetencies[index];
+    const comp = competencies.find(c => c.name === compName);
+    
+    const newSelectedCompetencies = selectedCompetencies.filter((_, i) => i !== index);
+    const newSelectedSkills = { ...selectedSkills };
+    if (comp) {
+      delete newSelectedSkills[comp.id];
+    }
+    
+    onUpdate(newSelectedCompetencies, newSelectedSkills);
+  };
+
+  const handleBackToCompetencies = () => {
+    setPopoverStep('competencies');
+    setTempSelectedCompetency(null);
+    setTempSelectedSkills([]);
+  };
+
+  const renderDropdownContent = () => {
+    if (popoverStep === 'competencies') {
+      return (
+        <>
+          <div className="p-3 border-b border-slate-200">
+            <p className="text-sm font-semibold text-slate-900">Select Competency</p>
+          </div>
+          <div className="max-h-[200px] overflow-y-auto p-2">
+            {availableCompetencies.length > 0 ? (
+              availableCompetencies.map(comp => (
+                <button
+                  key={comp.id}
+                  type="button"
+                  onClick={() => handleSelectCompetency(comp)}
+                  className="w-full flex items-start gap-3 rounded-lg p-2.5 text-left hover:bg-slate-50 transition"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-slate-900">{comp.name}</p>
+                    <p className="text-xs text-slate-500 line-clamp-1">{comp.description}</p>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-slate-400 flex-shrink-0 mt-0.5" />
+                </button>
+              ))
+            ) : (
+              <p className="text-sm text-slate-500 text-center py-4">All competencies selected</p>
+            )}
+          </div>
+        </>
+      );
+    }
+
+    if (popoverStep === 'skills' && tempSelectedCompetency) {
+      return (
+        <>
+          <div className="flex items-center gap-2 p-3 border-b border-slate-200">
+            <button
+              type="button"
+              onClick={handleBackToCompetencies}
+              className="p-1 rounded-md hover:bg-slate-100 transition"
+            >
+              <ArrowLeft className="h-4 w-4 text-slate-500" />
+            </button>
+            <p className="text-sm font-semibold text-slate-900 truncate">{tempSelectedCompetency.name}</p>
+          </div>
+          <div className="max-h-[160px] overflow-y-auto p-2">
+            {tempSelectedCompetency.skills.map(skill => (
+              <label
+                key={skill.id}
+                className="flex items-start gap-2.5 rounded-lg p-2 cursor-pointer hover:bg-slate-50 transition"
+              >
+                <input
+                  type="checkbox"
+                  checked={tempSelectedSkills.includes(skill.id)}
+                  onChange={() => handleToggleSkill(skill.id)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-slate-900">{skill.name}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+          <div className="p-3 border-t border-slate-200">
+            <button
+              type="button"
+              onClick={handleDone}
+              className="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 transition"
+            >
+              Done
+            </button>
+          </div>
+        </>
+      );
+    }
+
+    return null;
+  };
+
+  return (
+    <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+      {/* Filled Cards */}
+      {selectedCompetencies.map((compName, index) => {
+        const comp = competencies.find(c => c.name === compName);
+        const skills = comp ? selectedSkills[comp.id] || [] : [];
+        const skillNames = comp
+          ? skills.map(skillId => comp.skills.find(s => s.id === skillId)?.name).filter(Boolean)
+          : [];
+        const isActive = activeCardIndex === index;
+
+        return (
+          <div
+            key={`filled-${index}`}
+            ref={isActive ? popoverRef : undefined}
+            className={`rounded-xl border transition-all h-[260px] ${
+              isActive
+                ? 'border-slate-900 bg-white shadow-lg'
+                : 'border-slate-900 bg-slate-900 hover:bg-slate-800 cursor-pointer'
+            }`}
+            onClick={() => !isActive && handleOpenCard(index, compName)}
+          >
+            {isActive ? (
+              <div className="h-full flex flex-col">
+                {renderDropdownContent()}
+              </div>
+            ) : (
+              <div className="p-4 h-full flex flex-col group">
+                <div className="flex items-start gap-3 mb-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20 flex-shrink-0">
+                    <Check className="h-5 w-5 text-white" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-white line-clamp-2 leading-snug">{compName}</p>
+                    <p className="text-xs text-white/70 mt-0.5">{skillNames.length} skill{skillNames.length !== 1 ? 's' : ''}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => handleRemoveCard(index, e)}
+                    className="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition opacity-0 group-hover:opacity-100"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="flex-1 space-y-1.5 overflow-hidden">
+                  {skillNames.length > 0 ? (
+                    <>
+                      {skillNames.slice(0, 5).map((name, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <div className="h-1.5 w-1.5 rounded-full bg-white/70 flex-shrink-0" />
+                          <span className="text-xs text-white/90 truncate">{name}</span>
+                        </div>
+                      ))}
+                      {skillNames.length > 5 && (
+                        <p className="text-xs text-white/50 pl-3.5">+{skillNames.length - 5} more</p>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2 text-amber-300">
+                      <div className="h-1.5 w-1.5 rounded-full bg-amber-300 animate-pulse" />
+                      <span className="text-xs">Add skills to continue</span>
+                    </div>
+                  )}
+                </div>
+                <div className="pt-3 mt-auto border-t border-white/20 flex items-center justify-between">
+                  <span className="text-xs text-white/50 group-hover:text-white/70 transition">Click to edit</span>
+                  <ArrowRight className="h-3.5 w-3.5 text-white/50 opacity-0 group-hover:opacity-100 group-hover:text-white/70 transition" />
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Empty Cards */}
+      {Array.from({ length: emptySlots }).map((_, index) => {
+        const cardIndex = filledCount + index;
+        const isActive = activeCardIndex === cardIndex;
+
+        return (
+          <div
+            key={`empty-${index}`}
+            ref={isActive ? popoverRef : undefined}
+            className={`rounded-xl border transition-all h-[260px] ${
+              isActive
+                ? 'border-slate-900 bg-white shadow-lg'
+                : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-white cursor-pointer'
+            }`}
+            onClick={() => !isActive && handleOpenCard(cardIndex)}
+          >
+            {isActive ? (
+              <div className="h-full flex flex-col">
+                {renderDropdownContent()}
+              </div>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center gap-2 p-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-200">
+                  <Sparkles className="h-5 w-5 text-slate-500" />
+                </div>
+                <span className="text-sm text-slate-500">Select Competency</span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Add Card */}
+      {availableCompetencies.length > 0 && (
+        <div
+          ref={activeCardIndex === totalCards ? popoverRef : undefined}
+          className={`rounded-xl border-2 transition-all h-[260px] ${
+            activeCardIndex === totalCards
+              ? 'border-slate-900 bg-white shadow-lg border-solid'
+              : 'border-dashed border-slate-300 bg-transparent hover:border-slate-400 cursor-pointer'
+          }`}
+          onClick={() => activeCardIndex !== totalCards && handleOpenCard(totalCards)}
+        >
+          {activeCardIndex === totalCards ? (
+            <div className="h-full flex flex-col">
+              {renderDropdownContent()}
+            </div>
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center gap-2 p-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border-2 border-dashed border-slate-300">
+                <Sparkles className="h-5 w-5 text-slate-400" />
+              </div>
+              <span className="text-sm text-slate-400">Add Competency</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 };
 
 const defaultForm = {
@@ -477,7 +812,7 @@ export default function NewCampaignPage() {
         description: form.description,
         skillFocus: form.targetCompetencies[0] || 'Leadership',
         tags: form.targetCompetencies,
-        ...(cleanAllowedOrganizations.length > 0 ? { allowedOrganizations: cleanAllowedOrganizations } : {}),
+        allowedOrganizations: cleanAllowedOrganizations, // Always include, empty = accessible to all
         selectedSkills: form.selectedSkills,
         anonymousResponses: form.anonymousResponses,
         schedule: {
@@ -750,96 +1085,40 @@ export default function NewCampaignPage() {
                 </div>
               </div>
 
-                {/* Competencies Card */}
-                <div className="rounded-2xl border border-slate-200 bg-white p-6">
+                {/* Competencies & Skills - Card Based */}
+                <div>
                   <div className="mb-5 flex items-center justify-between">
-                  <div>
-                      <h2 className="text-base font-semibold text-slate-900">Target Competencies</h2>
-                      <p className="text-sm text-slate-500">Select 3-5 competencies to focus on</p>
-                  </div>
+                    <div>
+                      <h2 className="text-base font-semibold text-slate-900">Target Competencies & Skills</h2>
+                      <p className="text-sm text-slate-500">Select at least 3 competencies and choose skills for each</p>
+                    </div>
                     <span className={`rounded-full px-3 py-1 text-xs font-medium ${
-                      form.targetCompetencies.length >= 3 && form.targetCompetencies.length <= 5
+                      form.targetCompetencies.length >= 3
                         ? 'bg-emerald-100 text-emerald-700'
                         : 'bg-slate-100 text-slate-500'
                     }`}>
-                      {form.targetCompetencies.length}/5 selected
+                      {form.targetCompetencies.length} competencies
                     </span>
-                </div>
+                  </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
-                  {competencies.map((comp) => {
-                    const isSelected = form.targetCompetencies.includes(comp.name);
-                    const hasError = fieldErrors.has('targetCompetencies') || fieldErrors.has('selectedSkills');
-                    const missingSkills = isSelected && (!form.selectedSkills[comp.id] || form.selectedSkills[comp.id].length === 0);
-                    return (
-                      <button
-                        key={comp.id}
-                        onClick={() => toggleCompetency(comp)}
-                        type="button"
-                          className={`group relative flex items-start gap-3 rounded-xl border p-4 text-left transition ${
-                            hasError && (missingSkills || !isSelected)
-                              ? 'border-red-300 bg-red-50'
-                            : isSelected
-                                ? 'border-slate-900 bg-slate-900 text-white'
-                                : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
-                          }`}
-                        >
-                          <div className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md border ${
-                            isSelected ? 'border-white/30 bg-white/20' : 'border-slate-300'
-                          }`}>
-                            {isSelected && <Check className="h-3 w-3" />}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className={`text-sm font-medium ${isSelected ? 'text-white' : 'text-slate-900'}`}>{comp.name}</p>
-                            <p className={`mt-0.5 text-xs ${isSelected ? 'text-white/70' : 'text-slate-500'}`}>{comp.description}</p>
-                          </div>
-                      </button>
-                    );
-                  })}
+                  <CompetencyCardGrid
+                    competencies={competencies}
+                    selectedCompetencies={form.targetCompetencies}
+                    selectedSkills={form.selectedSkills}
+                    onUpdate={(targetCompetencies, selectedSkills) => {
+                      setForm(prev => ({
+                        ...prev,
+                        targetCompetencies,
+                        selectedSkills,
+                      }));
+                      setValidationMessage(null);
+                      const newErrors = new Set(fieldErrors);
+                      newErrors.delete('targetCompetencies');
+                      newErrors.delete('selectedSkills');
+                      setFieldErrors(newErrors);
+                    }}
+                  />
                 </div>
-              </div>
-
-                {/* Skills Selection - Only show if competencies selected */}
-              {form.targetCompetencies.length > 0 && (
-                  <div className="rounded-2xl border border-slate-200 bg-white p-6">
-                    <h2 className="text-base font-semibold text-slate-900 mb-5">Skills & Behaviors</h2>
-                    <div className="space-y-4">
-                  {competencies
-                    .filter((comp) => form.targetCompetencies.includes(comp.name))
-                    .map((comp) => (
-                          <div key={comp.id} className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-                            <p className="text-sm font-medium text-slate-900 mb-3">{comp.name}</p>
-                            <div className="grid gap-2 sm:grid-cols-2">
-                          {comp.skills.map((skill) => {
-                            const isSelected = form.selectedSkills[comp.id]?.includes(skill.id);
-                            return (
-                              <label
-                                key={skill.id}
-                                    className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition ${
-                                      isSelected
-                                        ? 'border-slate-900 bg-white'
-                                        : 'border-slate-200 bg-white hover:border-slate-300'
-                                  }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  onChange={() => toggleSkill(comp, skill)}
-                                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
-                                />
-                                    <div className="min-w-0 flex-1">
-                                      <p className="text-sm font-medium text-slate-800">{skill.name}</p>
-                                      <p className="text-xs text-slate-500 line-clamp-2">{skill.description}</p>
-                                </div>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                    </div>
-                </div>
-              )}
 
                 {/* Video Selection Card */}
                 <div className={`rounded-2xl border bg-white p-6 ${fieldErrors.has('videos') ? 'border-red-300' : 'border-slate-200'}`}>
@@ -1123,6 +1402,23 @@ export default function NewCampaignPage() {
                   </select>
                 </div>
                     </div>
+                
+                {/* Recurring Campaign Info */}
+                {form.frequency !== 'once' && (
+                  <div className="mt-4 flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3">
+                    <RefreshCw className="h-5 w-5 text-sky-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm">
+                      <p className="font-medium text-sky-900">Recurring Campaign</p>
+                      <p className="text-sky-700 mt-1">
+                        This campaign will automatically create new instances {form.frequency}. 
+                        Each instance will re-enroll participants and track progress separately.
+                        {form.frequency === 'weekly' && ' New instances are created every Monday.'}
+                        {form.frequency === 'monthly' && ' New instances are created on the 1st of each month.'}
+                        {form.frequency === 'quarterly' && ' New instances are created every 3 months.'}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Automation Card */}

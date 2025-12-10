@@ -6,7 +6,9 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import MainLayout from '@/components/Layout/MainLayout';
 import { Campaign, Video } from '@/lib/types';
 import { useAuth } from '@/contexts/AuthContext';
-import { getCampaign, setCampaignPublishState, getVideo } from '@/lib/firestore';
+import { useNotification } from '@/contexts/NotificationContext';
+import { getCampaign, setCampaignPublishState, getVideo, getOrganizations } from '@/lib/firestore';
+import type { Organization } from '@/lib/types';
 import {
   BookOpenIcon,
   CalendarIcon,
@@ -19,18 +21,25 @@ import {
   EnvelopeIcon,
   ShieldCheckIcon,
   SparklesIcon,
+  ChartBarIcon,
 } from '@heroicons/react/24/outline';
+import ResponsesPanel from '@/components/Campaign/ResponsesPanel';
+import EmailPanel from '@/components/Campaign/EmailPanel';
 
 export default function CampaignDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const campaignId = searchParams.get('id');
   const { user } = useAuth();
+  const { error: showError, success: showSuccess } = useNotification();
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [videos, setVideos] = useState<Record<string, Video>>({});
+  const [organizations, setOrganizations] = useState<Record<string, Organization>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
+  const [showResponses, setShowResponses] = useState(false);
+  const [showEmails, setShowEmails] = useState(false);
 
   const formatDate = (date: string | Date | undefined) => {
     if (!date) return '—';
@@ -44,6 +53,10 @@ export default function CampaignDetailPage() {
 
   const totalQuestions = useMemo(() => {
     if (!campaign) return 0;
+    // Use pre-computed value if available, otherwise calculate from videos
+    if (campaign.metadata?.computed?.totalQuestions !== undefined) {
+      return campaign.metadata.computed.totalQuestions;
+    }
     return campaign.items.reduce((sum, item) => {
       const video = videos[item.videoId];
       return sum + (video?.questions?.length || 0);
@@ -54,11 +67,14 @@ export default function CampaignDetailPage() {
     if (!campaign?.allowedOrganizations || campaign.allowedOrganizations.length === 0) {
       return 'All organizations';
     }
-    if (campaign.allowedOrganizations.length <= 3) {
-      return campaign.allowedOrganizations.join(', ');
+    const orgNames = campaign.allowedOrganizations.map(
+      (orgId) => organizations[orgId]?.name || orgId
+    );
+    if (orgNames.length <= 3) {
+      return orgNames.join(', ');
     }
-    return `${campaign.allowedOrganizations.length} organizations`;
-  }, [campaign]);
+    return `${orgNames.length} organizations`;
+  }, [campaign, organizations]);
 
   useEffect(() => {
     if (!campaignId) {
@@ -68,11 +84,13 @@ export default function CampaignDetailPage() {
     }
 
     if (!user) {
-      setLoading(false);
+      // Don't set loading to false here - wait for auth to complete
       return;
     }
 
     const fetchCampaign = async () => {
+      setLoading(true);
+      setError(null);
       try {
         const campaignData = await getCampaign(campaignId);
         if (!campaignData) {
@@ -81,8 +99,12 @@ export default function CampaignDetailPage() {
           return;
         }
 
-        // Check if user owns this campaign
-        if (campaignData.metadata.createdBy !== user.uid) {
+        // Check access: DiCode staff can access dicode/legacy campaigns, others need ownership
+        const isDiCodeStaff = user.email?.endsWith('@di-code.de');
+        const isDicodeCampaign = campaignData.source === 'dicode' || !campaignData.source;
+        const isOwner = campaignData.metadata.createdBy === user.uid;
+
+        if (!isOwner && !(isDiCodeStaff && isDicodeCampaign)) {
           setError('You do not have access to this campaign');
           setLoading(false);
           return;
@@ -99,6 +121,21 @@ export default function CampaignDetailPage() {
           }
         }
         setVideos(videoMap);
+
+        // Fetch organization names if there are allowed organizations
+        if (campaignData.allowedOrganizations && campaignData.allowedOrganizations.length > 0) {
+          try {
+            const orgs = await getOrganizations(campaignData.allowedOrganizations);
+            const orgMap: Record<string, Organization> = {};
+            for (const org of orgs) {
+              orgMap[org.id] = org;
+            }
+            setOrganizations(orgMap);
+          } catch (orgErr) {
+            console.error('Failed to fetch organizations:', orgErr);
+            // Don't fail the whole page if org fetching fails
+          }
+        }
       } catch (err: any) {
         console.error('Failed to fetch campaign:', err);
         setError(err?.message || 'Failed to load campaign');
@@ -124,9 +161,13 @@ export default function CampaignDetailPage() {
           isPublished: newPublishState,
         },
       });
+      showSuccess(
+        newPublishState ? 'Campaign Published' : 'Campaign Unpublished',
+        newPublishState ? 'The campaign is now live and visible to participants.' : 'The campaign has been unpublished.'
+      );
     } catch (err: any) {
       console.error('Failed to update publish state:', err);
-      alert('Failed to update campaign status');
+      showError('Update Failed', 'Failed to update campaign status. Please try again.');
     } finally {
       setPublishing(false);
     }
@@ -186,7 +227,7 @@ export default function CampaignDetailPage() {
                   </span>
                   </div>
                   <p className="mt-1 text-sm text-slate-500">
-                    {campaign.items.length} video{campaign.items.length !== 1 ? 's' : ''} • Created {formatDate(campaign.metadata.createdAt)}
+                    {campaign.metadata?.computed?.totalItems ?? campaign.items.length} video{(campaign.metadata?.computed?.totalItems ?? campaign.items.length) !== 1 ? 's' : ''} • Created {formatDate(campaign.metadata.createdAt)}
                   </p>
               </div>
             </div>
@@ -222,12 +263,26 @@ export default function CampaignDetailPage() {
                 </>
               )}
             </button>
+            <button
+              onClick={() => setShowResponses(true)}
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:shadow-sm"
+            >
+              <ChartBarIcon className="h-4 w-4" />
+              View Responses
+            </button>
+            <button
+              onClick={() => setShowEmails(true)}
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:shadow-sm"
+            >
+              <EnvelopeIcon className="h-4 w-4" />
+              Email Management
+            </button>
           </div>
         </div>
 
             <div className="grid w-full max-w-sm gap-4 sm:grid-cols-2">
               <div className="rounded-2xl border border-white/70 bg-white/90 p-4 text-center shadow-sm">
-                <p className="text-3xl font-semibold text-slate-900">{campaign.items.length}</p>
+                <p className="text-3xl font-semibold text-slate-900">{campaign.metadata?.computed?.totalItems ?? campaign.items.length}</p>
                 <p className="mt-2 text-xs uppercase tracking-[0.35em] text-slate-400">Videos</p>
               </div>
               <div className="rounded-2xl border border-white/70 bg-white/90 p-4 text-center shadow-sm">
@@ -263,12 +318,12 @@ export default function CampaignDetailPage() {
                 <p className="text-xs font-medium text-slate-400 uppercase tracking-wide">Organization Access</p>
                 {campaign.allowedOrganizations && campaign.allowedOrganizations.length > 0 ? (
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {campaign.allowedOrganizations.slice(0, 3).map((org) => (
+                    {campaign.allowedOrganizations.slice(0, 3).map((orgId) => (
                       <span
-                        key={org}
+                        key={orgId}
                         className="rounded-full bg-violet-50 border border-violet-200 px-2 py-0.5 text-xs font-medium text-violet-700"
                       >
-                        {org}
+                        {organizations[orgId]?.name || orgId}
                       </span>
                     ))}
                     {campaign.allowedOrganizations.length > 3 && (
@@ -477,6 +532,20 @@ export default function CampaignDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Responses Panel */}
+      <ResponsesPanel
+        campaign={campaign}
+        isOpen={showResponses}
+        onClose={() => setShowResponses(false)}
+      />
+
+      {/* Email Panel */}
+      <EmailPanel
+        campaign={campaign}
+        isOpen={showEmails}
+        onClose={() => setShowEmails(false)}
+      />
     </MainLayout>
   );
 }

@@ -1,13 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
-import { QuestionFormData } from '@/lib/types';
+import { QuestionFormData, IntentOption } from '@/lib/types';
 import { validateQuestion } from '@/lib/questionValidation';
-import { QUESTION_META } from '@/lib/questionDefaults';
+import { QUESTION_META, createDefaultIntentOptions } from '@/lib/questionDefaults';
 import { COMPETENCIES, type CompetencyDefinition, type SkillDefinition } from '@/lib/competencies';
 import { useCompetencies } from '@/hooks/useCompetencies';
 import type { QuestionAssistantState } from '@/types/questionAssist';
-import { Sparkles, ShieldCheck, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Sparkles, ShieldCheck, Loader2, AlertTriangle, CheckCircle2, Plus, Trash2, GripVertical } from 'lucide-react';
 
 interface QuestionEditorProps {
   question: QuestionFormData;
@@ -19,6 +19,7 @@ interface QuestionEditorProps {
   onGenerate?: () => void;
   onValidate?: () => void;
   onApplySuggestion?: () => void;
+  competencyLocked?: boolean; // When true, competency/skill inherit from Q1 and selectors are disabled
 }
 
 export default function QuestionEditor({
@@ -31,6 +32,7 @@ export default function QuestionEditor({
   onGenerate,
   onValidate,
   onApplySuggestion,
+  competencyLocked = false,
 }: QuestionEditorProps) {
   const [errors, setErrors] = useState<string[]>([]);
   const { competencies: firestoreCompetencies } = useCompetencies();
@@ -134,9 +136,14 @@ export default function QuestionEditor({
               <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-500">
                 {roleLabel}
               </span>
-              {isQuantitative && (
+              {question.type === 'behavioral-perception' && (
                 <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-500">
                   Likert scale
+                </span>
+              )}
+              {question.type === 'behavioral-intent' && (
+                <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-500">
+                  Multiple choice
                 </span>
               )}
             </div>
@@ -160,8 +167,16 @@ export default function QuestionEditor({
           />
 
         {isQuantitative && (
-            <div className="border-t border-slate-100 grid md:grid-cols-2">
-              <div className="p-3">
+            <div className="border-t border-slate-100">
+              {competencyLocked && (
+                <div className="px-3 pt-2 pb-1">
+                  <p className="text-[10px] text-slate-400 italic">
+                    Skill inherited from Q1 (Perception)
+                  </p>
+                </div>
+              )}
+              <div className="grid md:grid-cols-2">
+              <div className="p-3 pt-1">
               <select
                   aria-label="Select competency"
                   value={selectedCompetency?.id || ''}
@@ -184,8 +199,10 @@ export default function QuestionEditor({
                       competency: '',
                     });
                   }}
-                  disabled={disabled}
-                  className="w-full border-none bg-transparent text-sm text-slate-900 outline-none focus:ring-0 disabled:cursor-not-allowed disabled:text-slate-400"
+                  disabled={disabled || competencyLocked}
+                  className={`w-full border-none bg-transparent text-sm outline-none focus:ring-0 disabled:cursor-not-allowed ${
+                    competencyLocked ? 'text-slate-500' : 'text-slate-900 disabled:text-slate-400'
+                  }`}
                 >
                   <option value="">
                     {mergedCompetencies.length === 0
@@ -199,7 +216,7 @@ export default function QuestionEditor({
                   ))}
                 </select>
               </div>
-              <div className="border-t border-slate-100 p-3 md:border-t-0 md:border-l">
+              <div className="border-t border-slate-100 p-3 pt-1 md:border-t-0 md:border-l">
                 <select
                   aria-label="Select skill"
                   value={selectedSkillId}
@@ -215,8 +232,10 @@ export default function QuestionEditor({
                       competency: nextSkill?.name || '',
                     });
                   }}
-                  disabled={disabled || !selectedCompetency || skillOptions.length === 0}
-                  className="w-full border-none bg-transparent text-sm text-slate-900 outline-none focus:ring-0 disabled:cursor-not-allowed disabled:text-slate-400"
+                  disabled={disabled || competencyLocked || !selectedCompetency || skillOptions.length === 0}
+                  className={`w-full border-none bg-transparent text-sm outline-none focus:ring-0 disabled:cursor-not-allowed ${
+                    competencyLocked ? 'text-slate-500' : 'text-slate-900 disabled:text-slate-400'
+                  }`}
                 >
                   <option value="">
                     {!selectedCompetency
@@ -232,6 +251,138 @@ export default function QuestionEditor({
                   ))}
                 </select>
               </div>
+              </div>
+            </div>
+          )}
+
+          {/* Q1 Benchmark Score */}
+          {question.type === 'behavioral-perception' && (
+            <div className="border-t border-slate-100 p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-slate-600">Expert Benchmark</p>
+                  <p className="text-[11px] text-slate-400">
+                    What would an expert answer? (1-7, used for comparison)
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {[1, 2, 3, 4, 5, 6, 7].map((score) => (
+                    <button
+                      key={score}
+                      type="button"
+                      onClick={() => onChange({ ...question, benchmarkScore: score })}
+                      disabled={disabled}
+                      className={`w-8 h-8 rounded-full text-xs font-semibold transition-all ${
+                        question.benchmarkScore === score
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      } disabled:cursor-not-allowed disabled:opacity-50`}
+                    >
+                      {score}
+                    </button>
+                  ))}
+                  {question.benchmarkScore && (
+                    <button
+                      type="button"
+                      onClick={() => onChange({ ...question, benchmarkScore: undefined })}
+                      disabled={disabled}
+                      className="text-xs text-slate-400 hover:text-slate-600"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Q2 Intent Options Editor */}
+          {question.type === 'behavioral-intent' && (
+            <div className="border-t border-slate-100 p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-slate-600">Response Options</p>
+                  <p className="text-[11px] text-slate-400">
+                    Add choices with hidden intent scores (1=low, 7=high)
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newOption: IntentOption = {
+                      id: crypto.randomUUID(),
+                      text: '',
+                      intentScore: 4,
+                    };
+                    onChange({
+                      ...question,
+                      options: [...(question.options || []), newOption],
+                    });
+                  }}
+                  disabled={disabled}
+                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Option
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {(question.options || []).map((option, index) => (
+                  <div
+                    key={option.id}
+                    className="flex items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 p-2"
+                  >
+                    <GripVertical className="h-4 w-4 text-slate-300 flex-shrink-0" />
+                    <input
+                      type="text"
+                      value={option.text}
+                      onChange={(e) => {
+                        const newOptions = [...(question.options || [])];
+                        newOptions[index] = { ...option, text: e.target.value };
+                        onChange({ ...question, options: newOptions });
+                      }}
+                      placeholder={`Option ${index + 1} text...`}
+                      disabled={disabled}
+                      className="flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
+                    />
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <span className="text-[10px] text-slate-400">Score:</span>
+                      <select
+                        value={option.intentScore}
+                        onChange={(e) => {
+                          const newOptions = [...(question.options || [])];
+                          newOptions[index] = { ...option, intentScore: parseInt(e.target.value) };
+                          onChange({ ...question, options: newOptions });
+                        }}
+                        disabled={disabled}
+                        className="w-12 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-xs text-slate-700 outline-none focus:border-blue-400"
+                      >
+                        {[1, 2, 3, 4, 5, 6, 7].map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newOptions = (question.options || []).filter((_, i) => i !== index);
+                        onChange({ ...question, options: newOptions });
+                      }}
+                      disabled={disabled || (question.options?.length || 0) <= 2}
+                      className="p-1 text-slate-400 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {(!question.options || question.options.length < 2) && (
+                <p className="text-[11px] text-amber-600">
+                  At least 2 options are required
+                </p>
+              )}
             </div>
           )}
             </div>

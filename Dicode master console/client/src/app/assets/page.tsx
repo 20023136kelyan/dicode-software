@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNotification } from '@/contexts/NotificationContext';
 import MainLayout from '@/components/Layout/MainLayout';
 import { Asset, AssetPromptMetadata, AssetType } from '@/lib/types';
 import { getAssetsByUser, createAsset, updateAsset, deleteAsset, logActivity } from '@/lib/firestore';
@@ -23,6 +24,7 @@ import {
   Lightbulb,
   Video,
 } from 'lucide-react';
+import { AssetCardSkeleton } from '@/components/ui/skeleton';
 
 const getTypeColor = (type: AssetType) => {
   switch (type) {
@@ -53,6 +55,7 @@ const getTypeLabel = (type: AssetType) => {
 
 export default function AssetsPage() {
   const { user } = useAuth();
+  const { error: showError, success: showSuccess } = useNotification();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedType, setSelectedType] = useState<AssetType | 'all'>('all');
@@ -103,9 +106,10 @@ export default function AssetsPage() {
           resourceType: 'asset',
         });
       }
+      showSuccess('Asset Deleted', 'The asset has been successfully deleted.');
     } catch (error) {
       console.error('Error deleting asset:', error);
-      alert('Failed to delete asset');
+      showError('Delete Failed', 'Failed to delete asset. Please try again.');
     }
   };
 
@@ -125,24 +129,7 @@ export default function AssetsPage() {
 
   return (
     <MainLayout>
-      <div className="max-w-6xl mx-auto space-y-6">
-        {/* Page Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Prompt Assets</h1>
-            <p className="text-sm text-slate-500 mt-1">
-              Reusable characters, environments, and camera setups
-            </p>
-          </div>
-                <button
-                  onClick={() => setShowCreateModal(true)}
-            className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
-                >
-            <Plus className="h-4 w-4" />
-            New Asset
-                </button>
-        </div>
-
+      <div className="space-y-6">
         {/* Stats Cards */}
         <div className="grid gap-4 sm:grid-cols-4">
           <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -247,14 +234,24 @@ export default function AssetsPage() {
                 <List className="h-4 w-4" />
               </button>
             </div>
-            </div>
+
+            {/* New Asset Button */}
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
+            >
+              <Plus className="h-4 w-4" />
+              New Asset
+            </button>
           </div>
+        </div>
 
         {/* Content */}
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-20">
-            <div className="h-8 w-8 rounded-full border-2 border-slate-200 border-t-slate-900 animate-spin" />
-            <p className="mt-4 text-sm text-slate-500">Loading assets...</p>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <AssetCardSkeleton key={i} />
+            ))}
           </div>
         ) : filteredAssets.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white py-20 text-center">
@@ -444,9 +441,10 @@ export default function AssetsPage() {
                 await loadAssets();
                 setShowCreateModal(false);
                 setEditingAsset(null);
+                showSuccess('Asset Saved', editingAsset ? 'Asset has been updated.' : 'New asset has been created.');
               } catch (error) {
                 console.error('Error saving asset:', error);
-                alert('Failed to save asset');
+                showError('Save Failed', 'Failed to save asset. Please try again.');
               }
             }}
           />

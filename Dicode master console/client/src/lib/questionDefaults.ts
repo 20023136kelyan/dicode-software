@@ -1,4 +1,4 @@
-import { QuestionFormData, QuestionType, QuestionRole } from './types';
+import { QuestionFormData, QuestionType, QuestionRole, IntentOption } from './types';
 
 export const QUESTION_SEQUENCE: QuestionType[] = [
   'behavioral-perception',
@@ -14,6 +14,7 @@ const QUESTION_ROLE_BY_TYPE: Record<QuestionType, QuestionRole> = {
 
 const getRoleForType = (type: QuestionType): QuestionRole => QUESTION_ROLE_BY_TYPE[type];
 
+// Q1 (behavioral-perception) uses Likert scale
 const SCORE_SCALE = {
   scaleType: '7-point' as const,
   scaleLabels: {
@@ -21,6 +22,17 @@ const SCORE_SCALE = {
     high: 'Strongly Agree',
   },
 };
+
+/**
+ * Create default SJT options for Q2 (behavioral-intent)
+ * Each option has a text and a hidden intentScore (1-7)
+ */
+export const createDefaultIntentOptions = (): IntentOption[] => [
+  { id: crypto.randomUUID(), text: '', intentScore: 7 },
+  { id: crypto.randomUUID(), text: '', intentScore: 5 },
+  { id: crypto.randomUUID(), text: '', intentScore: 3 },
+  { id: crypto.randomUUID(), text: '', intentScore: 1 },
+];
 
 const buildQuantScale = () => ({
   scaleType: SCORE_SCALE.scaleType,
@@ -48,11 +60,11 @@ export const QUESTION_META: Record<
     competencyHint: 'Which competency or behavior does this statement reinforce?',
   },
   'behavioral-intent': {
-    title: 'Q2 · Behavioral Intent/Application',
-    description: 'Gauge the learner’s intent to apply the behavior in their own work.',
-    helper: 'Fixed 7-point scale · Strongly Disagree → Strongly Agree',
+    title: 'Q2 · Situational Judgment',
+    description: 'Present a scenario and multiple response options to gauge intent.',
+    helper: 'Multiple choice · Each option has a hidden intent score (1-7)',
     placeholder:
-      'I am confident applying this coaching technique in my upcoming conversations.',
+      'After watching this video, what would you do if a team member pushed back on your feedback?',
     competencyLabel: 'Competency tag',
     competencyHint: 'Name the capability this question measures (e.g., Coaching).',
   },
@@ -65,6 +77,7 @@ export const QUESTION_META: Record<
 };
 
 export const createDefaultQuestion = (type: QuestionType): QuestionFormData => {
+  // Q3 - Qualitative (free text)
   if (type === 'qualitative') {
     return {
       role: getRoleForType(type),
@@ -74,6 +87,21 @@ export const createDefaultQuestion = (type: QuestionType): QuestionFormData => {
     };
   }
 
+  // Q2 - Behavioral Intent (SJT multiple choice)
+  if (type === 'behavioral-intent') {
+    return {
+      role: getRoleForType(type),
+      type,
+      statement: '',
+      competency: '',
+      competencyId: undefined,
+      skillId: undefined,
+      isRequired: true,
+      options: createDefaultIntentOptions(),
+    };
+  }
+
+  // Q1 - Behavioral Perception (Likert scale)
   return {
     role: getRoleForType(type),
     type,
@@ -82,6 +110,7 @@ export const createDefaultQuestion = (type: QuestionType): QuestionFormData => {
     competencyId: undefined,
     skillId: undefined,
     isRequired: true,
+    benchmarkScore: undefined, // Expert/control answer to be set by admin
     ...buildQuantScale(),
   };
 };
@@ -92,6 +121,7 @@ export const createDefaultQuestionSet = (): QuestionFormData[] =>
 export const withFixedQuestionSettings = (
   question: QuestionFormData,
 ): QuestionFormData => {
+  // Q3 - Qualitative
   if (question.type === 'qualitative') {
     return {
       role: getRoleForType('qualitative'),
@@ -101,6 +131,22 @@ export const withFixedQuestionSettings = (
     };
   }
 
+  // Q2 - Behavioral Intent (SJT)
+  if (question.type === 'behavioral-intent') {
+    return {
+      role: getRoleForType('behavioral-intent'),
+      type: 'behavioral-intent',
+      statement: question.statement || '',
+      competency: question.competency || '',
+      competencyId: question.competencyId || undefined,
+      skillId: question.skillId || undefined,
+      isRequired: true,
+      // Preserve existing options or create defaults
+      options: question.options?.length ? question.options : createDefaultIntentOptions(),
+    };
+  }
+
+  // Q1 - Behavioral Perception (Likert)
   return {
     role: getRoleForType(question.type),
     type: question.type,
@@ -109,6 +155,7 @@ export const withFixedQuestionSettings = (
     competencyId: question.competencyId || undefined,
     skillId: question.skillId || undefined,
     isRequired: true,
+    benchmarkScore: question.benchmarkScore, // Preserve benchmark score
     ...buildQuantScale(),
   };
 };

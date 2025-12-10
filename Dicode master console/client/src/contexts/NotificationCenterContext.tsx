@@ -69,7 +69,7 @@ export function NotificationCenterProvider({ children }: { children: ReactNode }
   const previousNotificationIds = useRef<Set<string>>(new Set());
   const isInitialLoad = useRef(true);
 
-  // Subscribe to Firestore notifications
+  // Subscribe to Firestore notifications (cross-user)
   useEffect(() => {
     if (!user?.uid) {
       setFirestoreNotifications([]);
@@ -80,13 +80,14 @@ export function NotificationCenterProvider({ children }: { children: ReactNode }
     }
 
     setIsLoading(true);
-    const unsubscribe = subscribeToNotifications(user.uid, (notifications) => {
+    const unsubscribe = subscribeToNotifications((notifications) => {
       // Check for new notifications and show toast
-      if (!isInitialLoad.current) {
+      if (!isInitialLoad.current && user?.uid) {
         notifications.forEach((notification) => {
-          if (notification.id && !previousNotificationIds.current.has(notification.id) && !notification.read) {
+          const isUnreadForUser = !notification.readBy?.includes(user.uid);
+          if (notification.id && !previousNotificationIds.current.has(notification.id) && isUnreadForUser) {
             // Show toast for new notification
-            const toastType = notification.priority === 'high' ? 'error' : 
+            const toastType = notification.priority === 'high' ? 'error' :
                              notification.type === 'video_generation_complete' ? 'success' :
                              notification.type === 'campaign_published' ? 'success' : 'info';
             toast.showNotification(toastType, notification.title, notification.message);
@@ -148,14 +149,14 @@ export function NotificationCenterProvider({ children }: { children: ReactNode }
     };
   });
 
-  // Convert Firestore notifications to notification items
+  // Convert Firestore notifications to notification items (with per-user read status)
   const persistedNotifications: NotificationItem[] = firestoreNotifications.map((n) => ({
     id: n.id,
     type: n.type,
     title: n.title,
     message: n.message,
     priority: n.priority,
-    read: n.read,
+    read: user?.uid ? (n.readBy || []).includes(user.uid) : false, // Per-user read status
     actorName: n.actorName,
     resourceId: n.resourceId,
     resourceType: n.resourceType,
@@ -175,10 +176,10 @@ export function NotificationCenterProvider({ children }: { children: ReactNode }
 
   const markAsRead = useCallback(async (id: string) => {
     // Only mark Firestore notifications as read
-    if (!id.startsWith('job-')) {
-      await markNotificationRead(id);
+    if (!id.startsWith('job-') && user?.uid) {
+      await markNotificationRead(id, user.uid);
     }
-  }, []);
+  }, [user?.uid]);
 
   const markAllAsRead = useCallback(async () => {
     if (user?.uid) {
@@ -206,7 +207,6 @@ export function NotificationCenterProvider({ children }: { children: ReactNode }
     if (!user?.uid) return;
 
     await createNotification({
-      userId: user.uid,
       type: params.type,
       title: params.title,
       message: params.message,
@@ -215,8 +215,12 @@ export function NotificationCenterProvider({ children }: { children: ReactNode }
       resourceType: params.resourceType,
       resourceName: params.resourceName,
       actionUrl: params.actionUrl,
+      actorId: user.uid, // Track who created the notification
+      actorName: user.displayName || user.email || undefined,
+      actorEmail: user.email || undefined,
+      staffOnly: true, // Master console notifications are only visible to DiCode staff
     });
-  }, [user?.uid]);
+  }, [user?.uid, user?.displayName, user?.email]);
 
   return (
     <NotificationCenterContext.Provider

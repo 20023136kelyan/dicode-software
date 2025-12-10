@@ -31,14 +31,20 @@ service cloud.firestore {
         && request.auth.uid in get(/databases/$(database)/documents/organizations/$(organizationId)).data.adminIds;
     }
 
-    // Helper function to get user's organization
+    // Helper function to get user's organization from document (for single doc reads)
     function getUserOrganization() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.organization;
     }
 
+    // Helper function to get user's organization from token (for list queries - faster, no doc read)
+    // Custom claims are set by Cloud Functions when user's organization changes
+    function getTokenOrganization() {
+      return request.auth.token.organizationId;
+    }
+
     // Helper function to check if user is DiCode Staff (Super Admin)
     function isDiCodeStaff() {
-      return request.auth.token.email.matches('.*@di-code[.]de');
+      return request.auth.token.email.split('@')[1] == 'di-code.de';
     }
 
     // Organizations Collection
@@ -95,29 +101,18 @@ service cloud.firestore {
 
     // Campaigns Collection
     match /campaigns/{campaignId} {
+      // DiCode Staff can read ALL campaigns
+      allow read: if isAuthenticated() && isDiCodeStaff();
+
+      // Other users: Creator OR org is in allowedOrganizations (or list is empty/public)
       allow read: if isAuthenticated() && (
-        // 1. DiCode Staff (Super Admin)
-        isDiCodeStaff() ||
-        // 2. Creator (Client Admin)
+        // Creator (Client Admin)
         isCreator() ||
-        // 3. DiCode campaigns: public when allowlist empty, otherwise must include user's org
-        (
-          resource.data.source == 'dicode' &&
-          (
-            resource.data.allowedOrganizations == null ||
-            resource.data.allowedOrganizations.size() == 0 ||
-            getUserOrganization() in resource.data.allowedOrganizations
-          )
-        ) ||
-        // 4. Org campaigns: allowlist must include user's org (or be empty)
-        (
-          resource.data.source != 'dicode' &&
-          (
-            resource.data.allowedOrganizations == null ||
-            resource.data.allowedOrganizations.size() == 0 ||
-            getUserOrganization() in resource.data.allowedOrganizations
-          )
-        )
+        // User's org is in the allowed list
+        getUserOrganization() in resource.data.allowedOrganizations ||
+        // Public campaigns (empty or null allowedOrganizations)
+        resource.data.allowedOrganizations == null ||
+        resource.data.allowedOrganizations.size() == 0
       );
       
       // Write: DiCode Staff OR Org Admin/Creator for their own campaigns
@@ -141,11 +136,24 @@ service cloud.firestore {
 
     // Campaign Items Collection
     match /campaignItems/{itemId} {
-      allow read: if isAuthenticated()
-        && exists(/databases/$(database)/documents/campaigns/$(resource.data.campaignId));
+      // Allow DiCode Staff to read ALL campaign items (needed for deleteVideo integrity check)
+      // Other users can read if the parent campaign exists
+      allow read: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        exists(/databases/$(database)/documents/campaigns/$(resource.data.campaignId))
+      );
       
       // DiCode staff can manage any campaign items, or campaign creator can manage their own
-      allow create, update, delete: if isAuthenticated() && (
+      // For create: use request.resource.data (incoming data)
+      allow create: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        (
+          exists(/databases/$(database)/documents/campaigns/$(request.resource.data.campaignId)) &&
+          get(/databases/$(database)/documents/campaigns/$(request.resource.data.campaignId)).data.metadata.createdBy == request.auth.uid
+        )
+      );
+      // For update/delete: use resource.data (existing data)
+      allow update, delete: if isAuthenticated() && (
         isDiCodeStaff() ||
         (
           exists(/databases/$(database)/documents/campaigns/$(resource.data.campaignId)) &&
@@ -159,16 +167,32 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (
         isDiCodeStaff() ||
         isOwner(resource.data.userId) ||
-        exists(/databases/$(database)/documents/campaigns/$(resource.data.campaignId))
+        // Org admins can read enrollments of users in their organization (via enrollment's orgId)
+        (resource.data.organizationId != null && resource.data.organizationId != '' && isOrgAdmin(resource.data.organizationId)) ||
+        // Token-based org check for list queries (uses custom claims, no doc read required)
+        (resource.data.organizationId != null && resource.data.organizationId != '' && resource.data.organizationId == getTokenOrganization()) ||
+        // Fallback document-based org check (for single doc reads or when token claims not yet set)
+        (resource.data.organizationId != null && resource.data.organizationId != '' && resource.data.organizationId == getUserOrganization()) ||
+        // Legacy fallback: Check if the enrollment's user belongs to caller's organization (for enrollments with empty/missing orgId)
+        (exists(/databases/$(database)/documents/users/$(resource.data.userId)) &&
+         get(/databases/$(database)/documents/users/$(resource.data.userId)).data.organization == getUserOrganization())
       );
       allow create: if isAuthenticated();
       allow update: if isAuthenticated() && (
         isDiCodeStaff() ||
-        isOwner(resource.data.userId)
+        isOwner(resource.data.userId) ||
+        // Org admins can update enrollments in their organization
+        (resource.data.organizationId != null && resource.data.organizationId != '' && isOrgAdmin(resource.data.organizationId)) ||
+        // Org admins can update legacy enrollments (empty orgId) if the enrolled user is in their org
+        ((resource.data.organizationId == null || resource.data.organizationId == '') &&
+         exists(/databases/$(database)/documents/users/$(resource.data.userId)) &&
+         isOrgAdmin(get(/databases/$(database)/documents/users/$(resource.data.userId)).data.organization))
       );
       allow delete: if isAuthenticated() && (
         isDiCodeStaff() ||
-        isOwner(resource.data.userId)
+        isOwner(resource.data.userId) ||
+        // Org admins can delete enrollments in their organization
+        (resource.data.organizationId != null && resource.data.organizationId != '' && isOrgAdmin(resource.data.organizationId))
       );
     }
 
@@ -252,19 +276,19 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Notifications Collection (User Notification Center)
+    // Notifications Collection (Cross-User Notification Center)
     match /notifications/{notificationId} {
-      // Users can only read their own notifications
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      // Users can create notifications for themselves, or DiCode staff can create for anyone
-      allow create: if isAuthenticated() && (
-        request.resource.data.userId == request.auth.uid ||
-        isDiCodeStaff()
+      // Staff-only notifications are only readable by DiCode staff
+      // Other notifications are readable by all authenticated users
+      allow read: if isAuthenticated() && (
+        resource.data.staffOnly != true || isDiCodeStaff()
       );
-      // Users can update their own notifications (mark as read)
-      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      // Users can delete their own notifications
-      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Any authenticated user can create notifications
+      allow create: if isAuthenticated();
+      // Any authenticated user can update notifications (to mark as read via readBy array)
+      allow update: if isAuthenticated();
+      // Only DiCode staff can delete notifications
+      allow delete: if isAuthenticated() && isDiCodeStaff();
     }
 
     // Competencies Collection (System Configuration)
@@ -273,6 +297,203 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       // Only DiCode Staff can manage competencies
       allow create, update, delete: if isAuthenticated() && isDiCodeStaff();
+    }
+
+    // User Profiles Collection (DiCode Staff Settings)
+    match /userProfiles/{userId} {
+      // Users can read their own profile
+      allow read: if isOwner(userId);
+      // Users can create/update their own profile
+      allow create, update: if isOwner(userId);
+      // Users can delete their own profile
+      allow delete: if isOwner(userId);
+    }
+
+    // Support Tickets Collection
+    match /supportTickets/{ticketId} {
+      // DiCode staff can read all tickets, users can read their own
+      allow read: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        resource.data.userId == request.auth.uid
+      );
+      // Any authenticated user can create a ticket
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      // Only DiCode staff can update tickets (assign, resolve, etc.)
+      allow update: if isAuthenticated() && isDiCodeStaff();
+      // Only DiCode staff can delete tickets
+      allow delete: if isAuthenticated() && isDiCodeStaff();
+    }
+
+    // Chat Sessions Collection (AI Copilot History)
+    match /chatSessions/{sessionId} {
+      // Users can read their own chat sessions
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Users can create their own chat sessions
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      // Users can update their own chat sessions
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Users can delete their own chat sessions
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Assessment Responses Collection (Employee Onboarding)
+    match /assessmentResponses/{responseId} {
+      // Users can read their own assessment responses, DiCode staff and org admins can read all
+      allow read: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        resource.data.userId == request.auth.uid ||
+        isOrgAdmin(getUserOrganization())
+      );
+      // Users can create their own assessment responses
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      // Users can update their own assessment responses
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // DiCode staff can delete assessment responses
+      allow delete: if isAuthenticated() && isDiCodeStaff();
+    }
+
+    // User Skill Profiles Collection (XP, Levels, Streaks, Skills)
+    // Note: profileId is the userId, so we check profileId == request.auth.uid for ownership
+    match /userSkillProfiles/{profileId} {
+      // Users can read their own skill profile (using doc ID which equals userId)
+      // Org admins can read profiles of users in their org (for dashboards)
+      // DiCode staff can read all
+      allow read: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        profileId == request.auth.uid ||
+        (resource.data != null && getUserOrganization() != null && resource.data.organizationId == getUserOrganization())
+      );
+      // Users can create their own skill profile (profileId must match their uid)
+      allow create: if isAuthenticated() && profileId == request.auth.uid;
+      // Users can update their own skill profile
+      allow update: if isAuthenticated() && profileId == request.auth.uid;
+      // DiCode staff can delete skill profiles (for account cleanup)
+      allow delete: if isAuthenticated() && isDiCodeStaff();
+    }
+
+    // User Stats Collection (server-computed streaks & completion rollups)
+    match /userStats/{userId} {
+      // Users can read their own stats or stats of users in the same organization (for leaderboard)
+      // DiCode staff can read all (for support)
+      allow read: if isAuthenticated() && (
+        userId == request.auth.uid ||
+        isDiCodeStaff() ||
+        (resource.data.organizationId != null && resource.data.organizationId == getUserOrganization())
+      );
+      // Stats are written by Cloud Functions only, EXCEPT lastCelebratedLevel which users can update for themselves
+      allow update: if isAuthenticated() && 
+        userId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastCelebratedLevel']);
+      allow create, delete: if false;
+    }
+
+    // User Streaks Collection (historical streak records)
+    match /userStreaks/{streakId} {
+      // Users can read their own streaks; org admins can read streaks of users in their org
+      allow read: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        resource.data.userId == request.auth.uid ||
+        (resource.data.organizationId != null && isOrgAdmin(resource.data.organizationId))
+      );
+      // Streaks are written by Cloud Functions only
+      allow create, update, delete: if false;
+    }
+
+    // Streak Events Collection (streak activity log)
+    match /streakEvents/{eventId} {
+      // Users can read their own streak events; org admins can read events of users in their org
+      allow read: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        resource.data.userId == request.auth.uid
+      );
+      // Events are written by Cloud Functions only
+      allow create, update, delete: if false;
+    }
+
+    // Skill Assessments Collection (historical skill assessment records)
+    match /skillAssessments/{assessmentId} {
+      // Users can read their own assessments; org admins can read for analytics
+      allow read: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        resource.data.userId == request.auth.uid ||
+        (resource.data.organizationId != null && isOrgAdmin(resource.data.organizationId))
+      );
+      // Assessments are written by Cloud Functions only
+      allow create, update, delete: if false;
+    }
+
+    // Organization Notifications Collection (admin notifications for organizations)
+    match /organizationNotifications/{notificationId} {
+      // Org admins and org members can read notifications for their organization
+      allow read: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        isOrgAdmin(resource.data.organizationId) ||
+        resource.data.organizationId == getUserOrganization()
+      );
+      // Org admins can update notifications (mark as read)
+      allow update: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        isOrgAdmin(resource.data.organizationId) ||
+        resource.data.organizationId == getUserOrganization()
+      );
+      // Created by Cloud Functions only
+      allow create: if false;
+      // DiCode staff can delete
+      allow delete: if isAuthenticated() && isDiCodeStaff();
+    }
+
+    // Employee Notifications Collection (in-app notifications for employees)
+    match /employeeNotifications/{notificationId} {
+      // Users can read their own notifications
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Users can update their own notifications (to mark as read)
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      // Notifications are created by Cloud Functions only
+      allow create: if false;
+      // Users can delete their own notifications, DiCode staff can delete any
+      allow delete: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        isDiCodeStaff()
+      );
+    }
+
+
+    // Organization Activities Collection
+    match /organizationActivities/{activityId} {
+      allow read: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        isOrgAdmin(resource.data.organizationId) ||
+        resource.data.organizationId == getUserOrganization()
+      );
+      allow create: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        request.resource.data.organizationId == getUserOrganization() ||
+        request.resource.data.organizationId == getTokenOrganization()
+      );
+      allow update, delete: if false;
+    }
+
+    // Organization Analytics Collection (aggregated org-level analytics)
+    match /organizationAnalytics/{organizationId} {
+      // Org admins and members can read their own organization's analytics
+      allow read: if isAuthenticated() && (
+        isDiCodeStaff() ||
+        isOrgAdmin(organizationId) ||
+        organizationId == getUserOrganization()
+      );
+      // Analytics are written by Cloud Functions only
+      allow create, update, delete: if false;
+
+      // History subcollection (daily snapshots for trend charts)
+      match /history/{dateId} {
+        allow read: if isAuthenticated() && (
+          isDiCodeStaff() ||
+          isOrgAdmin(organizationId) ||
+          organizationId == getUserOrganization()
+        );
+        // Written by Cloud Functions only
+        allow create, update, delete: if false;
+      }
     }
   }
 }

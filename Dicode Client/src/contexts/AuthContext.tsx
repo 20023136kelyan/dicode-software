@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut, GoogleAuthProvider, signInWithPopup, User as FirebaseUser, browserLocalPersistence, browserSessionPersistence, setPersistence } from 'firebase/auth';
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut, GoogleAuthProvider, signInWithPopup, User as FirebaseUser, browserLocalPersistence, browserSessionPersistence, setPersistence, updateProfile } from 'firebase/auth';
+import { httpsCallable } from 'firebase/functions';
 import type { AuthState, User, UserRole } from '@/types';
-import { auth } from '@/lib/firebase';
+import { auth, functions } from '@/lib/firebase';
 import { getUserProfile, upsertUserProfile, getUserCohorts, type UserProfileDoc } from '@/lib/firestore';
+import { uploadAvatar } from '@/lib/storage';
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
@@ -63,11 +65,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (!profile) {
       // New user - set role (for initial signup flow)
       await upsertUserProfile(firebaseUser.uid, {
+        email: firebaseUser.email ?? '',
         role: desiredRole,
         name: firebaseUser.displayName ?? firebaseUser.email ?? 'Team Member',
         avatar: firebaseUser.photoURL ?? null,
       });
       return;
+    }
+
+    // Existing user - update email if it changed (e.g., Google account)
+    if (firebaseUser.email && profile.email !== firebaseUser.email) {
+      await upsertUserProfile(firebaseUser.uid, {
+        email: firebaseUser.email,
+      });
     }
 
     // Existing user - validate role matches
@@ -81,7 +91,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const login = async (email: string, password: string, desiredRole?: UserRole, rememberMe: boolean = true) => {
     // Set persistence based on rememberMe
     await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
-    
+
     const credential = await signInWithEmailAndPassword(auth, email, password);
     await validateRole(credential.user, desiredRole);
   };
@@ -89,7 +99,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const loginWithGoogle = async (desiredRole?: UserRole, rememberMe: boolean = true) => {
     // Set persistence based on rememberMe
     await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
-    
+
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({
       prompt: 'select_account'
@@ -121,6 +131,34 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  const updateAvatar = async (file: File, onProgress?: (progress: number) => void): Promise<string> => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) throw new Error('Not authenticated');
+
+    try {
+      // Upload to Firebase Storage
+      const photoURL = await uploadAvatar(file, currentUser.uid, onProgress);
+
+      // Update Firebase Auth profile
+      await updateProfile(currentUser, { photoURL });
+
+      // Update Firestore profile
+      // Note: hydrateUser/validateRole logic handles keeping them in sync, 
+      // but we should explicitly update the doc here to be instant.
+      await upsertUserProfile(currentUser.uid, {
+        avatar: photoURL
+      });
+
+      // Refresh local user state
+      await refreshUser();
+
+      return photoURL;
+    } catch (error) {
+      console.error('Error updating avatar:', error);
+      throw error;
+    }
+  };
+
   const value: AuthState = {
     user,
     isAuthenticated: !!user,
@@ -129,6 +167,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     loginWithGoogle,
     logout,
     refreshUser,
+    updateAvatar,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -145,13 +184,36 @@ async function hydrateUser(firebaseUser: FirebaseUser): Promise<User> {
 
   if (existingProfile) {
     profile = existingProfile;
+
+    // Ensure email is up to date (in case it was missing or changed)
+    if (firebaseUser.email && existingProfile.email !== firebaseUser.email) {
+      profile = await upsertUserProfile(firebaseUser.uid, {
+        email: firebaseUser.email,
+      });
+    }
   } else {
     profile = await upsertUserProfile(firebaseUser.uid, {
+      email: firebaseUser.email ?? '',
       role: deriveRoleFromEmail(firebaseUser.email),
       name: firebaseUser.displayName ?? firebaseUser.email ?? 'Team Member',
       avatar: firebaseUser.photoURL ?? null,
       department: null,
     });
+  }
+
+  // Sync custom claims for security rules (organizationId in token)
+  // This is needed for Firestore list queries to work properly
+  try {
+    const syncClaims = httpsCallable<void, { success: boolean; updated: boolean; organizationId: string | null }>(functions, 'syncCustomClaims');
+    const result = await syncClaims();
+    if (result.data.updated) {
+      // Claims were updated, force token refresh to get new claims
+      console.log('[auth] Custom claims updated, refreshing token...');
+      await firebaseUser.getIdToken(true);
+    }
+  } catch (error) {
+    // Don't fail login if claim sync fails - it's not critical for basic functionality
+    console.warn('[auth] Failed to sync custom claims:', error);
   }
 
   // Load user's cohort memberships

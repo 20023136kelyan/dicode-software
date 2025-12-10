@@ -42,10 +42,23 @@ const authorizedFetch = async (path: string, init?: RequestInit) => {
 const ensureOk = async <T>(response: Response): Promise<void> => {
   if (response.ok) return;
   const payload = await readJson<T>(response);
-  const errorMessage =
-    (payload as { error?: { message?: string } })?.error?.message
-    || response.statusText
-    || "Request failed";
+  console.log('[SoraApi] Error Payload:', JSON.stringify(payload, null, 2));
+
+  // Try to extract message with more robust checks (matching backend logic)
+  let errorMessage = "Request failed";
+  const anyError = payload as { error?: { message?: string; error?: { message?: string } }; message?: string };
+
+  if (anyError?.error?.message) {
+    errorMessage = anyError.error.message;
+  } else if (anyError?.error?.error?.message) {
+    // OpenAI nested error style
+    errorMessage = anyError.error.error.message;
+  } else if (anyError?.message) {
+    errorMessage = anyError.message;
+  } else if (response.statusText) {
+    errorMessage = response.statusText;
+  }
+
   const error = new Error(errorMessage) as Error & { status?: number; payload?: T };
   error.status = response.status;
   error.payload = payload;

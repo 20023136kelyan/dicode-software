@@ -121,7 +121,7 @@ const VideoPreviewOverlay = ({
             </Button>
           </div>
         </div>
-        <div className="flex flex-1 min-h-0 flex-col gap-4 overflow-y-auto px-6 py-5">
+        <div className="flex flex-1 min-h-0 flex-col gap-4 overflow-hidden px-6 py-5">
           <div className="relative flex flex-1 min-h-[320px] w-full items-center justify-center overflow-hidden rounded-2xl border border-border/60 bg-black/80">
             {loading ? (
               <div className="flex flex-col items-center gap-3 text-sm text-muted-foreground">
@@ -129,18 +129,7 @@ const VideoPreviewOverlay = ({
                 Loading preview…
               </div>
             ) : previewUrl ? (
-              <div
-                className="flex max-h-full max-w-full items-center justify-center"
-                style={
-                  videoDimensions
-                    ? {
-                        aspectRatio: `${videoDimensions.width} / ${videoDimensions.height}`,
-                        maxHeight: "100%",
-                        maxWidth: "100%",
-                      }
-                    : { width: "100%", height: "100%" }
-                }
-              >
+              <div className="flex h-full w-full items-center justify-center p-4">
                 <video
                   ref={videoRef}
                   key={previewUrl}
@@ -156,7 +145,16 @@ const VideoPreviewOverlay = ({
                       });
                     }
                   }}
-                  className="max-h-full max-w-full rounded-lg bg-black"
+                  className="rounded-lg bg-black"
+                  style={{
+                    maxWidth: "100%",
+                    maxHeight: "100%",
+                    // For portrait videos, constrain width more aggressively
+                    ...(videoDimensions && videoDimensions.height > videoDimensions.width
+                      ? { width: "auto", height: "100%" }
+                      : { width: "100%", height: "auto" }
+                    ),
+                  }}
                 />
               </div>
             ) : (

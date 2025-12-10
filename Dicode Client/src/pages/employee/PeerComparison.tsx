@@ -1,33 +1,40 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, MessageSquare, Loader, Video as VideoIcon, Users, CheckCircle, Info } from 'lucide-react';
+import { ArrowLeft, Play, MessageSquare, Video as VideoIcon, Users } from 'lucide-react';
+import { Skeleton } from '@/components/shared/Skeleton';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+  LabelList
+} from 'recharts';
 import AICopilot from '@/components/shared/AICopilot';
 import { useAuth } from '@/contexts/AuthContext';
 import { getCampaignResponses, getUserCampaignResponses, getCampaign, getVideo } from '@/lib/firestore';
-
-// Visualizations
-import RadarOverview from '@/components/employee/visualizations/RadarOverview';
-import ComparisonSlider from '@/components/employee/visualizations/ComparisonSlider';
-import ThemeBubbleCluster from '@/components/employee/visualizations/ThemeBubbleCluster';
+import { getTopWords, getUserWordMatches } from '@/lib/textProcessing';
+import MobilePeerComparison from './MobilePeerComparison';
 
 interface ComparisonData {
   questionId: string;
   question: string;
   userAnswer: string | number | boolean;
-  answerDistribution: Record<string | number, number>; // answer => count
+  answerDistribution: Record<string | number, number>;
   totalResponses: number;
-  isUserInMajority: boolean;
   videoId?: string;
-  type?: 'scale' | 'multiple-choice' | 'text';
-  averageScore?: number; // For scale questions
+  type?: 'behavioral-perception' | 'behavioral-intent' | 'qualitative' | 'scale' | 'multiple-choice' | 'text';
+  textResponses?: string[]; // For qualitative questions - all responses for word cloud
 }
 
 interface VideoGroup {
   videoId: string;
   videoTitle: string;
   comparisons: ComparisonData[];
-  userAverage?: number;
-  communityAverage?: number;
 }
 
 interface PeerComparisonProps {
@@ -35,8 +42,333 @@ interface PeerComparisonProps {
   embedded?: boolean;
 }
 
+// ============================================================================
+// CHART COMPONENTS (using Recharts)
+// ============================================================================
+
+// Custom tooltip for Recharts
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-[#1a1a1a] border border-white/10 rounded-lg px-3 py-2 shadow-lg">
+        <p className="text-white text-sm font-medium">{payload[0].value} responses</p>
+        <p className="text-white/50 text-xs">{payload[0].payload.percentage}% of total</p>
+      </div>
+    );
+  }
+  return null;
+};
+
+/**
+ * Likert Distribution Chart - Shows frequency distribution for 1-7 scale questions
+ * Uses Recharts BarChart to show how responses are distributed across the scale
+ */
+const LikertDistributionChart = ({
+  distribution,
+  userAnswer,
+  totalResponses
+}: {
+  distribution: Record<string, number>;
+  userAnswer: number;
+  totalResponses: number;
+}) => {
+  // Prepare data for Recharts
+  const chartData = [1, 2, 3, 4, 5, 6, 7].map(val => {
+    const count = distribution[String(val)] || 0;
+    const percentage = totalResponses > 0 ? Math.round((count / totalResponses) * 100) : 0;
+    return {
+      scale: val,
+      count,
+      percentage,
+      isUser: val === userAnswer
+    };
+  });
+
+  // Calculate where user stands
+  const userPercentage = chartData.find(d => d.isUser)?.percentage || 0;
+  const mostCommon = chartData.reduce((max, d) => d.count > max.count ? d : max, chartData[0]);
+
+  // Generate explanation
+  const getExplanation = () => {
+    if (userAnswer === mostCommon.scale) {
+      return `Your response (${userAnswer}) aligns with the majority. ${userPercentage}% of your colleagues responded the same way.`;
+    } else if (userPercentage >= 20) {
+      return `Your response (${userAnswer}) is a common perspective, shared by ${userPercentage}% of colleagues. Most people chose ${mostCommon.scale} (${mostCommon.percentage}%).`;
+    } else if (userPercentage > 0) {
+      return `Your response (${userAnswer}) represents a unique perspective (${userPercentage}%). The most common response was ${mostCommon.scale} (${mostCommon.percentage}%).`;
+    } else {
+      return `You chose ${userAnswer}. The most common response was ${mostCommon.scale} (${mostCommon.percentage}%).`;
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Chart */}
+      <div className="h-48">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 20, right: 10, left: 10, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+            <XAxis
+              dataKey="scale"
+              tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 12 }}
+              axisLine={{ stroke: 'rgba(255,255,255,0.1)' }}
+              tickLine={false}
+            />
+            <YAxis
+              tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }}
+              axisLine={false}
+              tickLine={false}
+              width={30}
+            />
+            <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
+            <Bar dataKey="count" radius={[4, 4, 0, 0]} maxBarSize={40}>
+              {chartData.map((entry, index) => (
+                <Cell
+                  key={`cell-${index}`}
+                  fill={entry.isUser ? '#00A3FF' : 'rgba(255,255,255,0.2)'}
+                />
+              ))}
+              <LabelList
+                dataKey="percentage"
+                position="top"
+                formatter={(value) => typeof value === 'number' && value > 0 ? `${value}%` : ''}
+                fill="rgba(255,255,255,0.5)"
+                fontSize={10}
+              />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center gap-4 text-xs">
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded bg-[#00A3FF]" />
+          <span className="text-white/70">Your response ({userAnswer})</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded bg-white/20" />
+          <span className="text-white/50">Team responses</span>
+        </div>
+        <span className="text-white/40 ml-auto">{totalResponses} total</span>
+      </div>
+
+      {/* Explanation */}
+      <p className="text-sm text-white/50 leading-relaxed">
+        {getExplanation()}
+      </p>
+    </div>
+  );
+};
+
+/**
+ * Choice Distribution Chart - Shows horizontal bar distribution for multiple choice
+ * Uses Recharts horizontal BarChart to show response distribution
+ */
+const ChoiceDistributionChart = ({
+  distribution,
+  userAnswer,
+  totalResponses
+}: {
+  distribution: Record<string, number>;
+  userAnswer: string;
+  totalResponses: number;
+}) => {
+  // Prepare data for Recharts (sorted by count, limited to top 6)
+  const chartData = Object.entries(distribution)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([option, count]) => {
+      const percentage = totalResponses > 0 ? Math.round((count / totalResponses) * 100) : 0;
+      const isUser = String(option) === String(userAnswer);
+      // Truncate long option labels
+      const label = option.length > 40 ? `${option.substring(0, 40)}...` : option;
+      return {
+        option: label,
+        fullOption: option,
+        count,
+        percentage,
+        isUser
+      };
+    });
+
+  const userEntry = chartData.find(d => d.isUser);
+  const userPercentage = userEntry?.percentage || 0;
+  const mostCommon = chartData[0];
+
+  // Generate explanation
+  const getExplanation = () => {
+    if (userEntry && userEntry === mostCommon) {
+      return `Your choice is the most popular option, selected by ${userPercentage}% of your colleagues.`;
+    } else if (userPercentage >= 25) {
+      return `${userPercentage}% of colleagues made the same choice as you. This is a common perspective within your team.`;
+    } else if (userPercentage > 0) {
+      return `Your choice represents ${userPercentage}% of responses. The most common choice was selected by ${mostCommon?.percentage}% of colleagues.`;
+    } else {
+      return `The most common choice was selected by ${mostCommon?.percentage}% of colleagues.`;
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Chart */}
+      <div style={{ height: Math.max(chartData.length * 45 + 20, 150) }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart
+            data={chartData}
+            layout="vertical"
+            margin={{ top: 5, right: 50, left: 10, bottom: 5 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
+            <XAxis
+              type="number"
+              tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }}
+              axisLine={{ stroke: 'rgba(255,255,255,0.1)' }}
+              tickLine={false}
+            />
+            <YAxis
+              type="category"
+              dataKey="option"
+              tick={{ fill: 'rgba(255,255,255,0.6)', fontSize: 11 }}
+              axisLine={false}
+              tickLine={false}
+              width={150}
+            />
+            <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
+            <Bar dataKey="count" radius={[0, 4, 4, 0]} maxBarSize={24}>
+              {chartData.map((entry, index) => (
+                <Cell
+                  key={`cell-${index}`}
+                  fill={entry.isUser ? '#00A3FF' : 'rgba(255,255,255,0.25)'}
+                />
+              ))}
+              <LabelList
+                dataKey="percentage"
+                position="right"
+                formatter={(value) => typeof value === 'number' ? `${value}%` : ''}
+                fill="rgba(255,255,255,0.6)"
+                fontSize={11}
+              />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center gap-4 text-xs">
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded bg-[#00A3FF]" />
+          <span className="text-white/70">Your choice</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded bg-white/25" />
+          <span className="text-white/50">Other choices</span>
+        </div>
+        <span className="text-white/40 ml-auto">{totalResponses} total</span>
+      </div>
+
+      {/* Explanation */}
+      <p className="text-sm text-white/50 leading-relaxed">
+        {getExplanation()}
+      </p>
+    </div>
+  );
+};
+
+/**
+ * Word Cloud Visualization - Shows common themes from text responses
+ * Highlights words that appear in user's response
+ */
+const WordCloudViz = ({
+  allResponses,
+  userResponse
+}: {
+  allResponses: string[];
+  userResponse: string;
+}) => {
+  const topWords = useMemo(() => getTopWords(allResponses, 20), [allResponses]);
+  const userMatches = useMemo(
+    () => getUserWordMatches(userResponse, topWords),
+    [userResponse, topWords]
+  );
+  const maxCount = Math.max(...topWords.map(w => w.count), 1);
+  const matchCount = userMatches.size;
+  const matchPercentage = topWords.length > 0 ? Math.round((matchCount / topWords.length) * 100) : 0;
+
+  if (topWords.length === 0) {
+    return (
+      <div className="text-center py-8 text-white/40 text-sm">
+        Gathering response themes...
+      </div>
+    );
+  }
+
+  // Generate explanation
+  const getExplanation = () => {
+    if (matchCount === 0) {
+      return `Your response uses different language than most colleagues. The most common themes focus on: ${topWords.slice(0, 3).map(w => w.word).join(', ')}.`;
+    } else if (matchPercentage >= 50) {
+      return `Your response shares ${matchCount} common themes with your colleagues (${matchPercentage}% alignment). You're using similar language to describe your perspective.`;
+    } else {
+      return `Your response includes ${matchCount} of the ${topWords.length} most common themes. You share some perspectives while bringing unique viewpoints.`;
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Word cloud */}
+      <div className="flex flex-wrap gap-2 justify-center py-4 min-h-[100px]">
+        {topWords.map(({ word, count }) => {
+          const isUserWord = userMatches.has(word);
+          // Scale font size: 12px to 22px based on frequency
+          const fontSize = 12 + (count / maxCount) * 10;
+
+          return (
+            <motion.span
+              key={word}
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.3 }}
+              className={`px-3 py-1.5 rounded-full transition-all cursor-default ${
+                isUserWord
+                  ? 'bg-[#00A3FF]/20 text-[#00A3FF] border border-[#00A3FF]/30 font-medium'
+                  : 'bg-white/10 text-white/60 hover:bg-white/15'
+              }`}
+              style={{ fontSize: `${fontSize}px` }}
+              title={`Used by ${count} ${count === 1 ? 'person' : 'people'}`}
+            >
+              {word}
+            </motion.span>
+          );
+        })}
+      </div>
+
+      {/* Legend */}
+      <div className="flex items-center justify-center gap-6 text-xs">
+        <div className="flex items-center gap-2 text-white/50">
+          <div className="w-3 h-3 rounded-full bg-[#00A3FF]/20 border border-[#00A3FF]/30" />
+          <span>In your response ({matchCount})</span>
+        </div>
+        <div className="flex items-center gap-2 text-white/50">
+          <div className="w-3 h-3 rounded-full bg-white/10" />
+          <span>Common themes ({topWords.length - matchCount})</span>
+        </div>
+      </div>
+
+      {/* Explanation */}
+      <p className="text-sm text-white/50 leading-relaxed text-center">
+        {getExplanation()}
+      </p>
+    </div>
+  );
+};
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+
 const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, embedded = false }) => {
-  const { moduleId: moduleIdFromRoute } = useParams(); // campaignId
+  const { moduleId: moduleIdFromRoute } = useParams();
   const moduleId = campaignIdOverride || moduleIdFromRoute;
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -46,7 +378,14 @@ const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, emb
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [campaignTitle, setCampaignTitle] = useState<string>('Campaign');
-  const isDark = !embedded;
+  const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
+
+  // Set selected video to first module when data loads
+  useEffect(() => {
+    if (comparisonGroups.length > 0 && !selectedVideoId) {
+      setSelectedVideoId(comparisonGroups[0].videoId);
+    }
+  }, [comparisonGroups, selectedVideoId]);
 
   useEffect(() => {
     const loadComparisonData = async () => {
@@ -115,17 +454,33 @@ const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, emb
         });
         const userResponses = Array.from(userResponsesMap.values());
 
-        console.log(`[DEBUG] Deduplicated user responses: ${userResponsesRaw.length} -> ${userResponses.length}`);
+        // 5. Filter responses by User Role (Applicant vs Employee)
+        if (!user.organization) {
+          console.warn('User has no organization, skipping role filtering');
+          return;
+        }
+        const { getUsersByOrganization } = await import('@/lib/firestore');
+        const orgUsers = await getUsersByOrganization(user.organization);
+        const userRoleMap = new Map<string, string>();
+        orgUsers.forEach((u: any) => userRoleMap.set(u.id, u.role || 'employee'));
 
-        // 5. Group responses
+        const currentUserRole = (user as any).role || 'employee';
+
+        // Filter responses: Only include responses from users with the SAME role
+        const relevantResponses = allResponses.filter(r => {
+          const responderRole = userRoleMap.get(r.userId) || 'employee';
+          return responderRole === currentUserRole;
+        });
+
+        // 6. Group filtered responses
         const responsesByQuestion = new Map<string, any[]>();
-        allResponses.forEach(response => {
+        relevantResponses.forEach(response => {
           const existing = responsesByQuestion.get(response.questionId) || [];
           existing.push(response);
           responsesByQuestion.set(response.questionId, existing);
         });
 
-        // 6. Build Comparison Data
+        // 7. Build Comparison Data
         const comparisonData: ComparisonData[] = [];
 
         userResponses.forEach(userResponse => {
@@ -133,28 +488,18 @@ const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, emb
           const allQuestionResponses = responsesByQuestion.get(questionId) || [];
           const questionInfo = questionMap.get(questionId);
 
-          if (allQuestionResponses.length < 3) return;
-
           const distribution: Record<string | number, number> = {};
-          let totalScore = 0;
-          let countNumeric = 0;
+          const textResponses: string[] = [];
 
           allQuestionResponses.forEach(r => {
             const answer = String(r.answer);
             distribution[answer] = (distribution[answer] || 0) + 1;
 
-            // Calculate average for scale questions
-            const numVal = parseFloat(String(r.answer));
-            if (!isNaN(numVal)) {
-              totalScore += numVal;
-              countNumeric++;
+            // Collect text responses for qualitative questions
+            if (questionInfo?.type === 'qualitative' || questionInfo?.type === 'text') {
+              textResponses.push(String(r.answer));
             }
           });
-
-          const sortedAnswers = Object.entries(distribution).sort((a, b) => b[1] - a[1]);
-          const mostCommonAnswer = sortedAnswers[0]?.[0];
-          const userAnswerStr = String(userResponse.answer);
-          const isUserInMajority = userAnswerStr === mostCommonAnswer;
 
           comparisonData.push({
             questionId,
@@ -162,28 +507,15 @@ const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, emb
             userAnswer: userResponse.answer,
             answerDistribution: distribution,
             totalResponses: allQuestionResponses.length,
-            isUserInMajority,
             videoId: userResponse.videoId || questionInfo?.videoId,
-            type: (questionInfo?.type as any) || (typeof userResponse.answer === 'number' ? 'scale' : 'multiple-choice'),
-            averageScore: countNumeric > 0 ? totalScore / countNumeric : undefined
+            type: questionInfo?.type as any,
+            textResponses: textResponses.length > 0 ? textResponses : undefined
           });
         });
 
-        // 7. Group by Video and Calculate Group Averages
+        // 8. Group by Video
         const groups: VideoGroup[] = [];
         const comparisonsByVideo = new Map<string, ComparisonData[]>();
-
-        console.log('[DEBUG] Video IDs from campaign:', Array.from(videoIds));
-        console.log('[DEBUG] Total comparison data items:', comparisonData.length);
-
-        // Show each comparison's videoId
-        comparisonData.forEach((c, idx) => {
-          console.log(`[DEBUG] Comparison ${idx}:`, {
-            questionId: c.questionId,
-            videoId: c.videoId,
-            question: c.question.substring(0, 50)
-          });
-        });
 
         comparisonData.forEach(comp => {
           const vid = comp.videoId || 'unknown';
@@ -192,42 +524,18 @@ const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, emb
           comparisonsByVideo.set(vid, existing);
         });
 
-        console.log('[DEBUG] Grouped comparisons by video:');
-        Array.from(comparisonsByVideo.entries()).forEach(([vid, comps]) => {
-          console.log(`  Video ${vid}:`, {
+        // Create groups for ALL campaign videos (in campaign order)
+        // Include modules even if user hasn't completed them yet
+        Array.from(videoIds).forEach(vid => {
+          const comps = comparisonsByVideo.get(vid) || [];
+          groups.push({
             videoId: vid,
-            count: comps.length,
-            title: videoTitleMap.get(vid) || 'Unknown',
-            questions: comps.map(c => c.question.substring(0, 30))
+            videoTitle: videoTitleMap.get(vid) || 'Untitled Video',
+            comparisons: comps // May be empty if user hasn't answered yet
           });
         });
 
-        Array.from(videoIds).forEach(vid => {
-          const comps = comparisonsByVideo.get(vid);
-          if (comps && comps.length > 0) {
-            // Calculate averages for the video group (Radar Chart Data)
-            let userSum = 0;
-            let commSum = 0;
-            let count = 0;
-
-            comps.forEach(c => {
-              if (c.averageScore !== undefined && typeof c.userAnswer === 'number') {
-                userSum += c.userAnswer;
-                commSum += c.averageScore;
-                count++;
-              }
-            });
-
-            groups.push({
-              videoId: vid,
-              videoTitle: videoTitleMap.get(vid) || 'Untitled Video',
-              comparisons: comps,
-              userAverage: count > 0 ? userSum / count : undefined,
-              communityAverage: count > 0 ? commSum / count : undefined
-            });
-          }
-        });
-
+        // Add unknown group at the end if any
         const unknownComps = comparisonsByVideo.get('unknown');
         if (unknownComps && unknownComps.length > 0) {
           groups.push({
@@ -250,58 +558,190 @@ const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, emb
     loadComparisonData();
   }, [moduleId, user]);
 
-  // --- Render Helpers ---
+  // Filter groups based on selected video (desktop sidebar selection)
+  const filteredGroups = useMemo(() => {
+    if (!selectedVideoId) return comparisonGroups;
+    return comparisonGroups.filter(g => g.videoId === selectedVideoId);
+  }, [comparisonGroups, selectedVideoId]);
 
-  const renderBarChart = (comparison: ComparisonData) => {
-    const labelColor = isDark ? 'text-white/80' : 'text-gray-600';
-    const percentColor = isDark ? 'text-white/60' : 'text-gray-400';
-    const barBg = isDark ? 'bg-white/10' : 'bg-gray-100';
-    const barFillUser = isDark ? 'bg-blue-400' : 'bg-blue-500';
-    const barFillOther = isDark ? 'bg-white/30' : 'bg-gray-300';
-    const userTag = isDark ? 'text-blue-300' : 'text-blue-500';
+  // Calculate summary stats (neutral - no scoring)
+  const summaryStats = useMemo(() => {
+    let totalQuestions = 0;
+    let maxResponses = 0;
 
-    const sortedAnswers = Object.entries(comparison.answerDistribution)
-      .sort((a, b) => b[1] - a[1]);
+    filteredGroups.forEach(group => {
+      totalQuestions += group.comparisons.length;
+      group.comparisons.forEach(comp => {
+        if (comp.totalResponses > maxResponses) {
+          maxResponses = comp.totalResponses;
+        }
+      });
+    });
 
+    return { totalQuestions, totalResponses: maxResponses };
+  }, [filteredGroups]);
+
+  // Determine chart type and render appropriate visualization
+  const renderQuestionVisualization = (comparison: ComparisonData) => {
+    const hasEnoughData = comparison.totalResponses >= 3;
+
+    if (!hasEnoughData) {
+      return (
+        <div className="bg-white/5 rounded-lg p-4 text-center">
+          <p className="text-white/60 text-sm">
+            Your response: <span className="text-white font-medium">{String(comparison.userAnswer)}</span>
+          </p>
+          <p className="text-white/40 text-xs mt-2">
+            Gathering more perspectives ({comparison.totalResponses}/3 needed)
+          </p>
+        </div>
+      );
+    }
+
+    // Q2: Multiple Choice (behavioral-intent) - bar chart
+    // Check this FIRST because behavioral-intent stores intentScore (1-7) as answer
+    // which would otherwise be detected as a Likert scale
+    if (comparison.type === 'behavioral-intent' || comparison.type === 'multiple-choice') {
+      return (
+        <ChoiceDistributionChart
+          distribution={comparison.answerDistribution}
+          userAnswer={String(comparison.userAnswer)}
+          totalResponses={comparison.totalResponses}
+        />
+      );
+    }
+
+    // Q3: Text/Qualitative - word cloud
+    if (comparison.type === 'qualitative' || comparison.type === 'text') {
+      return (
+        <WordCloudViz
+          allResponses={comparison.textResponses || [String(comparison.userAnswer)]}
+          userResponse={String(comparison.userAnswer)}
+        />
+      );
+    }
+
+    // Q1: Likert Scale (behavioral-perception) - numeric 1-7
+    // This is checked last as a fallback for numeric answers
+    const isLikertScale =
+      comparison.type === 'behavioral-perception' ||
+      comparison.type === 'scale' ||
+      (typeof comparison.userAnswer === 'number' &&
+        comparison.userAnswer >= 1 &&
+        comparison.userAnswer <= 7);
+
+    if (isLikertScale) {
+      return (
+        <LikertDistributionChart
+          distribution={comparison.answerDistribution}
+          userAnswer={Number(comparison.userAnswer)}
+          totalResponses={comparison.totalResponses}
+        />
+      );
+    }
+
+    // Default fallback - treat as choice distribution
     return (
-      <div className="space-y-4 mt-4">
-        {sortedAnswers.map(([answer, count], idx) => {
-          const percentage = Math.round((count / comparison.totalResponses) * 100);
-          const isUserAnswer = String(answer) === String(comparison.userAnswer);
-
-          return (
-            <div key={idx} className="relative">
-              <div className="flex justify-between items-end mb-1 text-sm">
-                <span className={`font-medium ${isUserAnswer ? 'text-blue-400' : labelColor}`}>
-                  {answer}
-                </span>
-                <span className={percentColor}>{percentage}%</span>
-              </div>
-              <div className={`h-2 w-full ${barBg} rounded-full overflow-hidden`}>
-                <div
-                  className={`h-full rounded-full transition-all duration-1000 ease-out ${isUserAnswer ? barFillUser : barFillOther}`}
-                  style={{ width: `${percentage}%` }}
-                />
-              </div>
-              {isUserAnswer && (
-                <div className={`text-[10px] ${userTag} font-bold mt-0.5`}>YOU</div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      <ChoiceDistributionChart
+        distribution={comparison.answerDistribution}
+        userAnswer={String(comparison.userAnswer)}
+        totalResponses={comparison.totalResponses}
+      />
     );
   };
 
   const containerClasses = 'min-h-screen bg-[#050608] pb-20 text-white';
 
-  if (isLoading) {
-    return (
-      <div className={`${containerClasses} flex items-center justify-center px-6 min-h-[200px]`}>
-        <div className="text-center">
-          <Loader className={`w-12 h-12 animate-spin ${isDark ? 'text-white' : 'text-blue-500'} mx-auto mb-4`} />
-          <p className={isDark ? 'text-white/70' : 'text-gray-500'}>Loading insights...</p>
+  // Skeleton loading component
+  const renderSkeletonLoading = () => (
+    <div className="flex flex-1">
+      {/* Sidebar Skeleton */}
+      <aside className="w-80 flex-shrink-0 border-r border-white/5 p-6">
+        <Skeleton className="h-4 w-20 mb-6" />
+        <div className="space-y-2">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-4 px-4 py-3">
+              <Skeleton className="w-10 h-10 rounded-xl" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-20" />
+              </div>
+            </div>
+          ))}
         </div>
+      </aside>
+
+      {/* Main Content Skeleton */}
+      <main className="flex-1 p-6">
+        <div className="max-w-4xl mx-auto space-y-6">
+          {/* Summary Card Skeleton */}
+          <div className="bg-white/5 border border-white/5 rounded-xl p-5">
+            <div className="flex items-center gap-5">
+              <Skeleton className="w-12 h-12 rounded-xl" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="h-4 w-56" />
+              </div>
+              <div className="flex items-center gap-6">
+                <div className="text-center space-y-1">
+                  <Skeleton className="h-6 w-8 mx-auto" />
+                  <Skeleton className="h-3 w-16" />
+                </div>
+                <div className="text-center space-y-1 border-l border-white/10 pl-6">
+                  <Skeleton className="h-6 w-8 mx-auto" />
+                  <Skeleton className="h-3 w-20" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Module Title Skeleton */}
+          <Skeleton className="h-6 w-36 mt-4" />
+
+          {/* Question Cards Skeleton */}
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="bg-white/5 border border-white/5 rounded-xl overflow-hidden">
+              {/* Question Header */}
+              <div className="px-5 py-4 border-b border-white/5">
+                <div className="flex items-start gap-3">
+                  <Skeleton className="w-6 h-6 rounded-lg" />
+                  <Skeleton className="h-4 w-3/4" />
+                </div>
+              </div>
+              {/* Chart Area */}
+              <div className="p-5 space-y-4">
+                <div className="h-48 flex items-end gap-2">
+                  {Array.from({ length: 7 }).map((_, j) => (
+                    <Skeleton
+                      key={j}
+                      className="flex-1 rounded-t"
+                      style={{ height: `${Math.random() * 60 + 30}%` }}
+                    />
+                  ))}
+                </div>
+                <div className="flex items-center gap-4">
+                  <Skeleton className="h-3 w-3 rounded" />
+                  <Skeleton className="h-3 w-24" />
+                  <Skeleton className="h-3 w-3 rounded" />
+                  <Skeleton className="h-3 w-20" />
+                </div>
+                <Skeleton className="h-4 w-full" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </main>
+    </div>
+  );
+
+  if (isLoading) {
+    return embedded ? (
+      <div className="hidden lg:flex flex-1 bg-[#050608]">
+        {renderSkeletonLoading()}
+      </div>
+    ) : (
+      <div className={containerClasses}>
+        {renderSkeletonLoading()}
       </div>
     );
   }
@@ -310,10 +750,10 @@ const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, emb
     return (
       <div className={`${containerClasses} flex items-center justify-center px-6 min-h-[200px]`}>
         <div className="text-center">
-          <h1 className={`text-2xl font-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>Unable to Load Data</h1>
-          <p className={`${isDark ? 'text-white/70' : 'text-gray-500'} mb-6`}>{loadError}</p>
+          <h1 className="text-2xl font-semibold mb-4 text-white">Unable to Load Data</h1>
+          <p className="text-white/50 mb-6">{loadError}</p>
           {!embedded && (
-            <button onClick={() => navigate('/employee/home')} className={`${isDark ? 'inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-500 text-white hover:bg-blue-600' : 'btn-primary bg-blue-600 text-white hover:bg-blue-700'}`}>
+            <button onClick={() => navigate('/employee/home')} className="px-6 py-2.5 rounded-xl bg-[#00A3FF] text-white hover:bg-[#00A3FF]/90 transition">
               Back to Home
             </button>
           )}
@@ -322,189 +762,309 @@ const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, emb
     );
   }
 
-  // Prepare Radar Data
-  const radarData = comparisonGroups
-    .filter(g => g.userAverage !== undefined && g.communityAverage !== undefined)
-    .map(g => ({
-      subject: g.videoTitle.length > 15 ? g.videoTitle.substring(0, 15) + '...' : g.videoTitle,
-      A: g.userAverage || 0,
-      B: g.communityAverage || 0,
-      fullMark: 5,
-    }));
+  const renderComparisonContent = () => (
+    <div className="space-y-6">
+      {/* Summary Card - Neutral (no scoring) */}
+      {filteredGroups.length > 0 && filteredGroups[0].comparisons.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white/5 border border-white/5 rounded-xl p-5"
+        >
+          <div className="flex items-center gap-5">
+            {/* Icon */}
+            <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center">
+              <Users size={24} className="text-white/60" />
+            </div>
 
-  return (
-    <div className={containerClasses}>
-      {/* Minimalist Header */}
-      <div className={`px-6 pt-8 pb-6 ${embedded ? 'bg-white border-gray-100 text-gray-900' : 'bg-[#050608] border-white/10 text-white'}`}>
-        <div className="max-w-3xl mx-auto">
-          {!embedded && (
-            <button
-              onClick={() => navigate('/employee/home')}
-              className="flex items-center gap-2 text-white/70 hover:text-white mb-6 transition-colors"
-            >
-              <ArrowLeft size={20} />
-              Back
-            </button>
-          )}
-          <h1 className={`text-2xl font-bold mb-1 ${embedded ? 'text-gray-900' : 'text-white'}`}>
-            Survey Results
-          </h1>
-          <p className={embedded ? 'text-gray-500' : 'text-white/70'}>{campaignTitle}</p>
-        </div>
-      </div>
+            {/* Title */}
+            <div className="flex-1">
+              <h2 className="text-lg font-semibold text-white">Response Distribution</h2>
+              <p className="text-sm text-white/50">
+                Compare perspectives with your colleagues
+              </p>
+            </div>
 
-      <div className="max-w-3xl mx-auto px-6 py-8 space-y-12">
-
-        {/* Hero Radar Chart */}
-        {radarData.length >= 3 && (
-          <div className={`${isDark ? 'bg-[#0f1118] border border-white/10 text-white' : 'bg-white border border-gray-100 text-gray-900'} rounded-2xl p-6 shadow-sm`}>
-            <h2 className="text-center font-semibold mb-6">Performance Overview</h2>
-            <RadarOverview data={radarData} />
-
-            <div className="flex justify-center gap-6 mt-4 text-sm">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-blue-400 rounded-full" />
-                <span className={`${isDark ? 'text-white/70' : 'text-gray-600'} font-medium`}>You</span>
+            {/* Stats - Neutral */}
+            <div className="flex items-center gap-6">
+              <div className="text-center">
+                <p className="text-xl font-bold text-white">{summaryStats.totalQuestions}</p>
+                <p className="text-xs text-white/40">Questions</p>
               </div>
-              <div className="flex items-center gap-2">
-                <div className={`w-3 h-3 ${isDark ? 'bg-white/40' : 'bg-gray-400'} rounded-full opacity-70`} />
-                <span className={`${isDark ? 'text-white/70' : 'text-gray-600'} font-medium`}>Community Avg</span>
+              <div className="text-center border-l border-white/10 pl-6">
+                <p className="text-xl font-bold text-white">{summaryStats.totalResponses}</p>
+                <p className="text-xs text-white/40">Peer Responses</p>
               </div>
             </div>
           </div>
-        )}
+        </motion.div>
+      )}
 
-        {/* Empty State */}
-        {comparisonGroups.length === 0 && (
-          <div className={`text-center py-12 rounded-2xl p-6 shadow-sm ${isDark ? 'bg-[#0f1118] border border-white/10 text-white' : 'bg-white border border-gray-100 text-gray-900'}`}>
-            <div className={`w-16 h-16 ${isDark ? 'bg-white/10' : 'bg-blue-100'} rounded-full flex items-center justify-center mx-auto mb-4`}>
-              <Users size={32} className={`${isDark ? 'text-white' : 'text-blue-600'}`} />
+      {/* Empty State - No modules at all */}
+      {filteredGroups.length === 0 && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="bg-white/5 border border-white/5 rounded-xl p-8 text-center"
+        >
+          <div className="flex items-center justify-center gap-4 mb-4">
+            <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center">
+              <Users size={24} className="text-white/40" />
             </div>
-            <h3 className="text-xl font-semibold mb-2">Waiting for Colleagues</h3>
-            <p className={`${isDark ? 'text-white/70' : 'text-gray-500'} mb-6 max-w-md mx-auto`}>
-              Your responses are safe! We're just waiting for a few more teammates to finish so we can show you the comparison.
-            </p>
+            <div className="text-left">
+              <h3 className="text-lg font-semibold text-white">Gathering Perspectives</h3>
+              <p className="text-sm text-white/50">Waiting for more teammates to respond</p>
+            </div>
+          </div>
+          {!embedded && (
+            <button
+              onClick={() => navigate('/employee/learn')}
+              className="px-6 py-2 bg-white/10 text-white text-sm font-medium rounded-xl hover:bg-white/15 transition"
+            >
+              Back to Learning
+            </button>
+          )}
+        </motion.div>
+      )}
+
+      {/* Empty State - Module selected but not completed by user */}
+      {filteredGroups.length > 0 && filteredGroups[0].comparisons.length === 0 && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="bg-white/5 border border-white/5 rounded-xl p-8"
+        >
+          <div className="flex flex-col items-center text-center gap-4">
+            <div className="w-16 h-16 rounded-2xl bg-white/10 flex items-center justify-center">
+              <Play size={28} className="text-white/40" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-white mb-1">Module Not Completed</h3>
+              <p className="text-sm text-white/50 max-w-sm">
+                Complete this module to see how your responses compare with your colleagues.
+              </p>
+            </div>
             {!embedded && (
-              <button onClick={() => navigate('/employee/home')} className="btn-primary bg-blue-600 text-white hover:bg-blue-700">
-                Continue Learning
+              <button
+                onClick={() => navigate('/employee/learn')}
+                className="mt-2 px-6 py-2.5 bg-[#00A3FF] text-white text-sm font-medium rounded-xl hover:bg-[#00A3FF]/90 transition"
+              >
+                Go to Learning
               </button>
             )}
           </div>
-        )}
+        </motion.div>
+      )}
 
-        {/* Comparison Groups */}
-        {comparisonGroups.map((group) => (
-          <div key={group.videoId} className="space-y-6">
-            <div className={`flex items-center gap-3 pb-2 ${isDark ? 'border-b border-white/10' : 'border-b border-gray-100'}`}>
-              <VideoIcon size={20} className={isDark ? 'text-blue-400' : 'text-blue-600'} />
-              <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{group.videoTitle}</h2>
-            </div>
+      {/* Question Cards with Module Titles */}
+      <AnimatePresence>
+        {filteredGroups
+          .filter(group => group.comparisons.length > 0)
+          .map((group, groupIdx) => (
+            <div key={group.videoId} className="space-y-4">
+              {/* Module Title - simple heading, no container */}
+              <motion.h3
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-lg font-semibold text-white pt-2"
+              >
+                {group.videoTitle}
+              </motion.h3>
 
-            <div className="space-y-8">
+              {/* Questions for this module */}
               {group.comparisons.map((comparison, idx) => (
-                <div
-                  key={idx}
-                  className={`${isDark ? 'bg-[#0f1118] border border-white/10 text-white' : 'bg-white border border-gray-100 text-gray-900'} p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow`}
+                <motion.div
+                  key={comparison.questionId}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.03 * idx }}
+                  className="bg-white/5 border border-white/5 rounded-xl overflow-hidden"
                 >
-                  <h3 className="text-lg font-medium mb-2">
-                    {comparison.question}
-                  </h3>
-
-                  {comparison.type === 'scale' || (typeof comparison.userAnswer === 'number' && comparison.averageScore)
-                    ? (
-                      <ComparisonSlider
-                        userValue={Number(comparison.userAnswer)}
-                        avgValue={comparison.averageScore || 0}
-                      />
-                    )
-                    : renderBarChart(comparison)
-                  }
-
-                  {/* Example usage of ThemeBubbleCluster for text questions (mocked for now as we don't have text analysis yet) */}
-                  {comparison.type === 'text' && (
-                    <div className="mt-4">
-                      <p className={`text-sm mb-3 ${isDark ? 'text-white/70' : 'text-gray-500'}`}>Common Themes:</p>
-                      <ThemeBubbleCluster themes={[
-                        { name: 'Communication', type: 'user', percentage: 85 },
-                        { name: 'Teamwork', type: 'community' },
-                        { name: 'Leadership', type: 'community' },
-                        { name: 'Strategy', type: 'user', percentage: 40 }
-                      ]} />
+                  {/* Question Header */}
+                  <div className="px-5 py-4 border-b border-white/5">
+                    <div className="flex items-start gap-3">
+                      <span className="flex-shrink-0 w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center text-xs font-medium text-white/60">
+                        {idx + 1}
+                      </span>
+                      <p className="text-sm text-white/80 leading-relaxed">{comparison.question}</p>
                     </div>
-                  )}
-
-                  <div className={`mt-6 flex items-center gap-2 text-sm ${isDark ? 'text-white/60' : 'text-gray-400'}`}>
-                    <Users size={14} className={isDark ? 'text-white/60' : ''} />
-                    <span>{comparison.totalResponses} responses</span>
-                    {comparison.isUserInMajority ? (
-                      <span className="flex items-center gap-1 text-green-500 ml-auto">
-                        <CheckCircle size={14} />
-                        In Majority
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-blue-400 ml-auto">
-                        <Info size={14} />
-                        Unique View
-                      </span>
-                    )}
                   </div>
-                </div>
+
+                  {/* Visualization */}
+                  <div className="p-5">
+                    {renderQuestionVisualization(comparison)}
+                  </div>
+                </motion.div>
               ))}
             </div>
-          </div>
-        ))}
+          ))}
+      </AnimatePresence>
 
-        {/* AI Copilot Prompt */}
-        <div className={`${isDark ? 'bg-[#0f1118] border border-white/10 text-white' : 'bg-blue-50 border border-blue-100 text-gray-900'} rounded-2xl p-6`}>
-          <div className="flex items-start gap-4">
-            <div className={`${isDark ? 'p-3 bg-white/10 text-white' : 'p-3 bg-blue-100 text-blue-600'} rounded-xl`}>
-              <MessageSquare size={24} />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-lg mb-2">
-                Analyze with AI
-              </h3>
-              <p className={`${isDark ? 'text-white/70' : 'text-gray-600'} mb-4`}>
-                Want to understand why your score differs from the average? Ask our AI Copilot.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {['Analyze my gaps', 'How can I improve?', 'Summarize key themes'].map((q, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setIsCopilotOpen(true)}
-                    className={`${isDark ? 'px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white' : 'px-4 py-2 bg-white hover:bg-blue-50 border border-blue-200 text-blue-700'} rounded-lg text-sm transition-colors shadow-sm`}
-                  >
-                    "{q}"
-                  </button>
-                ))}
-              </div>
-            </div>
+      {/* AI Copilot Prompt */}
+      {filteredGroups.length > 0 && filteredGroups[0].comparisons.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="bg-white/5 border border-white/5 rounded-xl p-4 flex items-center gap-4"
+        >
+          <MessageSquare size={16} className="text-white/30 flex-shrink-0" />
+          <p className="text-sm text-white/50 flex-1">Need help understanding your responses?</p>
+          <div className="flex gap-2">
+            {['Explore themes', 'Understand perspectives'].map((q, i) => (
+              <button
+                key={i}
+                onClick={() => setIsCopilotOpen(true)}
+                className="px-3 py-1.5 text-xs text-white/60 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-all"
+              >
+                {q}
+              </button>
+            ))}
           </div>
+        </motion.div>
+      )}
+
+      {/* Footer Action */}
+      {!embedded && filteredGroups.length > 0 && filteredGroups[0].comparisons.length > 0 && (
+        <div className="flex justify-end pt-2">
+          <button
+            onClick={() => navigate('/employee/home')}
+            className="inline-flex items-center gap-2 px-5 py-2.5 text-sm bg-[#00A3FF] text-white font-medium hover:bg-[#00A3FF]/90 rounded-xl transition"
+          >
+            <Play size={16} />
+            Continue Learning
+          </button>
         </div>
-
-        {/* Footer Action */}
-        {!embedded && comparisonGroups.length > 0 && (
-          <div className="text-center pt-8 pb-12">
-            <button
-              onClick={() => navigate('/employee/home')}
-              className={`${isDark ? 'inline-flex items-center gap-2 px-8 py-3 text-lg bg-blue-500 text-white hover:bg-blue-600 shadow-lg shadow-blue-900/40' : 'btn-primary inline-flex items-center gap-2 px-8 py-3 text-lg bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-200'}`}
-            >
-              <Play size={20} />
-              Continue Learning
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* AI Copilot */}
-      {isCopilotOpen && (
-        <AICopilot
-          isOpen={isCopilotOpen}
-          onClose={() => setIsCopilotOpen(false)}
-          context={{ userRole: 'employee' }}
-        />
       )}
     </div>
+  );
+
+  return (
+    <>
+      {/* Mobile View */}
+      <div className="lg:hidden">
+        <MobilePeerComparison campaignIdOverride={campaignIdOverride} embedded={embedded} />
+      </div>
+
+      {/* Desktop View */}
+      {embedded ? (
+        <div className="hidden lg:flex flex-1 bg-[#050608]">
+          {/* Sidebar - Module Selection (Embedded) */}
+          <aside className="w-80 flex-shrink-0 border-r border-white/5 p-6 overflow-y-auto">
+            <div className="space-y-2">
+              <p className="text-sm font-semibold uppercase tracking-wide text-white/40 px-3 mb-4">Modules</p>
+
+              {comparisonGroups.map((group) => {
+                const hasData = group.comparisons.length > 0;
+                const isSelected = selectedVideoId === group.videoId;
+
+                return (
+                  <button
+                    key={group.videoId}
+                    onClick={() => setSelectedVideoId(group.videoId)}
+                    className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl font-medium transition-all ${
+                      isSelected
+                        ? 'bg-white/10 text-white'
+                        : hasData
+                          ? 'text-white/60 hover:text-white hover:bg-white/5'
+                          : 'text-white/30 hover:bg-white/5 cursor-pointer'
+                    }`}
+                  >
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                      isSelected ? 'bg-[#00A3FF]/20' : hasData ? 'bg-white/10' : 'bg-white/5'
+                    }`}>
+                      <VideoIcon size={20} className={isSelected ? 'text-[#00A3FF]' : hasData ? 'text-white/40' : 'text-white/20'} />
+                    </div>
+                    <div className="flex-1 text-left min-w-0">
+                      <span className={`block truncate text-sm ${!hasData && 'text-white/40'}`}>{group.videoTitle}</span>
+                      <p className="text-xs text-white/40">
+                        {hasData ? `${group.comparisons.length} questions` : 'Not yet completed'}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+
+          {/* Main Content */}
+          <main className="flex-1 overflow-y-auto p-6">
+            <div className="max-w-4xl mx-auto space-y-6 pb-20">
+              {renderComparisonContent()}
+            </div>
+          </main>
+
+          {isCopilotOpen && (
+            <AICopilot
+              isOpen={isCopilotOpen}
+              onClose={() => setIsCopilotOpen(false)}
+              context={{ userRole: 'employee' }}
+            />
+          )}
+        </div>
+      ) : (
+        /* Non-embedded desktop view */
+        <div className="hidden lg:flex flex-1 bg-[#050608]">
+          <aside className="w-80 flex-shrink-0 border-r border-white/5 p-6 overflow-y-auto">
+            <button
+              onClick={() => navigate(-1)}
+              className="flex items-center gap-2 text-white/60 hover:text-white transition-colors mb-5"
+            >
+              <ArrowLeft size={18} />
+              <span className="text-sm">Back</span>
+            </button>
+
+            <div className="space-y-2">
+              <p className="text-sm font-semibold uppercase tracking-wide text-white/40 px-3 mb-4">Modules</p>
+
+              {comparisonGroups.map((group) => {
+                const hasData = group.comparisons.length > 0;
+                const isSelected = selectedVideoId === group.videoId;
+
+                return (
+                  <button
+                    key={group.videoId}
+                    onClick={() => setSelectedVideoId(group.videoId)}
+                    className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl font-medium transition-all ${
+                      isSelected
+                        ? 'bg-white/10 text-white'
+                        : hasData
+                          ? 'text-white/60 hover:text-white hover:bg-white/5'
+                          : 'text-white/30 hover:bg-white/5 cursor-pointer'
+                    }`}
+                  >
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                      isSelected ? 'bg-[#00A3FF]/20' : hasData ? 'bg-white/10' : 'bg-white/5'
+                    }`}>
+                      <VideoIcon size={20} className={isSelected ? 'text-[#00A3FF]' : hasData ? 'text-white/40' : 'text-white/20'} />
+                    </div>
+                    <div className="flex-1 text-left min-w-0">
+                      <span className={`block truncate text-sm ${!hasData && 'text-white/40'}`}>{group.videoTitle}</span>
+                      <p className="text-xs text-white/40">
+                        {hasData ? `${group.comparisons.length} questions` : 'Not yet completed'}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+
+          <main className="flex-1 overflow-y-auto p-6">
+            <div className="max-w-4xl mx-auto space-y-6 pb-20">
+              {renderComparisonContent()}
+            </div>
+          </main>
+
+          {isCopilotOpen && (
+            <AICopilot
+              isOpen={isCopilotOpen}
+              onClose={() => setIsCopilotOpen(false)}
+              context={{ userRole: 'employee' }}
+            />
+          )}
+        </div>
+      )}
+    </>
   );
 };
 

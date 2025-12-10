@@ -18,6 +18,7 @@ import {
   Settings,
   HelpCircle,
   Building2,
+  BarChart3,
 } from 'lucide-react';
 
 interface NavItem {
@@ -71,6 +72,12 @@ const mainNavItems: NavItem[] = [
     label: 'Clients',
     icon: Building2,
     path: '/clients',
+  },
+  {
+    id: 'analytics',
+    label: 'Analytics',
+    icon: BarChart3,
+    path: '/analytics',
   },
 ];
 
@@ -137,7 +144,7 @@ export default function Sidebar() {
               <div className="flex items-baseline gap-1.5">
                 <span className="text-lg font-semibold text-slate-900">DiCode</span>
                 <span className="text-sm font-light text-slate-400">Suite</span>
-            </div>
+              </div>
             </Link>
             <button
               onClick={toggleSidebar}
@@ -148,12 +155,12 @@ export default function Sidebar() {
             </button>
           </>
         )}
-          </div>
+      </div>
 
       {/* New Campaign Button */}
       <div className={cn('p-3', isCollapsed && 'px-2')}>
-          <Link
-            href="/campaigns/new"
+        <Link
+          href="/campaigns/new"
           className={cn(
             'flex items-center justify-center gap-2 rounded-lg bg-slate-900 font-medium text-white shadow-sm transition hover:bg-slate-800',
             isCollapsed ? 'h-10 w-10 mx-auto' : 'h-10 px-4'
@@ -162,8 +169,8 @@ export default function Sidebar() {
         >
           <Plus className="h-4 w-4" />
           {!isCollapsed && <span className="text-sm">New Campaign</span>}
-          </Link>
-        </div>
+        </Link>
+      </div>
 
       {/* Main Navigation */}
       <nav className="flex-1 overflow-y-auto px-3 py-2">
@@ -199,7 +206,7 @@ export default function Sidebar() {
                 {isCollapsed && item.badge && (
                   <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-violet-500" />
                 )}
-                
+
                 {/* Tooltip for collapsed state */}
                 {isCollapsed && (
                   <div className="pointer-events-none absolute left-full ml-2 hidden rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 lg:block">
@@ -213,7 +220,7 @@ export default function Sidebar() {
             );
           })}
         </div>
-        </nav>
+      </nav>
 
       {/* Bottom Navigation */}
       <div className="border-t border-slate-100 px-3 py-3">
@@ -237,12 +244,12 @@ export default function Sidebar() {
               >
                 <Icon className="h-5 w-5 flex-shrink-0" />
                 {!isCollapsed && <span>{item.label}</span>}
-                
+
                 {/* Tooltip for collapsed state */}
                 {isCollapsed && (
                   <div className="pointer-events-none absolute left-full ml-2 hidden rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 lg:block">
                     {item.label}
-            </div>
+                  </div>
                 )}
               </Link>
             );

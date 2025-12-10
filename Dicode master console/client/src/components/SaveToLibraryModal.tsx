@@ -11,7 +11,8 @@ import QuestionBuilder from '@/components/Questions/QuestionBuilder';
 import { validateQuestionSet } from '@/lib/questionValidation';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
-import { getCampaignsByUser } from '@/lib/firestore';
+import { useNotification } from '@/contexts/NotificationContext';
+import { getCampaignsByUser, getAllCampaigns } from '@/lib/firestore';
 import { buildTagList, type CompetencyDefinition } from '@/lib/competencies';
 import { useCompetencies } from '@/hooks/useCompetencies';
 import { createDefaultQuestionSet, normalizeQuestionSet } from '@/lib/questionDefaults';
@@ -24,6 +25,7 @@ export interface SaveMetadata {
   questions?: QuestionFormData[];
   campaignId?: string;
   tags: string[];
+  usedAssetIds?: string[];
 }
 
 interface VideoMetadataState {
@@ -49,6 +51,7 @@ export function SaveToLibraryModal({
   saving,
 }: SaveToLibraryModalProps) {
   const { user } = useAuth();
+  const { warning: showWarning } = useNotification();
   const { competencies } = useCompetencies();
   const [activeTabIndex, setActiveTabIndex] = useState(0);
   const [videoMetadata, setVideoMetadata] = useState<Record<string, VideoMetadataState>>({});
@@ -60,13 +63,19 @@ export function SaveToLibraryModal({
     Record<string, Record<number, QuestionAssistantState>>
   >({});
 
-  // Load user's campaigns
+  // Load campaigns (dicode source for DiCode staff, user's own for others)
   useEffect(() => {
     if (isOpen && user) {
       setLoadingCampaigns(true);
-      getCampaignsByUser(user.uid)
-        .then((userCampaigns) => {
-          setCampaigns(userCampaigns);
+      const isDiCodeStaff = user.email?.endsWith('@di-code.de');
+      const fetchCampaigns = isDiCodeStaff ? getAllCampaigns() : getCampaignsByUser(user.uid);
+      fetchCampaigns
+        .then((fetchedCampaigns) => {
+          // DiCode staff only see 'dicode' source campaigns (or no source = legacy dicode)
+          const filtered = isDiCodeStaff
+            ? fetchedCampaigns.filter(c => c.source === 'dicode' || !c.source)
+            : fetchedCampaigns;
+          setCampaigns(filtered);
         })
         .catch((error) => {
           console.error('Failed to load campaigns:', error);
@@ -76,6 +85,23 @@ export function SaveToLibraryModal({
         });
     }
   }, [isOpen, user]);
+
+  // Escape key handler
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !saving) {
+        onClose();
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('keydown', handleEscape);
+      document.body.style.overflow = 'hidden';
+    }
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      document.body.style.overflow = 'unset';
+    };
+  }, [isOpen, saving, onClose]);
 
   // Initialize metadata state for all videos
   useEffect(() => {
@@ -274,7 +300,7 @@ export function SaveToLibraryModal({
     // Check all videos are complete
     const allComplete = videos.every((video) => videoMetadata[video.id]?.isComplete);
     if (!allComplete) {
-      alert('Please complete all videos before saving');
+      showWarning('Incomplete Videos', 'Please complete all videos before saving.');
       return;
     }
 
@@ -296,7 +322,7 @@ export function SaveToLibraryModal({
     });
 
     if (questionIssues.length > 0) {
-      alert(`Please complete the question metadata:\n${questionIssues.join('\n')}`);
+      showWarning('Incomplete Questions', `Please complete the question metadata:\n${questionIssues.join('\n')}`);
       return;
     }
 

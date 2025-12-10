@@ -1,95 +1,91 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState, useRef, useMemo } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  ArrowLeft,
-  Award,
+  AlertCircle,
+  BarChart3,
   Bell,
-  BarChart,
+  BookOpen,
   Building2,
+  Camera,
   CheckCircle,
-  Clock3,
-  Edit3,
-  ChevronRight,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Flame,
-  FileText,
-  Loader,
-  LogOut,
+  Hexagon,
+  List,
+  Loader2,
+  Lock,
   Mail,
-  MessageCircle,
   Save,
   Shield,
+  Star,
+  Target,
+  Trophy,
   User,
-  X,
+  Zap,
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Radar,
+} from 'recharts';
 import { useAuth } from '../../contexts/AuthContext';
-import { getUserEnrollments, getUserStats, upsertUserProfile } from '@/lib/firestore';
+import { useUserStatsWithFallback, useSkillScoresRealtime, useBadgesRealtime, getRecentBadges, getSortedCompetencies } from '@/hooks/useUserStats';
+import { useUserEnrollmentsRealtime } from '@/hooks/useEnrollmentRealtime';
+import { useSkillProgress, useChartData } from '@/hooks/useSkillHistory';
+import { upsertUserProfile } from '@/lib/firestore';
+import { COMPETENCIES } from '@/lib/competencies';
+import MobileProfile from './MobileProfile';
+import Avatar from '@/components/shared/Avatar';
+import DesktopLayout from '@/components/desktop/DesktopLayout';
+
+// Distinct colors for competency chart lines
+const CHART_COLORS = ['#60a5fa', '#f472b6', '#34d399', '#fbbf24', '#a78bfa', '#fb923c'];
 
 type NotificationKey = 'emailNotifications' | 'moduleReminders' | 'progressUpdates';
 
-const PROFILE_NAV_ITEMS = [
-  { label: 'Edit profile', active: true },
-  { label: 'My stats', active: false },
-  { label: 'Contact support', active: false },
-];
+// Tab navigation items (similar to admin Account)
+const TABS = [
+  { id: 'edit', label: 'Profile', icon: User },
+  { id: 'skills', label: 'Skills', icon: Target },
+  { id: 'security', label: 'Security', icon: Shield },
+  { id: 'notifications', label: 'Notifications', icon: Bell },
+] as const;
 
-const SETTINGS_NAV_ITEMS = [
-  { label: 'Security', active: false },
-  { label: 'Email notifications', active: false },
-  { label: 'Report an issue', active: false },
-  { label: 'Privacy statement', active: false },
-];
-
-
-
-const MOBILE_MENU_GROUPS = [
-  {
-    title: 'General',
-    items: [
-      { key: 'Edit profile', label: 'Edit profile', icon: User },
-      { key: 'My stats', label: 'My stats', icon: BarChart },
-      { key: 'Security', label: 'Security', icon: Shield },
-      { key: 'Email notifications', label: 'Email notifications', icon: Bell },
-    ],
-  },
-  {
-    title: 'Support',
-    items: [
-      { key: 'Report an issue', label: 'Report an issue', icon: MessageCircle },
-      { key: 'Contact support', label: 'Contact support', icon: MessageCircle },
-    ],
-  },
-  {
-    title: 'Legal',
-    items: [
-      { key: 'Privacy statement', label: 'Privacy statement', icon: FileText },
-      { key: 'Change password', label: 'Change password', icon: Shield },
-    ],
-  },
-];
-
-const normalizeDate = (value: any): Date | null => {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  if (typeof value === 'object' && typeof value.toDate === 'function') {
-    return value.toDate();
-  }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
+type TabId = typeof TABS[number]['id'];
 
 const Profile = () => {
   const navigate = useNavigate();
-  const { user, logout, refreshUser } = useAuth();
+  const location = useLocation();
+  const { user, refreshUser, updateAvatar } = useAuth();
+  const [activeTab, setActiveTab] = useState<TabId>('edit');
   const [isEditing, setIsEditing] = useState(false);
-  const [isLoadingStats, setIsLoadingStats] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [mobileSection, setMobileSection] = useState<string>('Edit profile');
-  const [mobileMode, setMobileMode] = useState<'list' | 'detail'>('list');
+
+  // Avatar upload state
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [profileData, setProfileData] = useState({
     name: user?.name || '',
     email: user?.email || '',
     department: user?.department || '',
+    gender: user?.gender || '',
+    dateOfBirth: user?.dateOfBirth
+      ? new Date(user.dateOfBirth as string).toISOString().split('T')[0]
+      : '',
   });
 
   const [notifications, setNotifications] = useState({
@@ -98,69 +94,138 @@ const Profile = () => {
     progressUpdates: true,
   });
 
-  const [userStats, setUserStats] = useState({
-    completedModules: 0,
-    totalModules: 0,
-    completionRate: 0,
-    averageScore: 0,
-    currentStreak: 0,
-    totalLearningHours: 0,
-    joinDate: 'N/A',
-    lastActivity: 'N/A',
-  });
+  // Skills tab state
+  const [proficiencyView, setProficiencyView] = useState<'bars' | 'radar'>('bars');
+  const [expandedCompetency, setExpandedCompetency] = useState<string | null>(null);
+  const [chartTimePeriod, setChartTimePeriod] = useState<number>(90);
+  const [chartCompetencyFilter, setChartCompetencyFilter] = useState<string>('all');
+
+  // Real-time data hooks
+  const { enrollments } = useUserEnrollmentsRealtime(user?.id || '');
+  const { stats: streakStats } = useUserStatsWithFallback(user?.id || '', enrollments);
+  const { badges: userBadges } = useBadgesRealtime(user?.id || '');
+  const { skillScores } = useSkillScoresRealtime(user?.id || '');
+
+  // Skill progress for chart
+  const skillProgressOptions = useMemo(() => ({ days: chartTimePeriod }), [chartTimePeriod]);
+  const { progress: skillProgress, isLoading: skillProgressLoading } = useSkillProgress(
+    user?.id || '',
+    user?.organization || '',
+    skillProgressOptions
+  );
+  const { data: competencyChartData, labels: competencyLabels } = useChartData(skillProgress, 'competencies');
+
+  // Competencies data - map COMPETENCIES definitions to assessed data
+  const topCompetencies = useMemo(() => {
+    const assessedCompetencies = getSortedCompetencies(skillScores.competencyScores);
+    return COMPETENCIES.map(compDef => {
+      const assessed = assessedCompetencies.find(c => c.competencyId === compDef.id);
+      if (assessed) return assessed;
+      return {
+        competencyId: compDef.id,
+        competencyName: compDef.name,
+        currentScore: 0,
+        level: 1,
+        skillCount: compDef.skills.length,
+        assessedSkillCount: 0,
+      };
+    });
+  }, [skillScores.competencyScores]);
+
+  // Get skills for a competency
+  const getSkillsForCompetency = (competencyId: string) => {
+    const competencyDef = COMPETENCIES.find(c => c.id === competencyId);
+    if (!competencyDef) return [];
+    return competencyDef.skills.map(skillDef => {
+      const assessedSkill = Object.values(skillScores.skills).find(
+        s => s.skillId === skillDef.id && s.competencyId === competencyId
+      );
+      if (assessedSkill) return assessedSkill;
+      return {
+        skillId: skillDef.id,
+        skillName: skillDef.name,
+        competencyId: competencyId,
+        currentScore: 0,
+        level: 1,
+        history: [],
+      };
+    });
+  };
+
+  // Filter chart data based on competency filter
+  const filteredChartData = useMemo(() => {
+    if (chartCompetencyFilter === 'all') return competencyChartData;
+    return competencyChartData.map(point => {
+      const filtered: { date: string; [key: string]: string | number | null } = { date: point.date };
+      for (const key of Object.keys(point)) {
+        if (key === 'date') continue;
+        if (key.toLowerCase().replace(/\s+/g, '-') === chartCompetencyFilter || key === chartCompetencyFilter) {
+          filtered[key] = point[key];
+        }
+      }
+      return filtered;
+    });
+  }, [competencyChartData, chartCompetencyFilter]);
+
+  const filteredLabels = useMemo(() => {
+    if (chartCompetencyFilter === 'all') return competencyLabels;
+    return competencyLabels.filter(label =>
+      label.toLowerCase().replace(/\s+/g, '-') === chartCompetencyFilter || label === chartCompetencyFilter
+    );
+  }, [competencyLabels, chartCompetencyFilter]);
+
+  // Radar chart data
+  const radarData = useMemo(() =>
+    topCompetencies.map(comp => ({
+      competency: comp.competencyName,
+      score: Math.round(comp.currentScore),
+      fullMark: 100,
+    })),
+    [topCompetencies]
+  );
+
+  // Derive stats
+  const completedEnrollments = enrollments.filter((e) => e.status === 'completed');
+  const completedModules = completedEnrollments.length;
+
+  // Recent badges
+  const recentBadges = getRecentBadges(userBadges, 8);
 
   useEffect(() => {
-    const loadStats = async () => {
-      if (!user) return;
+    if (location.state && (location.state as any).activeSection) {
+      const section = (location.state as any).activeSection;
+      if (section === 'security') setActiveTab('security');
+      else if (section === 'notifications') setActiveTab('notifications');
+      else if (section === 'edit-profile') setActiveTab('edit');
+    }
+  }, [location]);
 
-      setIsLoadingStats(true);
+  const handleAvatarClick = () => {
+    fileInputRef.current?.click();
+  };
 
-      try {
-        const enrollments = await getUserEnrollments(user.id);
-        const stats = await getUserStats(user.id);
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-        const completedModules = enrollments.filter((e) => e.status === 'completed').length;
-        const totalModules = enrollments.length;
-        const completionRate = totalModules > 0 ? Math.round((completedModules / totalModules) * 100) : 0;
+    if (!updateAvatar) {
+      alert('Avatar upload not supported');
+      return;
+    }
 
-        const lastAccessDates = enrollments
-          .map((e) => normalizeDate((e as any).lastAccessedAt))
-          .filter((date): date is Date => !!date)
-          .sort((a, b) => b.getTime() - a.getTime());
+    setUploadingAvatar(true);
 
-        const lastActivity = lastAccessDates.length > 0 ? formatDate(lastAccessDates[0]) : 'No activity yet';
-        const joinDate = 'N/A'; // TODO: Add createdAt to User type once available
-
-        setUserStats({
-          completedModules,
-          totalModules,
-          completionRate,
-          averageScore: stats.averageScore,
-          currentStreak: stats.currentStreak,
-          totalLearningHours: stats.totalLearningHours,
-          joinDate,
-          lastActivity,
-        });
-      } catch (error) {
-        console.error('[Profile] Failed to load stats:', error);
-      } finally {
-        setIsLoadingStats(false);
+    try {
+      await updateAvatar(file);
+    } catch (error) {
+      console.error('Error updating avatar:', error);
+      alert('Failed to upload avatar');
+    } finally {
+      setUploadingAvatar(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
       }
-    };
-
-    loadStats();
-  }, [user]);
-
-  const formatDate = (date: Date): string => {
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-    if (diffDays === 0) return 'Today';
-    if (diffDays === 1) return 'Yesterday';
-    if (diffDays < 7) return `${diffDays} days ago`;
-
-    return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    }
   };
 
   const handleSaveProfile = async () => {
@@ -172,6 +237,8 @@ const Profile = () => {
       await upsertUserProfile(user.id, {
         name: profileData.name.trim(),
         department: profileData.department.trim() || null,
+        gender: profileData.gender as any || undefined,
+        dateOfBirth: profileData.dateOfBirth ? new Date(profileData.dateOfBirth) : undefined,
       });
 
       await refreshUser();
@@ -184,24 +251,15 @@ const Profile = () => {
     }
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
-
-  const handleBackClick = () => {
-    if (typeof window !== 'undefined' && window.innerWidth < 1024 && mobileMode === 'detail') {
-      setMobileMode('list');
-      return;
-    }
-    navigate(-1);
-  };
-
   const handleCancelEdit = () => {
     setProfileData({
       name: user?.name || '',
       email: user?.email || '',
       department: user?.department || '',
+      gender: user?.gender || '',
+      dateOfBirth: user?.dateOfBirth
+        ? new Date(user.dateOfBirth as string).toISOString().split('T')[0]
+        : '',
     });
     setIsEditing(false);
   };
@@ -212,128 +270,378 @@ const Profile = () => {
     { key: 'progressUpdates', title: 'Progress updates', description: 'Weekly summaries in your inbox' },
   ];
 
-  const progressBadges = [
-    {
-      label: 'Completed modules',
-      value: `${userStats.completedModules}/${userStats.totalModules}`,
-      icon: CheckCircle,
-    },
-    { label: 'Completion rate', value: `${userStats.completionRate}%`, icon: Award },
-    { label: 'Current streak', value: `${userStats.currentStreak} days`, icon: Flame },
-    { label: 'Learning time', value: `${userStats.totalLearningHours}h`, icon: Clock3 },
-  ];
+  // XP progress calculation
+  const xpProgress = streakStats.xpToNextLevel > 0
+    ? (streakStats.xpInCurrentLevel / (streakStats.xpInCurrentLevel + streakStats.xpToNextLevel)) * 100
+    : 100;
 
-  const renderActionButtons = () => (
-    <div className="flex flex-wrap items-center justify-end gap-3">
-      {!isEditing ? (
-        <button
-          onClick={() => setIsEditing(true)}
-          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:border-white/30 hover:bg-white/10"
-        >
-          <Edit3 size={16} />
-          Edit profile
-        </button>
-      ) : (
-        <>
-          <button
-            onClick={handleCancelEdit}
-            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-white/10"
-          >
-            <X size={16} />
-            Cancel
-          </button>
-          <button
-            onClick={handleSaveProfile}
-            disabled={isSaving}
-            className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-black shadow-sm transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {isSaving ? (
-              <>
-                <Loader size={16} className="animate-spin" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Save size={16} />
-                Save changes
-              </>
-            )}
-          </button>
-        </>
-      )}
+  // ===== TAB CONTENT RENDERERS =====
+
+  const renderSkillsTab = () => (
+    <div className="space-y-8">
+      {/* Competencies Header with View Toggle */}
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-white/50">Competencies</p>
+          <div className="flex items-center gap-1 p-1 rounded-lg bg-white/5 border border-white/10">
+            <button
+              onClick={() => setProficiencyView('bars')}
+              className={`p-1.5 rounded-md transition ${
+                proficiencyView === 'bars' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'
+              }`}
+              title="List view"
+            >
+              <List size={16} />
+            </button>
+            <button
+              onClick={() => setProficiencyView('radar')}
+              className={`p-1.5 rounded-md transition ${
+                proficiencyView === 'radar' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'
+              }`}
+              title="Radar view"
+            >
+              <Hexagon size={16} />
+            </button>
+          </div>
+        </div>
+
+        {proficiencyView === 'radar' ? (
+          <div className="rounded-xl bg-white/5 border border-white/5 p-6">
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
+                  <PolarGrid stroke="rgba(255,255,255,0.1)" />
+                  <PolarAngleAxis
+                    dataKey="competency"
+                    tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 11 }}
+                    tickLine={false}
+                  />
+                  <PolarRadiusAxis
+                    angle={90}
+                    domain={[0, 100]}
+                    tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }}
+                    tickCount={5}
+                    axisLine={false}
+                  />
+                  <Radar
+                    name="Score"
+                    dataKey="score"
+                    stroke="rgba(255,255,255,0.8)"
+                    fill="rgba(255,255,255,0.15)"
+                    strokeWidth={2}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#1a1a1a',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '8px',
+                      color: '#fff',
+                      fontSize: '12px',
+                    }}
+                    formatter={(value: number) => [`${value}%`, 'Score']}
+                  />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              {topCompetencies.map((comp) => (
+                <div key={comp.competencyId} className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="px-1.5 py-0.5 rounded bg-white/10 text-white/60 font-medium">
+                      L{comp.level}
+                    </span>
+                    <span className="text-white/70">{comp.competencyName}</span>
+                  </div>
+                  <span className="text-white/50">{Math.round(comp.currentScore)}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {topCompetencies.map((competency) => {
+              const skills = getSkillsForCompetency(competency.competencyId);
+              const isExpanded = expandedCompetency === competency.competencyId;
+
+              return (
+                <div key={competency.competencyId} className="rounded-xl bg-white/5 border border-white/5 overflow-hidden">
+                  <button
+                    onClick={() => setExpandedCompetency(isExpanded ? null : competency.competencyId)}
+                    className="w-full flex items-center justify-between p-4 hover:bg-white/5 transition"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="px-2 py-1 rounded bg-white/10 text-white/70 text-xs font-medium">
+                        L{competency.level}
+                      </span>
+                      <span className="text-sm text-white font-medium">{competency.competencyName}</span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className="text-xs text-white/40">
+                        {competency.assessedSkillCount}/{competency.skillCount} skills
+                      </span>
+                      <span className="text-xs text-white/50">{Math.round(competency.currentScore)}%</span>
+                      {isExpanded ? (
+                        <ChevronUp className="text-white/40" size={16} />
+                      ) : (
+                        <ChevronDown className="text-white/40" size={16} />
+                      )}
+                    </div>
+                  </button>
+
+                  <div className="px-4 pb-1">
+                    <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-white rounded-full"
+                        style={{ width: `${competency.currentScore}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {isExpanded && skills.length > 0 && (
+                    <div className="px-4 pb-4 pt-3 space-y-3 border-t border-white/5 mt-3">
+                      {skills.map((skill) => {
+                        const isAssessed = skill.currentScore > 0 || (skill.history && skill.history.length > 0);
+                        return (
+                          <div key={skill.skillId} className="space-y-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <div className="flex items-center gap-2">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${isAssessed ? 'bg-white/10 text-white/60' : 'bg-white/5 text-white/30'}`}>
+                                  L{skill.level}
+                                </span>
+                                <span className={isAssessed ? 'text-white/70' : 'text-white/40'}>
+                                  {skill.skillName}
+                                </span>
+                                {!isAssessed && <span className="text-white/30 text-[10px]">(not assessed)</span>}
+                              </div>
+                              <span className={isAssessed ? 'text-white/50' : 'text-white/20'}>
+                                {Math.round(skill.currentScore)}%
+                              </span>
+                            </div>
+                            <div className="h-1 w-full bg-white/10 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${isAssessed ? 'bg-white' : 'bg-white/5'}`}
+                                style={{ width: isAssessed ? `${skill.currentScore}%` : '0%' }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Progress Chart */}
+      <div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-white/50">Score History</p>
+          <div className="flex gap-3">
+            <select
+              value={chartCompetencyFilter}
+              onChange={(e) => setChartCompetencyFilter(e.target.value)}
+              className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white text-xs focus:outline-none focus:border-white/20"
+            >
+              <option value="all">All Competencies</option>
+              {COMPETENCIES.map((comp) => (
+                <option key={comp.id} value={comp.name}>{comp.name}</option>
+              ))}
+            </select>
+            <select
+              value={chartTimePeriod}
+              onChange={(e) => setChartTimePeriod(Number(e.target.value))}
+              className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white text-xs focus:outline-none focus:border-white/20"
+            >
+              <option value={30}>30 days</option>
+              <option value={60}>60 days</option>
+              <option value={90}>90 days</option>
+              <option value={180}>6 months</option>
+              <option value={365}>1 year</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-white/5 border border-white/5 p-4">
+          {skillProgressLoading ? (
+            <div className="h-64 flex items-center justify-center text-white/40">Loading...</div>
+          ) : filteredChartData.length > 0 ? (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={filteredChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <XAxis
+                    dataKey="date"
+                    stroke="rgba(255,255,255,0.2)"
+                    tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }}
+                    tickFormatter={(value) => {
+                      const date = new Date(value);
+                      return `${date.getMonth() + 1}/${date.getDate()}`;
+                    }}
+                    interval="preserveStartEnd"
+                    minTickGap={30}
+                  />
+                  <YAxis
+                    domain={[0, 100]}
+                    stroke="rgba(255,255,255,0.2)"
+                    tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }}
+                    tickFormatter={(value) => `${value}%`}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#1a1a1a',
+                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '8px',
+                      color: '#fff',
+                      fontSize: '12px',
+                    }}
+                    labelFormatter={(label) => new Date(label).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    formatter={(value) => (value !== null && value !== undefined ? [`${value}%`, ''] : ['No data', ''])}
+                  />
+                  <Legend
+                    wrapperStyle={{ paddingTop: '10px' }}
+                    formatter={(value) => <span className="text-white/50 text-xs">{value}</span>}
+                  />
+                  {filteredLabels.map((label, index) => (
+                    <Line
+                      key={label}
+                      type="monotone"
+                      dataKey={label}
+                      stroke={CHART_COLORS[index % CHART_COLORS.length]}
+                      strokeWidth={1.5}
+                      dot={false}
+                      connectNulls
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="h-64 flex flex-col items-center justify-center text-white/40">
+              <BarChart3 className="mb-3 opacity-30" size={32} />
+              <p className="text-sm">No assessment history yet</p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 
-  const renderMainContent = () => (
-    <div className="relative rounded-2xl bg-[#090909] p-6 shadow-sm space-y-8">
-      <div className="flex flex-wrap items-start gap-6 -mt-20">
-        <div className="h-28 w-28 rounded-2xl border-4 border-[#050608] bg-gradient-to-br from-indigo-500 via-purple-500 to-amber-300 text-3xl font-semibold text-white shadow-lg flex items-center justify-center">
-          {user?.name?.charAt(0).toUpperCase() || 'U'}
+  const renderEditProfileTab = () => (
+    <div className="space-y-8">
+      {/* Hidden input for avatar */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleAvatarChange}
+        className="hidden"
+      />
+
+      {/* Profile Header */}
+      <div className="flex flex-wrap items-start gap-6">
+        <div className="relative group">
+          <Avatar
+            src={user?.avatar}
+            name={user?.name}
+            email={user?.email}
+            size="xxl"
+            className="h-28 w-28 rounded-2xl border-4 border-[#050608] shadow-lg text-3xl"
+          />
+          {uploadingAvatar && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl border-4 border-transparent">
+              <Loader2 size={24} className="text-white animate-spin" />
+            </div>
+          )}
+          {!uploadingAvatar && (
+            <button
+              onClick={handleAvatarClick}
+              className="absolute bottom-0 right-[-10px] p-2 bg-blue-600 rounded-full border-4 border-[#050608] hover:bg-blue-500 transition-colors shadow-sm"
+            >
+              <Camera size={16} className="text-white" />
+            </button>
+          )}
         </div>
-        <div className="min-w-[240px] flex-1 space-y-2">
-          <h2 className="text-xl font-semibold text-white">{profileData.name || 'Your name'}</h2>
-          <p className="text-sm text-white/70">{profileData.email || 'your.email@company.com'}</p>
+
+        <div className="min-w-[240px] flex-1 space-y-2 pt-10 sm:pt-0">
+          <h2 className="text-2xl font-semibold text-white">{profileData.name || 'Your name'}</h2>
+          <p className="text-sm text-white/70">{profileData.email}</p>
           <div className="flex flex-wrap gap-2">
             <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-white">
               <User size={14} />
               {user?.role || 'Employee'}
             </span>
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-white">
-              <Building2 size={14} />
-              {profileData.department || 'Department'}
-            </span>
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold text-white">
-              Active
-            </span>
+            {profileData.department && (
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-white">
+                <Building2 size={14} />
+                {profileData.department}
+              </span>
+            )}
           </div>
+        </div>
+
+        <div className="w-full sm:w-auto flex items-center gap-3 mt-4 sm:mt-0">
+          {!isEditing ? (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-white/10"
+            >
+              Edit Profile
+            </button>
+          ) : (
+            <div className="flex gap-2">
+              <button
+                onClick={handleCancelEdit}
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveProfile}
+                disabled={isSaving}
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-black shadow-sm transition hover:bg-white/90 disabled:opacity-50"
+              >
+                {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                {isSaving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+      {/* Profile Form */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6">
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold text-white">Full name</p>
-              <p className="text-xs text-white/60">Your display name</p>
-            </div>
-          </div>
+          <label className="text-sm font-semibold text-white block">Full Name</label>
           <input
             type="text"
             value={profileData.name}
             onChange={(e) => setProfileData({ ...profileData, name: e.target.value })}
             disabled={!isEditing}
-            className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder:text-white/50 focus:border-white/40 focus:ring-2 focus:ring-white/15 disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/50"
+            className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder:text-white/50 focus:border-white/40 focus:ring-2 focus:ring-white/15 disabled:cursor-not-allowed disabled:text-white/50"
           />
         </div>
 
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold text-white">Email</p>
-              <p className="text-xs text-white/60">Where you receive notifications</p>
-            </div>
-            <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-1 text-xs font-medium text-white">
-              <CheckCircle size={14} />
-              Verified
-            </span>
-          </div>
+          <label className="text-sm font-semibold text-white block">Email Address</label>
           <div className="relative">
             <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/50" />
             <input
               type="email"
               value={profileData.email}
-              onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
               disabled
-              className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 pl-10 text-sm text-white/60 placeholder:text-white/50 focus:border-white/30 focus:ring-2 focus:ring-white/15"
+              className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 pl-10 text-sm text-white/50 cursor-not-allowed"
             />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
+              <CheckCircle size={10} /> Verified
+            </span>
           </div>
         </div>
 
         <div className="space-y-2">
-          <div>
-            <p className="text-sm font-semibold text-white">Department</p>
-            <p className="text-xs text-white/60">Where you sit in the org</p>
-          </div>
+          <label className="text-sm font-semibold text-white block">Department</label>
           <div className="relative">
             <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/50" />
             <input
@@ -341,536 +649,326 @@ const Profile = () => {
               value={profileData.department}
               onChange={(e) => setProfileData({ ...profileData, department: e.target.value })}
               disabled={!isEditing}
-              className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 pl-10 text-sm text-white placeholder:text-white/50 focus:border-white/40 focus:ring-2 focus:ring-white/15 disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/50"
+              className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 pl-10 text-sm text-white placeholder:text-white/50 focus:border-white/40 focus:ring-2 focus:ring-white/15 disabled:cursor-not-allowed disabled:text-white/50"
             />
           </div>
         </div>
 
         <div className="space-y-2">
-          <div>
-            <p className="text-sm font-semibold text-white">Role</p>
-            <p className="text-xs text-white/60">This is managed by your admin</p>
-          </div>
-          <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/60 capitalize">
+          <label className="text-sm font-semibold text-white block">Role</label>
+          <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/60 capitalize cursor-not-allowed">
             {user?.role || 'Employee'}
           </div>
         </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-semibold text-white block">Gender</label>
+          <select
+            value={profileData.gender}
+            onChange={(e) => setProfileData({ ...profileData, gender: e.target.value })}
+            disabled={!isEditing}
+            className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white focus:border-white/40 focus:ring-2 focus:ring-white/15 disabled:cursor-not-allowed disabled:text-white/50"
+          >
+            <option value="">Select gender</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="other">Other</option>
+            <option value="prefer-not-to-say">Prefer not to say</option>
+          </select>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-semibold text-white block">Date of Birth</label>
+          <input
+            type="date"
+            value={profileData.dateOfBirth}
+            onChange={(e) => setProfileData({ ...profileData, dateOfBirth: e.target.value })}
+            disabled={!isEditing}
+            className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white [color-scheme:dark] focus:border-white/40 focus:ring-2 focus:ring-white/15 disabled:cursor-not-allowed disabled:text-white/50"
+          />
+        </div>
       </div>
 
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold text-white">Your progress</p>
-            <p className="text-xs text-white/60">Live snapshot from your enrollments</p>
+      {/* Stats Grid */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-white/50 mb-4">Performance Stats</p>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="p-4 rounded-xl bg-white/5 border border-white/5">
+            <div className="flex items-center gap-3 mb-2">
+              <Star className="text-white/40" size={18} />
+              <span className="text-xs text-white/50 uppercase tracking-wider">Level</span>
+            </div>
+            <div className="text-2xl font-bold text-white">{streakStats.level}</div>
           </div>
-          {isLoadingStats ? <Loader className="h-5 w-5 animate-spin text-white" /> : null}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {progressBadges.map((badge) => (
-            <span
-              key={badge.label}
-              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white"
-            >
-              <badge.icon size={14} className="text-white" />
-              <span className="text-sm font-semibold text-white">{badge.value}</span>
-              <span className="text-xs text-white/60">{badge.label}</span>
-            </span>
-          ))}
+
+          <div className="p-4 rounded-xl bg-white/5 border border-white/5 relative">
+            <div className="flex items-center gap-3 mb-2">
+              <Flame className="text-white/40" size={18} />
+              <span className="text-xs text-white/50 uppercase tracking-wider">Streak</span>
+            </div>
+            <div className="text-2xl font-bold text-white">
+              {streakStats.currentStreak} <span className="text-sm font-normal text-white/40">days</span>
+            </div>
+            {streakStats.streakAtRisk && (
+              <AlertCircle className="absolute top-3 right-3 text-amber-500/60" size={14} />
+            )}
+          </div>
+
+          <div className="p-4 rounded-xl bg-white/5 border border-white/5">
+            <div className="flex items-center gap-3 mb-2">
+              <Zap className="text-white/40" size={18} />
+              <span className="text-xs text-white/50 uppercase tracking-wider">Total XP</span>
+            </div>
+            <div className="text-2xl font-bold text-white">{streakStats.totalXp.toLocaleString()}</div>
+          </div>
+
+          <div className="p-4 rounded-xl bg-white/5 border border-white/5">
+            <div className="flex items-center gap-3 mb-2">
+              <BookOpen className="text-white/40" size={18} />
+              <span className="text-xs text-white/50 uppercase tracking-wider">Completed</span>
+            </div>
+            <div className="text-2xl font-bold text-white">{completedModules}</div>
+          </div>
         </div>
       </div>
 
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <Bell className="h-4 w-4 text-white" />
-          <div>
-            <p className="text-sm font-semibold text-white">Notification preferences</p>
-            <p className="text-xs text-white/60">Choose how you want to stay in the loop</p>
+      {/* XP Progress */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-white/50 mb-3">Level Progress</p>
+        <div className="p-4 rounded-xl bg-white/5 border border-white/5">
+          <div className="flex justify-between text-xs text-white/50 mb-2">
+            <span>Level {streakStats.level}</span>
+            <span>{streakStats.xpToNextLevel} XP to Level {streakStats.level + 1}</span>
+          </div>
+          <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+            <div className="h-full bg-white rounded-full transition-all" style={{ width: `${xpProgress}%` }} />
           </div>
         </div>
-        <div className="space-y-0 rounded-2xl border border-white/10 overflow-hidden">
-          {notificationToggles.map((toggle) => (
-            <div
-              key={toggle.key}
-              className="flex items-center justify-between px-4 py-4 bg-[#111] border-b border-white/5 last:border-b-0"
-            >
-              <div>
-                <p className="text-sm font-semibold text-white">{toggle.title}</p>
-                <p className="text-xs text-white/60">{toggle.description}</p>
+      </div>
+
+      {/* Week Activity */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-white/50 mb-3">This Week's Activity</p>
+        <div className="p-4 rounded-xl bg-white/5 border border-white/5">
+          <div className="flex items-center gap-3">
+            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, i) => (
+              <div key={day} className="flex flex-col items-center gap-1.5">
+                <div
+                  className={`h-8 w-8 rounded-full flex items-center justify-center border ${
+                    streakStats.streakDays?.[i]
+                      ? 'bg-white/10 border-white/20'
+                      : 'bg-white/5 border-white/10'
+                  }`}
+                >
+                  {streakStats.streakDays?.[i] ? (
+                    <CheckCircle2 className="text-white/60" size={14} />
+                  ) : (
+                    <div className="h-1.5 w-1.5 rounded-full bg-white/20" />
+                  )}
+                </div>
+                <span className="text-[10px] text-white/40">{day}</span>
               </div>
-              <label className="relative inline-flex cursor-pointer items-center">
-                <input
-                  type="checkbox"
-                  className="peer sr-only"
-                  checked={notifications[toggle.key]}
-                  onChange={(e) =>
-                    setNotifications({ ...notifications, [toggle.key]: e.target.checked })
-                  }
-                />
-                <div className="h-6 w-11 rounded-full bg-white/20 transition peer-checked:bg-white peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-white/30" />
-                <div className="absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow transition peer-checked:translate-x-5 peer-checked:bg-[#0c0c0c]" />
-              </label>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="rounded-xl bg-white/5 p-4">
-          <p className="text-sm font-semibold text-white">Account activity</p>
-          <div className="mt-3 space-y-2 text-sm text-white">
-            <div className="flex items-center justify-between">
-              <span className="text-white/60">Member since</span>
-              <span className="font-medium text-white">{userStats.joinDate}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-white/60">Last activity</span>
-              <span className="font-medium text-white">{userStats.lastActivity}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-white/60">Completion rate</span>
-              <span className="font-medium text-white">{userStats.completionRate}%</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-xl bg-white/5 p-4">
-          <p className="text-sm font-semibold text-white">Learning cadence</p>
-          <div className="mt-3 space-y-2 text-sm text-white">
-            <div className="flex items-center justify-between">
-              <span className="text-white/60">Current streak</span>
-              <span className="font-semibold text-white">{userStats.currentStreak} days</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-white/60">Average score</span>
-              <span className="font-medium text-white">{userStats.averageScore}%</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-white/60">Learning time</span>
-              <span className="font-medium text-white">{userStats.totalLearningHours}h</span>
+            ))}
+            <div className="ml-auto text-xs text-white/50">
+              Best: <span className="text-white font-medium">{streakStats.longestStreak} days</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="rounded-xl bg-white/5 p-4">
-        <p className="text-sm font-semibold text-white">My stats</p>
-        <p className="mt-2 text-sm text-white/60">We’ll add detailed analytics and insights here soon.</p>
+      {/* Badges */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-white/50 mb-3">Badges Earned ({userBadges.length})</p>
+        {recentBadges.length > 0 ? (
+          <div className="grid grid-cols-4 sm:grid-cols-8 gap-3">
+            {recentBadges.map((badge) => (
+              <div
+                key={badge.id}
+                className="flex flex-col items-center gap-1 p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition cursor-default"
+                title={`${badge.name}: ${badge.description}`}
+              >
+                <span className="text-xl">{badge.icon}</span>
+                <span className="text-[9px] text-white/40 text-center truncate w-full">{badge.name}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="p-8 rounded-xl bg-white/5 border border-white/5 text-center text-white/40">
+            <Trophy className="mx-auto mb-2 opacity-30" size={24} />
+            <p className="text-sm">No badges earned yet</p>
+          </div>
+        )}
       </div>
+    </div>
+  );
 
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
-        <Shield className="h-4 w-4 text-white" />
+  const renderSecurityTab = () => (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <div className="p-2 rounded-lg bg-blue-500/10">
+          <Lock size={20} className="text-blue-400" />
+        </div>
         <div>
-          <p className="text-sm font-semibold text-white">Security</p>
-          <p className="text-xs text-white/60">Manage password and sign-in protection</p>
+          <h3 className="text-lg font-semibold text-white">Security</h3>
+          <p className="text-xs text-white/60">Manage your password</p>
+        </div>
+      </div>
+
+      <div className="space-y-0 rounded-xl border border-white/10 overflow-hidden">
+        {/* Password */}
+        <div className="flex items-center justify-between px-4 py-4 bg-white/5 border-b border-white/5 hover:bg-white/[0.07] transition-colors">
+          <div>
+            <p className="text-sm font-semibold text-white">Password</p>
+            <p className="text-xs text-white/60">Update your password</p>
+          </div>
+          <button
+            onClick={() => navigate('/change-password')}
+            className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm font-medium hover:bg-white/10 transition-colors"
+          >
+            Change
+          </button>
+        </div>
+
+        {/* Two-Factor */}
+        <div className="flex items-center justify-between px-4 py-4 bg-white/5 border-b border-white/5 hover:bg-white/[0.07] transition-colors">
+          <div>
+            <p className="text-sm font-semibold text-white">Two-Factor Authentication</p>
+            <p className="text-xs text-white/60">Add extra security</p>
+          </div>
+          <span className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/50 text-xs font-medium">
+            Coming Soon
+          </span>
+        </div>
+
+        {/* Sessions */}
+        <div className="flex items-center justify-between px-4 py-4 bg-white/5 hover:bg-white/[0.07] transition-colors">
+          <div>
+            <p className="text-sm font-semibold text-white">Active Sessions</p>
+            <p className="text-xs text-white/60">Sign out from all devices</p>
+          </div>
+          <button className="px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-medium hover:bg-red-500/20 transition-colors">
+            Sign Out All
+          </button>
         </div>
       </div>
     </div>
   );
-  return (
-    <div className="min-h-screen bg-[#050608] text-white">
-      <div className="max-w-7xl mx-auto px-6 py-10 space-y-8">
-        <div className="flex items-center justify-between">
-          <button
-            onClick={handleBackClick}
-            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:border-white/30 hover:bg-white/10"
-          >
-            <ArrowLeft size={16} />
-            Back
-          </button>
-        </div>
 
-        {/* Desktop layout */}
-        <div className="hidden lg:flex gap-8">
-          <aside className="w-64 space-y-4">
-            <div className="space-y-6">
+  const renderNotificationsTab = () => (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <div className="p-2 rounded-lg bg-purple-500/10">
+          <Bell size={20} className="text-purple-400" />
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-white">Notifications</h3>
+          <p className="text-xs text-white/60">Manage your alerts</p>
+        </div>
+      </div>
+
+      <div className="space-y-0 rounded-xl border border-white/10 overflow-hidden">
+        {notificationToggles.map((toggle, index) => (
+          <div
+            key={toggle.key}
+            className={`flex items-center justify-between px-4 py-4 bg-white/5 hover:bg-white/[0.07] transition-colors ${
+              index < notificationToggles.length - 1 ? 'border-b border-white/5' : ''
+            }`}
+          >
+            <div>
+              <p className="text-sm font-semibold text-white">{toggle.title}</p>
+              <p className="text-xs text-white/60">{toggle.description}</p>
+            </div>
+            <label className="relative inline-flex cursor-pointer items-center">
+              <input
+                type="checkbox"
+                className="peer sr-only"
+                checked={notifications[toggle.key]}
+                onChange={(e) =>
+                  setNotifications({ ...notifications, [toggle.key]: e.target.checked })
+                }
+              />
+              <div className="h-6 w-11 rounded-full bg-white/20 transition peer-checked:bg-blue-600 peer-focus:outline-none" />
+              <div className="absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
+            </label>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'edit':
+        return renderEditProfileTab();
+      case 'skills':
+        return renderSkillsTab();
+      case 'security':
+        return renderSecurityTab();
+      case 'notifications':
+        return renderNotificationsTab();
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <>
+      {/* Mobile View */}
+      <div className="lg:hidden">
+        <MobileProfile />
+      </div>
+
+      {/* Desktop View */}
+      <DesktopLayout activePage="profile" title="Profile">
+        <div className="flex-1 overflow-y-auto p-6 md:p-10">
+          <div className="max-w-6xl mx-auto flex flex-col lg:flex-row gap-8">
+            {/* Vertical Sidebar Navigation */}
+            <aside className="w-full lg:w-64 flex-shrink-0 space-y-8 lg:sticky lg:top-0 h-fit">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-white/50">Profile</p>
-                <div className="mt-3 space-y-1">
-                  {PROFILE_NAV_ITEMS.map((item) => {
-                    const isActive = item.active;
+                <p className="text-xs font-semibold uppercase tracking-wide text-white/50 px-3 mb-3">Settings</p>
+                <div className="space-y-1">
+                  {TABS.map((tab) => {
+                    const Icon = tab.icon;
+                    const isActive = activeTab === tab.id;
                     return (
                       <button
-                        key={item.label}
-                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[#050608] ${isActive ? 'bg-white/15 text-white' : 'text-white/60 hover:text-white hover:bg-white/5'
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-sm font-medium transition-all ${isActive
+                            ? 'bg-white/15 text-white'
+                            : 'text-white/60 hover:text-white hover:bg-white/5'
                           }`}
                       >
-                        <span>{item.label}</span>
+                        <Icon size={18} />
+                        {tab.label}
                       </button>
                     );
                   })}
                 </div>
               </div>
+            </aside>
 
-              <div className="border-t border-white/10 pt-4 space-y-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-white/50">Settings</p>
-                  <div className="mt-3 space-y-1">
-                    {SETTINGS_NAV_ITEMS.map((item) => {
-                      const isActive = item.active;
-                      return (
-                        <button
-                          key={item.label}
-                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[#050608] ${isActive ? 'bg-white/15 text-white' : 'text-white/60 hover:text-white hover:bg-white/5'
-                            }`}
-                        >
-                          <span>{item.label}</span>
-                        </button>
-                      );
-                    })}
-                    <button className="w-full flex items-center gap-3 px-3 py-2 rounded-2xl text-sm font-medium text-white/60 transition-all hover:text-white hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[#050608]">
-                      <span>Change password</span>
-                    </button>
-                  </div>
-                </div>
+            {/* Divider */}
+            <div className="hidden lg:block w-px bg-white/5 rounded-full self-stretch" />
 
-                <button
-                  onClick={handleLogout}
-                  className="w-full inline-flex items-center justify-center gap-2 rounded-full bg-red-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600"
+            {/* Main Content Area */}
+            <main className="flex-1 min-w-0 max-w-3xl">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeTab}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.2 }}
                 >
-                  <LogOut size={16} />
-                  Log out
-                </button>
-              </div>
-            </div>
-          </aside>
-
-          <div className="w-px bg-white/5 rounded-full self-stretch" />
-
-          <main className="flex-1 space-y-6">
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              {!isEditing ? (
-                <button
-                  onClick={() => setIsEditing(true)}
-                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:border-white/30 hover:bg-white/10"
-                >
-                  <Edit3 size={16} />
-                  Edit profile
-                </button>
-              ) : (
-                <>
-                  <button
-                    onClick={handleCancelEdit}
-                    className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-white/10"
-                  >
-                    <X size={16} />
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleSaveProfile}
-                    disabled={isSaving}
-                    className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-black shadow-sm transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    {isSaving ? (
-                      <>
-                        <Loader size={16} className="animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      <>
-                        <Save size={16} />
-                        Save changes
-                      </>
-                    )}
-                  </button>
-                </>
-              )}
-            </div>
-
-            <div className="relative rounded-2xl bg-[#090909] p-6 shadow-sm space-y-8">
-              <div className="flex flex-wrap items-start gap-6 -mt-20">
-                <div className="h-28 w-28 rounded-2xl border-4 border-[#050608] bg-gradient-to-br from-indigo-500 via-purple-500 to-amber-300 text-3xl font-semibold text-white shadow-lg flex items-center justify-center">
-                  {user?.name?.charAt(0).toUpperCase() || 'U'}
-                </div>
-                <div className="min-w-[240px] flex-1 space-y-2">
-                  <h2 className="text-xl font-semibold text-white">{profileData.name || 'Your name'}</h2>
-                  <p className="text-sm text-white/70">{profileData.email || 'your.email@company.com'}</p>
-                  <div className="flex flex-wrap gap-2">
-                    <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-white">
-                      <User size={14} />
-                      {user?.role || 'Employee'}
-                    </span>
-                    <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-white">
-                      <Building2 size={14} />
-                      {profileData.department || 'Department'}
-                    </span>
-                    <span className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold text-white">
-                      Active
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-white">Full name</p>
-                      <p className="text-xs text-white/60">Your display name</p>
-                    </div>
-                  </div>
-                  <input
-                    type="text"
-                    value={profileData.name}
-                    onChange={(e) => setProfileData({ ...profileData, name: e.target.value })}
-                    disabled={!isEditing}
-                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder:text-white/50 focus:border-white/40 focus:ring-2 focus:ring-white/15 disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/50"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-white">Email</p>
-                      <p className="text-xs text-white/60">Where you receive notifications</p>
-                    </div>
-                    <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-1 text-xs font-medium text-white">
-                      <CheckCircle size={14} />
-                      Verified
-                    </span>
-                  </div>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/50" />
-                    <input
-                      type="email"
-                      value={profileData.email}
-                      onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
-                      disabled
-                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 pl-10 text-sm text-white/60 placeholder:text-white/50 focus:border-white/30 focus:ring-2 focus:ring-white/15"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div>
-                    <p className="text-sm font-semibold text-white">Department</p>
-                    <p className="text-xs text-white/60">Where you sit in the org</p>
-                  </div>
-                  <div className="relative">
-                    <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/50" />
-                    <input
-                      type="text"
-                      value={profileData.department}
-                      onChange={(e) => setProfileData({ ...profileData, department: e.target.value })}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 pl-10 text-sm text-white placeholder:text-white/50 focus:border-white/40 focus:ring-2 focus:ring-white/15 disabled:cursor-not-allowed disabled:bg-white/5 disabled:text-white/50"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div>
-                    <p className="text-sm font-semibold text-white">Role</p>
-                    <p className="text-xs text-white/60">This is managed by your admin</p>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-white/60 capitalize">
-                    {user?.role || 'Employee'}
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-white">Your progress</p>
-                    <p className="text-xs text-white/60">Live snapshot from your enrollments</p>
-                  </div>
-                  {isLoadingStats ? (
-                    <Loader className="h-5 w-5 animate-spin text-white" />
-                  ) : null}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {progressBadges.map((badge) => (
-                    <span
-                      key={badge.label}
-                      className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white"
-                    >
-                      <badge.icon size={14} className="text-white" />
-                      <span className="text-sm font-semibold text-white">{badge.value}</span>
-                      <span className="text-xs text-white/60">{badge.label}</span>
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <Bell className="h-4 w-4 text-white" />
-                  <div>
-                    <p className="text-sm font-semibold text-white">Notification preferences</p>
-                    <p className="text-xs text-white/60">Choose how you want to stay in the loop</p>
-                  </div>
-                </div>
-                <div className="space-y-0 rounded-2xl border border-white/10 overflow-hidden">
-                  {notificationToggles.map((toggle) => (
-                    <div
-                      key={toggle.key}
-                      className="flex items-center justify-between px-4 py-4 bg-[#111] border-b border-white/5 last:border-b-0"
-                    >
-                      <div>
-                        <p className="text-sm font-semibold text-white">{toggle.title}</p>
-                        <p className="text-xs text-white/60">{toggle.description}</p>
-                      </div>
-                      <label className="relative inline-flex cursor-pointer items-center">
-                        <input
-                          type="checkbox"
-                          className="peer sr-only"
-                          checked={notifications[toggle.key]}
-                          onChange={(e) =>
-                            setNotifications({ ...notifications, [toggle.key]: e.target.checked })
-                          }
-                        />
-                        <div className="h-6 w-11 rounded-full bg-white/20 transition peer-checked:bg-white peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-white/30" />
-                        <div className="absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow transition peer-checked:translate-x-5 peer-checked:bg-[#0c0c0c]" />
-                      </label>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div className="rounded-xl bg-white/5 p-4">
-                  <p className="text-sm font-semibold text-white">Account activity</p>
-                  <div className="mt-3 space-y-2 text-sm text-white">
-                    <div className="flex items-center justify-between">
-                      <span className="text-white/60">Member since</span>
-                      <span className="font-medium text-white">{userStats.joinDate}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-white/60">Last activity</span>
-                      <span className="font-medium text-white">{userStats.lastActivity}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-white/60">Completion rate</span>
-                      <span className="font-medium text-white">{userStats.completionRate}%</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-xl bg-white/5 p-4">
-                  <p className="text-sm font-semibold text-white">Learning cadence</p>
-                  <div className="mt-3 space-y-2 text-sm text-white">
-                    <div className="flex items-center justify-between">
-                      <span className="text-white/60">Current streak</span>
-                      <span className="font-semibold text-white">{userStats.currentStreak} days</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-white/60">Average score</span>
-                      <span className="font-medium text-white">{userStats.averageScore}%</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-white/60">Learning time</span>
-                      <span className="font-medium text-white">{userStats.totalLearningHours}h</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-xl bg-white/5 p-4">
-                <p className="text-sm font-semibold text-white">My stats</p>
-                <p className="mt-2 text-sm text-white/60">We’ll add detailed analytics and insights here soon.</p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
-                <Shield className="h-4 w-4 text-white" />
-                <div>
-                  <p className="text-sm font-semibold text-white">Security</p>
-                  <p className="text-xs text-white/60">Manage password and sign-in protection</p>
-                </div>
-              </div>
-            </div>
-          </main>
+                  {renderTabContent()}
+                </motion.div>
+              </AnimatePresence>
+            </main>
+          </div>
         </div>
-
-        {/* Mobile layout */}
-        <div className="lg:hidden space-y-4">
-          {mobileMode === 'list' ? (
-            <>
-              <div className="flex items-center gap-3 pt-2">
-                <div className="h-16 w-16 rounded-lg bg-gradient-to-br from-indigo-500 via-purple-500 to-amber-300 flex items-center justify-center text-xl font-semibold text-white shadow-lg">
-                  {user?.name?.charAt(0).toUpperCase() || 'U'}
-                </div>
-                <div className="space-y-1">
-                  <p className="text-base font-semibold text-white">{profileData.name || 'Your name'}</p>
-                  <p className="text-xs text-white/60">{profileData.email || 'your.email@company.com'}</p>
-                </div>
-              </div>
-              <div className="rounded-3xl overflow-hidden">
-                {MOBILE_MENU_GROUPS.map((group) => (
-                  <div key={group.title} className="px-4 py-3">
-                    <div className="flex items-center justify-between pb-2">
-                      <p className="text-[11px] uppercase tracking-[0.3em] text-white/50">{group.title}</p>
-                      <div className="flex-1 ml-3 h-px bg-white/10" />
-                    </div>
-                    <div className="space-y-1">
-                      {group.items.map((item) => {
-                        const Icon = item.icon;
-                        const isActive = mobileSection === item.key;
-                        return (
-                          <button
-                            key={item.key}
-                            onClick={() => {
-                              setMobileSection(item.key);
-                              setMobileMode('detail');
-                            }}
-                            className={`w-full flex items-center justify-between py-3 text-left transition transform ${isActive ? 'text-white' : 'text-white/80'
-                              } hover:bg-white/5 active:scale-[0.99]`}
-                          >
-                            <div className="flex items-center gap-3">
-                              <span className="h-8 w-8 rounded-full bg-white/5 flex items-center justify-center">
-                                <Icon size={16} />
-                              </span>
-                              <span className="text-sm font-semibold">{item.label}</span>
-                            </div>
-                            <ChevronRight size={16} className="text-white/50" />
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-
-                <button
-                  onClick={handleLogout}
-                  className="w-full flex items-center justify-between px-4 py-4 text-left text-sm font-semibold text-red-400 transition hover:bg-white/5 active:scale-[0.99] border-t border-white/10"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="h-8 w-8 rounded-full bg-red-500/10 flex items-center justify-center text-red-400">
-                      <LogOut size={16} />
-                    </span>
-                    <span>Logout</span>
-                  </div>
-                  <ChevronRight size={16} className="text-red-400/80" />
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="space-y-4">
-
-              {mobileSection === 'Edit profile' && (
-                <>
-                  {renderActionButtons()}
-                  {renderMainContent()}
-                </>
-              )}
-
-              {mobileSection === 'My stats' && (
-                <div className="rounded-2xl bg-white/5 p-4">
-                  <p className="text-sm font-semibold text-white">My stats</p>
-                  <p className="mt-2 text-sm text-white/60">We’ll add detailed analytics and insights here soon.</p>
-                </div>
-              )}
-
-              {mobileSection !== 'Edit profile' && mobileSection !== 'My stats' && mobileSection !== 'Logout' && (
-                <div className="rounded-2xl bg-white/5 p-4">
-                  <p className="text-sm font-semibold text-white">{mobileSection}</p>
-                  <p className="mt-2 text-sm text-white/60">Content coming soon for this section.</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+      </DesktopLayout>
+    </>
   );
 };
 

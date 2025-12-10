@@ -21,6 +21,7 @@ import useVideoForm from "@/hooks/useVideoForm";
 import useVideoPolling from "@/hooks/useVideoPolling";
 import useVideoLibrary from "@/hooks/useVideoLibrary";
 import { useAuth } from "@/contexts/AuthContext";
+import { useNotification } from "@/contexts/NotificationContext";
 import { incrementAssetsUsage, createVideo as createVideoInFirestore, createCampaignItem, getCampaign, getCampaignsByVideo, deleteVideo as deleteVideoDoc } from "@/lib/firestore";
 import { uploadVideoBlob, generateVideoPath, deleteVideo as deleteVideoStorage } from "@/lib/storage";
 import { convertFormDataToQuestions } from "@/lib/questionUtils";
@@ -119,6 +120,7 @@ export default function App() {
   }>({ isOpen: false, video: null, campaigns: null, isDeleting: false });
   const { libraryItems, loading: libraryLoading } = useVideoLibrary();
   const { user } = useAuth();
+  const { success: showSuccess, error: showError, warning: showWarning, info: showInfo } = useNotification();
 
   const closeMobileSidebar = useCallback(() => {
     setMobileSidebarOpen(false);
@@ -397,9 +399,9 @@ export default function App() {
 
           // Generate each shot as an individual video
           // Users can then select and merge them using the new merge feature
-          alert(
-            "Multi-shot generation has been simplified! Each shot will be generated as a separate video. " +
-            "You can then select the videos and click 'Merge' to combine them."
+          showInfo(
+            "Multi-Shot Generation",
+            "Each shot will be generated as a separate video. You can then select the videos and click 'Merge' to combine them."
           );
 
           // For now, just generate the first shot as a regular video
@@ -416,10 +418,8 @@ export default function App() {
 
         } catch (error) {
           console.error(error);
-          console.error(
-            `Shot generation failed: ${error instanceof Error ? error.message : error || "Unknown error"
-            }`,
-          );
+          const message = error instanceof Error ? error.message : "Failed to generate shots";
+          showError("Shot Generation Failed", message);
         } finally {
           setSubmitting(false);
           setBatchProgress(null);
@@ -534,10 +534,8 @@ export default function App() {
         setRemixId("");
       } catch (error) {
         console.error(error);
-        console.error(
-          `Create failed: ${error instanceof Error ? error.message : error || "Unknown error"
-          }`,
-        );
+        const message = error instanceof Error ? error.message : "Failed to create video";
+        showError("Video Generation Failed", message);
       } finally {
         setSubmitting(false);
         setBatchProgress(null);
@@ -719,10 +717,10 @@ export default function App() {
         closeMobileSidebar();
       } catch (error) {
         console.error("Failed to extract frame:", error);
-        alert("Failed to extract frame from video. Please try again.");
+        showError("Frame Extraction Failed", "Failed to extract frame from video. Please try again.");
       }
     },
-    [applyVideoToForm, handleImageSelect, preview, closeMobileSidebar],
+    [applyVideoToForm, handleImageSelect, preview, closeMobileSidebar, showError],
   );
 
   const handleToggleSelection = useCallback((videoId: string) => {
@@ -736,7 +734,7 @@ export default function App() {
   const handleMergeSelected = useCallback(
     async (videoIds: string[]) => {
       if (videoIds.length < 2) {
-        alert("Please select at least 2 videos to merge");
+        showWarning("Selection Required", "Please select at least 2 videos to merge.");
         return;
       }
 
@@ -792,15 +790,15 @@ export default function App() {
         // Clear selection
         setSelectedVideoIds([]);
 
-        alert(`Successfully merged ${videoIds.length} videos! The merged video has been added to your session list.`);
+        showSuccess("Videos Merged", `Successfully merged ${videoIds.length} videos! The merged video has been added to your session list.`);
       } catch (error) {
         console.error("Failed to merge videos:", error);
-        alert("Failed to merge videos. Please try again.");
+        showError("Merge Failed", "Failed to merge videos. Please try again.");
       } finally {
         setMergingVideos(false);
       }
     },
-    [sessionItems, thumbnailMap, setSessionItems, model, size, seconds],
+    [sessionItems, thumbnailMap, setSessionItems, model, size, seconds, showSuccess, showError],
   );
 
   const handleSaveSelected = useCallback(
@@ -811,7 +809,7 @@ export default function App() {
         .filter((item) => item && isCompletedStatus(item.status)) as VideoItem[];
 
       if (validVideos.length === 0) {
-        alert("Please select completed videos to save");
+        showWarning("Selection Required", "Please select completed videos to save.");
         return;
       }
 
@@ -819,7 +817,7 @@ export default function App() {
       setVideosToSave(validVideos);
       setShowSaveModal(true);
     },
-    [sessionItems],
+    [sessionItems, showWarning],
   );
 
   const fetchThumbnailBlob = useCallback(
@@ -863,12 +861,12 @@ export default function App() {
   const handleSaveAllToLibrary = useCallback(
     async (metadataList: SaveMetadata[]) => {
       if (!user) {
-        alert("You must be logged in to save videos");
+        showError("Authentication Required", "You must be logged in to save videos.");
         return;
       }
 
       if (metadataList.length !== videosToSave.length) {
-        alert("Metadata count mismatch");
+        showError("Data Mismatch", "Metadata count doesn't match videos. Please try again.");
         return;
       }
 
@@ -962,8 +960,14 @@ export default function App() {
             const generationData: any = {};
             if (video.quality) generationData.quality = video.quality;
             if (video.model) generationData.model = video.model;
-            // TODO: Track used assets here when available
-            // if (activeAssets?.length) generationData.usedAssets = activeAssets.map(a => a.id);
+            
+            // Track used assets if available
+            const usedAssetIds = metadata.usedAssetIds || [];
+            if (usedAssetIds.length > 0) {
+              generationData.usedAssets = usedAssetIds;
+              // Increment usage count for all used assets
+              await incrementAssetsUsage(usedAssetIds, { incrementBy: 1 });
+            }
 
             const videoId = await createVideoInFirestore(user.uid, {
               title: metadata.title,
@@ -1005,15 +1009,15 @@ export default function App() {
         // 6. Close modal and show success
         setShowSaveModal(false);
         setVideosToSave([]);
-        alert(`Successfully saved ${savedVideos.length} video(s) to library!`);
+        showSuccess("Videos Saved", `Successfully saved ${savedVideos.length} video(s) to library!`);
       } catch (error) {
         console.error("Failed to save videos:", error);
-        alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        showError("Save Failed", error instanceof Error ? error.message : 'Failed to save videos');
       } finally {
         setSavingToLibrary(false);
       }
     },
-    [user, videosToSave, setSessionItems, thumbnailMap, fetchThumbnailBlob],
+    [user, videosToSave, setSessionItems, thumbnailMap, fetchThumbnailBlob, showSuccess, showError],
   );
 
   const handleCloseSaveModal = useCallback(() => {
@@ -1092,12 +1096,13 @@ export default function App() {
       // Close modal
       setDeleteModalState({ isOpen: false, video: null, campaigns: null, isDeleting: false });
       console.log('✅ Video deleted successfully');
+      showSuccess("Video Deleted", "The video has been successfully deleted.");
     } catch (error) {
       console.error('Failed to delete video:', error);
       setDeleteModalState(prev => ({ ...prev, isDeleting: false }));
-      alert(`Failed to delete video: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      showError("Delete Failed", error instanceof Error ? error.message : 'Failed to delete video');
     }
-  }, [deleteModalState]);
+  }, [deleteModalState, showSuccess, showError]);
 
   const handleRetry = useCallback(
     async (item: VideoItem) => {

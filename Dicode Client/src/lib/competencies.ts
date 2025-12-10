@@ -11,6 +11,7 @@ export type CompetencyDefinition = {
   skills: SkillDefinition[];
 };
 
+// Default competencies - used as fallback if Firestore fetch fails
 export const COMPETENCIES: CompetencyDefinition[] = [
   {
     id: 'psychological-safety',
@@ -39,7 +40,7 @@ export const COMPETENCIES: CompetencyDefinition[] = [
     name: 'Encourage Collaboration',
     description: 'Foster trusting relationships based on mutual understanding that leads to improved collaboration towards shared goals.',
     skills: [
-      { id: 'co-1', name: 'Demonstrate Empathy', description: 'Experience genuine concern for others’ feelings and validate their perspectives.' },
+      { id: 'co-1', name: 'Demonstrate Empathy', description: "Experience genuine concern for others' feelings and validate their perspectives." },
       { id: 'co-2', name: 'Recognize Strengths', description: 'Discover and amplify unique talents, creating opportunities to apply them.' },
       { id: 'co-3', name: 'Share Decision-making', description: 'Involve team members in decisions, especially those that impact them directly.' },
       { id: 'co-4', name: 'Promote Allyship', description: 'Recognize support among members and create opportunities for those structurally blocked.' },
@@ -58,34 +59,60 @@ export const COMPETENCIES: CompetencyDefinition[] = [
   },
 ];
 
-export const getCompetencyById = (id: string) =>
-  COMPETENCIES.find((competency) => competency.id === id);
+/**
+ * Get a competency definition by name
+ */
+export const getCompetencyByName = (name: string): CompetencyDefinition | undefined =>
+  COMPETENCIES.find((c) => c.name === name);
 
-export const getSkillById = (competencyId: string, skillId: string) => {
-  const competency = getCompetencyById(competencyId);
-  return competency?.skills.find((skill) => skill.id === skillId);
+/**
+ * Get a competency definition by ID
+ */
+export const getCompetencyById = (id: string): CompetencyDefinition | undefined =>
+  COMPETENCIES.find((c) => c.id === id);
+
+/**
+ * Get a skill definition by name from all competencies
+ */
+export const getSkillByName = (name: string): (SkillDefinition & { competencyName: string }) | undefined => {
+  for (const competency of COMPETENCIES) {
+    const skill = competency.skills.find((s) => s.name === name);
+    if (skill) {
+      return { ...skill, competencyName: competency.name };
+    }
+  }
+  return undefined;
 };
 
-export const buildTagList = (
-  competencyIds: string[],
-  selectedSkills: Record<string, string[]>,
-): string[] => {
-  const tags = new Set<string>();
-
-  competencyIds.forEach((competencyId) => {
-    const competency = getCompetencyById(competencyId);
-    if (!competency) return;
-    tags.add(competency.name);
-
-    const skills = selectedSkills[competencyId] || [];
-    skills.forEach((skillId) => {
-      const skill = competency.skills.find((entry) => entry.id === skillId);
-      if (skill) {
-        tags.add(skill.name);
-      }
-    });
-  });
-
-  return Array.from(tags);
+/**
+ * Get a skill definition by ID from all competencies
+ */
+export const getSkillById = (id: string): (SkillDefinition & { competencyId: string; competencyName: string }) | undefined => {
+  for (const competency of COMPETENCIES) {
+    const skill = competency.skills.find((s) => s.id === id);
+    if (skill) {
+      return { ...skill, competencyId: competency.id, competencyName: competency.name };
+    }
+  }
+  return undefined;
 };
 
+/**
+ * Look up description for a competency or skill name
+ * Returns the description if found, otherwise undefined
+ */
+export const getDescriptionByName = (name: string): string | undefined => {
+  // First try to find as a competency
+  const competency = getCompetencyByName(name);
+  if (competency) {
+    return competency.description;
+  }
+
+  // Then try to find as a skill
+  const skill = getSkillByName(name);
+  if (skill) {
+    return skill.description;
+  }
+
+  return undefined;
+};

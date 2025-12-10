@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import MainLayout from '@/components/Layout/MainLayout';
+import { useNotification } from '@/contexts/NotificationContext';
 import { COMPETENCIES, CompetencyDefinition, SkillDefinition } from '@/lib/competencies';
 import {
   getCompetencies,
@@ -41,6 +42,7 @@ interface EditingCompetency {
 }
 
 export default function MainSettingsPage() {
+  const { error: showError, success: showSuccess } = useNotification();
   const [activeSection, setActiveSection] = useState<SettingsSection>('competencies');
   const [competencies, setCompetencies] = useState<CompetencyDefinition[]>([]);
   const [competenciesLoading, setCompetenciesLoading] = useState(true);
@@ -59,6 +61,33 @@ export default function MainSettingsPage() {
   const [promptsLoading, setPromptsLoading] = useState(true);
   const [savingPrompts, setSavingPrompts] = useState(false);
   const [showPromptConfirmModal, setShowPromptConfirmModal] = useState<'generator' | 'evaluator' | null>(null);
+  
+  // Delete confirmation modal state
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{ id: string; name: string; skillCount: number } | null>(null);
+  const [deletingCompetency, setDeletingCompetency] = useState(false);
+
+  // Escape key handler for slide-over panels
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showSkillPanel) {
+          setShowSkillPanel(false);
+          setEditingSkill(null);
+        } else if (showCompetencyPanel && !savingCompetency) {
+          setShowCompetencyPanel(false);
+          setEditingCompetency(null);
+        }
+      }
+    };
+    if (showCompetencyPanel || showSkillPanel) {
+      document.addEventListener('keydown', handleEscape);
+      document.body.style.overflow = 'hidden';
+    }
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      document.body.style.overflow = 'unset';
+    };
+  }, [showCompetencyPanel, showSkillPanel, savingCompetency]);
 
   // Load competencies from Firestore with real-time updates
   useEffect(() => {
@@ -164,22 +193,39 @@ Also check for: scenario anchoring, concrete behavior, avoiding double-barreled 
       }
       setShowCompetencyPanel(false);
       setEditingCompetency(null);
+      showSuccess('Competency Saved', editingCompetency.isNew ? 'New competency has been created.' : 'Competency has been updated.');
     } catch (error) {
       console.error('Failed to save competency:', error);
-      alert('Failed to save competency. Please try again.');
+      showError('Save Failed', 'Failed to save competency. Please try again.');
     } finally {
       setSavingCompetency(false);
     }
   };
 
-  const handleDeleteCompetency = async (id: string) => {
-    if (confirm('Are you sure you want to delete this competency? This action cannot be undone.')) {
-      try {
-        await deleteCompetency(id);
-      } catch (error) {
-        console.error('Failed to delete competency:', error);
-        alert('Failed to delete competency. Please try again.');
-      }
+  const handleDeleteCompetency = (id: string) => {
+    const competency = competencies.find(c => c.id === id);
+    if (competency) {
+      setDeleteConfirmModal({
+        id,
+        name: competency.name,
+        skillCount: competency.skills.length,
+      });
+    }
+  };
+
+  const confirmDeleteCompetency = async () => {
+    if (!deleteConfirmModal) return;
+    
+    setDeletingCompetency(true);
+    try {
+      await deleteCompetency(deleteConfirmModal.id);
+      showSuccess('Competency Deleted', 'The competency has been removed.');
+      setDeleteConfirmModal(null);
+    } catch (error) {
+      console.error('Failed to delete competency:', error);
+      showError('Delete Failed', 'Failed to delete competency. Please try again.');
+    } finally {
+      setDeletingCompetency(false);
     }
   };
 
@@ -238,9 +284,10 @@ Also check for: scenario anchoring, concrete behavior, avoiding double-barreled 
         
         try {
           await updateCompetency(editingSkill.competencyId, { skills: updatedSkills });
+          showSuccess('Skill Saved', editingSkill.isNew ? 'New skill has been added.' : 'Skill has been updated.');
         } catch (error) {
           console.error('Failed to save skill:', error);
-          alert('Failed to save skill. Please try again.');
+          showError('Save Failed', 'Failed to save skill. Please try again.');
           return;
         }
       }
@@ -263,9 +310,10 @@ Also check for: scenario anchoring, concrete behavior, avoiding double-barreled 
         const updatedSkills = competency.skills.filter(s => s.id !== skillId);
         try {
           await updateCompetency(competencyId, { skills: updatedSkills });
+          showSuccess('Skill Deleted', 'The skill has been removed.');
         } catch (error) {
           console.error('Failed to delete skill:', error);
-          alert('Failed to delete skill. Please try again.');
+          showError('Delete Failed', 'Failed to delete skill. Please try again.');
         }
       }
     }
@@ -285,18 +333,6 @@ Also check for: scenario anchoring, concrete behavior, avoiding double-barreled 
       <div className="min-h-[calc(100vh-4rem)] bg-slate-50/50 p-6">
         <div className="mx-auto max-w-6xl">
           {/* Header */}
-          <div className="mb-8">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900">
-                <Settings className="h-5 w-5 text-white" />
-              </div>
-              <h1 className="text-2xl font-semibold text-slate-900">Main Settings</h1>
-            </div>
-            <p className="text-sm text-slate-500">
-              Configure competencies, skills, and AI system prompts
-            </p>
-          </div>
-
           <div className="flex flex-col gap-6 lg:flex-row">
             {/* Sidebar Navigation */}
             <nav className="w-full shrink-0 lg:w-64">
@@ -951,6 +987,80 @@ Also check for: scenario anchoring, concrete behavior, avoiding double-barreled 
                     <>
                       <Save className="h-4 w-4" />
                       Confirm & Save
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Competency Delete Confirmation Modal */}
+      {deleteConfirmModal && (
+        <>
+          <div
+            className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-sm transition-opacity"
+            onClick={() => !deletingCompetency && setDeleteConfirmModal(null)}
+          />
+          <div className="fixed left-1/2 top-1/2 z-[80] w-full max-w-md -translate-x-1/2 -translate-y-1/2 animate-in fade-in zoom-in-95 duration-200">
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+              {/* Icon */}
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-rose-100">
+                <Trash2 className="h-7 w-7 text-rose-600" />
+              </div>
+
+              {/* Content */}
+              <div className="text-center">
+                <h3 className="text-lg font-semibold text-slate-900">
+                  Delete Competency
+                </h3>
+                <p className="mt-2 text-sm text-slate-500">
+                  Are you sure you want to delete{' '}
+                  <span className="font-medium text-slate-700">
+                    {deleteConfirmModal.name}
+                  </span>
+                  ?
+                </p>
+              </div>
+
+              {/* Consequences Box */}
+              <div className="mt-4 rounded-lg bg-rose-50 border border-rose-200 p-3 space-y-2">
+                <p className="text-xs text-rose-800">
+                  <strong>This will permanently delete:</strong>
+                </p>
+                <ul className="text-xs text-rose-700 list-disc list-inside space-y-1">
+                  <li>The competency and all its configuration</li>
+                  <li>{deleteConfirmModal.skillCount} skill{deleteConfirmModal.skillCount !== 1 ? 's' : ''} associated with this competency</li>
+                </ul>
+                <p className="text-xs text-rose-800 pt-1">
+                  <strong>Note:</strong> Campaigns using this competency may be affected.
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="mt-6 flex gap-3">
+                <button
+                  onClick={() => setDeleteConfirmModal(null)}
+                  disabled={deletingCompetency}
+                  className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmDeleteCompetency}
+                  disabled={deletingCompetency}
+                  className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-rose-700 disabled:opacity-50"
+                >
+                  {deletingCompetency ? (
+                    <>
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="h-4 w-4" />
+                      Delete Competency
                     </>
                   )}
                 </button>

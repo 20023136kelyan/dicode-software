@@ -1,0 +1,46 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user is DiCode Staff
+    function isDiCodeStaff() {
+      return request.auth.token.email.matches('.*@di-code[.]de');
+    }
+    
+    // Videos folder - anyone authenticated can read, only DiCode staff can write
+    match /videos/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isDiCodeStaff();
+    }
+    
+    // Thumbnails folder - anyone authenticated can read, only DiCode staff can write
+    match /thumbnails/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isDiCodeStaff();
+    }
+    
+    // Assets folder - anyone authenticated can read, only DiCode staff can write
+    match /assets/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isDiCodeStaff();
+    }
+    
+    // User avatars - users can read/write their own, others can read
+    match /avatars/{userId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Organization assets - anyone authenticated can read, only DiCode staff can write
+    match /organizations/{orgId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isDiCodeStaff();
+    }
+  }
+}
+

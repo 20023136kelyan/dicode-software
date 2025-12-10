@@ -1,9 +1,26 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Building2, Upload, Save, Palette, Image as ImageIcon, Users, Plus, X } from 'lucide-react';
-import { saveCompanyColors, getCompanyColors, getCompanyLogo, getContrastTextColor } from '@/utils/companyColors';
+import {
+  Building2,
+  Upload,
+  Save,
+  Image as ImageIcon,
+  Users,
+  Plus,
+  X,
+  LayoutDashboard,
+  Palette,
+  Layers,
+  Globe,
+  Loader2,
+  Trash2,
+  Search,
+  Check,
+  AlertTriangle
+} from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getOrganization, updateOrganization, getUsersByOrganization } from '@/lib/firestore';
-import type { Organization } from '@/types';
+import type { Organization, User } from '@/types';
+import { Skeleton } from '@/components/shared/Skeleton';
 
 const Company: React.FC = () => {
   const { user } = useAuth();
@@ -12,12 +29,31 @@ const Company: React.FC = () => {
 
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [employeeCount, setEmployeeCount] = useState(0);
+  const [allEmployees, setAllEmployees] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
 
   const [departments, setDepartments] = useState<string[]>([]);
+  const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
   const [newDepartment, setNewDepartment] = useState('');
 
-  // Load organization data and saved colors/logo on mount
+  // Delete Modal State
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [pendingDeleteDepartments, setPendingDeleteDepartments] = useState<string[]>([]);
+  const [deleteAction, setDeleteAction] = useState<'reassign' | 'delete_users'>('reassign');
+  const [targetReassignDepartment, setTargetReassignDepartment] = useState<string>('');
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Navigation State
+  const [activeTab, setActiveTab] = useState('general');
+
+  const NAV_ITEMS = [
+    { id: 'general', label: 'Overview', icon: LayoutDashboard },
+    { id: 'departments', label: 'Departments', icon: Layers },
+    { id: 'branding', label: 'Branding', icon: Palette },
+  ];
+
+  // Load organization data on mount
   useEffect(() => {
     const loadData = async () => {
       if (!user?.organization) {
@@ -33,21 +69,16 @@ const Company: React.FC = () => {
 
         if (org) {
           setOrganization(org);
-          setDepartments(org.departments);
+          setDepartments(org.departments || []);
 
           // Load logo from organization settings if available
           if (org.settings.logo) {
             setLogo(org.settings.logo);
-          } else {
-            // Fall back to localStorage
-            const savedLogo = getCompanyLogo();
-            if (savedLogo) {
-              setLogo(savedLogo);
-            }
           }
         }
 
         setEmployeeCount(employees.length);
+        setAllEmployees(employees);
       } catch (error) {
         console.error('[Company] Failed to load organization data:', error);
       } finally {
@@ -56,24 +87,18 @@ const Company: React.FC = () => {
     };
 
     loadData();
-
-    // Load saved colors
-    const savedColors = getCompanyColors();
-    setColors(savedColors);
-    setColorInputs(savedColors);
   }, [user?.organization]);
 
-  const [colors, setColors] = useState({
-    primary: '#F7F7F7',
-    secondary: '#0E4191',
-    background: '#191A1C',
-  });
-
-  const [colorInputs, setColorInputs] = useState({
-    primary: '#F7F7F7',
-    secondary: '#0E4191',
-    background: '#191A1C',
-  });
+  // Calculate department counts
+  const deptCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    allEmployees.forEach(u => {
+      if (u.department) {
+        counts[u.department] = (counts[u.department] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [allEmployees]);
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -98,61 +123,6 @@ const Company: React.FC = () => {
     }
   };
 
-  const handleColorChange = (colorType: keyof typeof colors, value: string) => {
-    setColors((prev) => ({
-      ...prev,
-      [colorType]: value,
-    }));
-    setColorInputs((prev) => ({
-      ...prev,
-      [colorType]: value,
-    }));
-  };
-
-  const handleColorInputChange = (colorType: keyof typeof colors, value: string) => {
-    // Always update the input field
-    setColorInputs((prev) => ({
-      ...prev,
-      [colorType]: value,
-    }));
-
-    // Normalize the hex value (add # if missing, handle 3-char hex)
-    let normalizedValue = value.trim();
-    
-    // Remove # if present to normalize
-    if (normalizedValue.startsWith('#')) {
-      normalizedValue = normalizedValue.slice(1);
-    }
-    
-    // Validate hex characters only
-    const hexCharPattern = /^[A-Fa-f0-9]+$/;
-    if (normalizedValue === '' || hexCharPattern.test(normalizedValue)) {
-      // If valid hex characters, format and update
-      if (normalizedValue.length === 3) {
-        // Expand 3-char hex to 6-char (e.g., fff -> ffffff)
-        normalizedValue = normalizedValue.split('').map(char => char + char).join('');
-      }
-      
-      if (normalizedValue.length === 6) {
-        // Valid 6-character hex, add # and update color
-        const fullHex = '#' + normalizedValue;
-        setColors((prev) => ({
-          ...prev,
-          [colorType]: fullHex,
-        }));
-        // Update input to show the formatted value
-        setColorInputs((prev) => ({
-          ...prev,
-          [colorType]: fullHex,
-        }));
-      } else if (normalizedValue === '') {
-        // Empty input, keep current color
-        return;
-      }
-      // If length is not 3 or 6, don't update color but keep input value
-    }
-  };
-
   const handleAddDepartment = () => {
     if (newDepartment.trim() && !departments.includes(newDepartment.trim())) {
       setDepartments([...departments, newDepartment.trim()]);
@@ -161,7 +131,92 @@ const Company: React.FC = () => {
   };
 
   const handleRemoveDepartment = (dept: string) => {
-    setDepartments(departments.filter(d => d !== dept));
+    setPendingDeleteDepartments([dept]);
+    setShowDeleteModal(true);
+    setTargetReassignDepartment('');
+    setDeleteAction('reassign');
+  };
+
+  const handleBulkDelete = () => {
+    setPendingDeleteDepartments(selectedDepartments);
+    setShowDeleteModal(true);
+    setTargetReassignDepartment('');
+    setDeleteAction('reassign');
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!user?.organization || pendingDeleteDepartments.length === 0) return;
+
+    // Validation
+    if (deleteAction === 'reassign' && !targetReassignDepartment) {
+      alert("Please select a department to reassign users to.");
+      return;
+    }
+
+    setIsDeleting(true);
+
+    try {
+      const response = await fetch('https://us-central1-dicode-software.cloudfunctions.net/api/delete-departments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          organizationId: user.organization,
+          departments: pendingDeleteDepartments,
+          action: deleteAction,
+          targetDepartment: targetReassignDepartment
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete departments');
+      }
+
+      // Success: Update local state
+      const updatedDepts = departments.filter(d => !pendingDeleteDepartments.includes(d));
+      setDepartments(updatedDepts);
+      setSelectedDepartments([]); // Clear selection
+
+      // Update employee list locally (approximation)
+      if (deleteAction === 'reassign') {
+        setAllEmployees(prev => prev.map(emp => {
+          if (emp.department && pendingDeleteDepartments.includes(emp.department)) {
+            return { ...emp, department: targetReassignDepartment };
+          }
+          return emp;
+        }));
+      } else {
+        // Remove locally if deleted
+        setAllEmployees(prev => prev.filter(emp => !emp.department || !pendingDeleteDepartments.includes(emp.department)));
+      }
+
+      setShowDeleteModal(false);
+      setPendingDeleteDepartments([]);
+
+    } catch (error: any) {
+      console.error('Delete failed:', error);
+      alert(`Error: ${error.message} `);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const toggleDepartment = (dept: string) => {
+    if (selectedDepartments.includes(dept)) {
+      setSelectedDepartments(selectedDepartments.filter(d => d !== dept));
+    } else {
+      setSelectedDepartments([...selectedDepartments, dept]);
+    }
+  };
+
+  const toggleAllDepartments = () => {
+    if (selectedDepartments.length === departments.length) {
+      setSelectedDepartments([]);
+    } else {
+      setSelectedDepartments([...departments]);
+    }
   };
 
   const handleSave = async () => {
@@ -170,31 +225,22 @@ const Company: React.FC = () => {
       return;
     }
 
+    setIsSaving(true);
     try {
-      // Save to Firestore
       await updateOrganization(user.organization, {
         departments,
         settings: {
           ...organization.settings,
-          ...(logo ? { logo } : {}), // Only include logo if it exists
-          primaryColor: colors.primary,
-          secondaryColor: colors.secondary,
-          backgroundColor: colors.background,
+          ...(logo ? { logo } : {}),
         },
-      });
-
-      // Also save to localStorage for quick access
-      saveCompanyColors({
-        primary: colors.primary,
-        secondary: colors.secondary,
-        background: colors.background,
-        logo: logo || null,
       });
 
       alert('Company settings saved successfully!');
     } catch (error) {
       console.error('[Company] Failed to save settings:', error);
       alert('Failed to save company settings. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -203,524 +249,522 @@ const Company: React.FC = () => {
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-    // Clear saved logo from storage
-    localStorage.removeItem('company_logo');
   };
-
-  // Calculate dynamic text colors based on background colors
-  const textColors = useMemo(() => {
-    return {
-      primary: getContrastTextColor(colors.primary),
-      secondary: getContrastTextColor(colors.secondary),
-      background: getContrastTextColor(colors.background),
-    };
-  }, [colors.primary, colors.secondary, colors.background]);
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-dark-text-muted">Loading company settings...</div>
+      <div className="p-10 space-y-6">
+        <Skeleton className="h-10 w-48 bg-white/5" />
+        <div className="flex gap-8">
+          <Skeleton className="w-64 h-96 bg-white/5 rounded-2xl" />
+          <Skeleton className="flex-1 h-96 bg-white/5 rounded-2xl" />
+        </div>
       </div>
     );
   }
 
   if (!organization) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-dark-text-muted">Organization not found</div>
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <div className="text-white/60">Organization not found</div>
       </div>
     );
   }
 
-  const panelClass = 'card';
-
-  return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      {/* Action Bar */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-6 text-sm">
-          <div>
-            <span className="text-dark-text font-semibold">{employeeCount}</span>
-            <span className="text-dark-text-muted ml-1">employees</span>
-          </div>
-          <div>
-            <span className="text-dark-text font-semibold">{departments.length}</span>
-            <span className="text-dark-text-muted ml-1">departments</span>
-          </div>
-          <div>
-            <span className="text-dark-text font-semibold">{organization.size || '—'}</span>
-            <span className="text-dark-text-muted ml-1">org size</span>
-          </div>
-        </div>
-        <button onClick={handleSave} className="btn-primary flex items-center gap-2">
-          <Save size={16} />
-          Save Changes
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Content */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Organization Info Section */}
-          <div className={panelClass}>
-            <div className="flex items-start justify-between">
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'general':
+        return (
+          <div className="space-y-6 animate-in fade-in duration-500">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-blue-500/10">
+                <Building2 size={24} className="text-blue-400" />
+              </div>
               <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Building2 size={20} className="text-primary" />
-                  <span className="text-xs uppercase tracking-wider text-dark-text-muted">Organization</span>
-                </div>
-                <h2 className="text-3xl font-bold text-dark-text mb-2">{organization.name}</h2>
-                <p className="text-sm text-dark-text-muted mb-6">
-                  {organization.industry || 'Technology'} • {organization.region || 'Global'} • {organization.size || 'Small'} company
-                </p>
-
-                <div className="grid grid-cols-3 gap-8">
-                  <div>
-                    <p className="text-xs text-dark-text-muted mb-1">URL Slug</p>
-                    <p className="text-sm font-medium text-dark-text">{organization.slug}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-dark-text-muted mb-1">Total Employees</p>
-                    <div className="flex items-center gap-1.5">
-                      <Users size={16} className="text-primary" />
-                      <p className="text-sm font-medium text-dark-text">{employeeCount}</p>
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-xs text-dark-text-muted mb-1">Departments</p>
-                    <p className="text-sm font-medium text-dark-text">{departments.length}</p>
-                  </div>
-                </div>
+                <h3 className="text-xl font-semibold text-white">{organization.name}</h3>
+                <p className="text-sm text-white/60">Manage your organization profile</p>
               </div>
             </div>
-          </div>
 
-          {/* Departments Section */}
-          <div className={panelClass}>
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-2 bg-primary/10 rounded-lg">
-                <Building2 size={24} className="text-primary" />
-              </div>
-              <h2 className="text-xl font-semibold text-dark-text">Departments</h2>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-dark-text mb-2">Add Department</label>
-                <div className="flex gap-2">
+            <div className="grid grid-cols-1 gap-6">
+              {/* Organization Info */}
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-white block">Organization Name</label>
                   <input
                     type="text"
-                    value={newDepartment}
-                    onChange={(e) => setNewDepartment(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddDepartment()}
-                    placeholder="e.g., Marketing, Engineering, Sales"
-                    className="input flex-1"
+                    value={organization.name}
+                    disabled
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white focus:border-white/40 focus:ring-2 focus:ring-white/15 disabled:opacity-50 disabled:cursor-not-allowed"
                   />
-                  <button
-                    type="button"
-                    onClick={handleAddDepartment}
-                    className="btn-secondary flex items-center gap-2"
-                  >
-                    <Plus size={18} />
-                    Add
-                  </button>
                 </div>
-              </div>
 
-              {departments.length > 0 && (
-                <div>
-                  <p className="text-sm font-medium text-dark-text mb-3">
-                    Departments ({departments.length})
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {departments.map((dept) => (
-                      <span
-                        key={dept}
-                        className="inline-flex items-center gap-2 px-3 py-1 bg-primary/10 text-primary rounded-full text-sm"
-                      >
-                        {dept}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveDepartment(dept)}
-                          className="hover:text-primary-light"
-                        >
-                          <X size={14} />
-                        </button>
-                      </span>
-                    ))}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-white block">Industry</label>
+                    <div className="relative">
+                      <Layers className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+                      <input
+                        type="text"
+                        value={organization.industry || 'Technology'}
+                        disabled
+                        className="w-full rounded-xl border border-white/10 bg-white/5 pl-10 pr-4 py-2.5 text-sm text-white disabled:opacity-50"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-white block">Size</label>
+                    <div className="relative">
+                      <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+                      <input
+                        type="text"
+                        value={organization.size || 'Startup'}
+                        disabled
+                        className="w-full rounded-xl border border-white/10 bg-white/5 pl-10 pr-4 py-2.5 text-sm text-white disabled:opacity-50"
+                      />
+                    </div>
                   </div>
                 </div>
-              )}
-            </div>
-          </div>
 
-          {/* Logo Upload Section */}
-          <div className={panelClass}>
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-2 bg-primary/10 rounded-lg">
-                <ImageIcon size={24} className="text-primary" />
-              </div>
-              <h2 className="text-xl font-semibold text-dark-text">Company Logo</h2>
-            </div>
-
-            <div className="space-y-4">
-              {/* Logo Preview */}
-              <div className="flex items-center gap-6">
-                <div className="w-32 h-32 border-2 border-dashed border-dark-border rounded-lg flex items-center justify-center bg-dark-card relative overflow-hidden">
-                  {logo ? (
-                    <img
-                      src={logo}
-                      alt="Company Logo"
-                      className="w-full h-full object-contain p-2"
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-white block">Region</label>
+                  <div className="relative">
+                    <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+                    <input
+                      type="text"
+                      value={organization.region || 'Global'}
+                      disabled
+                      className="w-full rounded-xl border border-white/10 bg-white/5 pl-10 pr-4 py-2.5 text-sm text-white disabled:opacity-50"
                     />
-                  ) : (
-                    <img
-                      src="/DI-Code-Logo.png"
-                      alt="DI Code Logo"
-                      className="w-full h-full object-contain p-2"
-                    />
-                  )}
+                  </div>
                 </div>
 
-                <div className="flex-1 space-y-3">
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-white block">URL Slug</label>
+                  <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-sm text-white/60">
+                    <span className="text-white/40">dicode.io/org/</span>
+                    <span className="text-white font-medium">{organization.slug}</span>
+                  </div>
+                </div>
+              </div>
+
+
+            </div>
+
+            <div className="pt-4 flex justify-end border-t border-white/10">
+              <button disabled className="text-sm text-white/40 cursor-not-allowed">
+                Need to change these details? Contact Support
+              </button>
+            </div>
+          </div>
+        );
+
+      case 'branding':
+        return (
+          <div className="space-y-6 animate-in fade-in duration-500">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-pink-500/10">
+                <Palette size={24} className="text-pink-400" />
+              </div>
+              <div>
+                <h3 className="text-xl font-semibold text-white">Brand Assets</h3>
+                <p className="text-sm text-white/60">Manage your company logo and themes</p>
+              </div>
+            </div>
+
+            <div className="p-8 rounded-2xl border border-white/10 bg-white/5">
+              <div className="flex flex-col sm:flex-row items-center gap-8">
+                <div className="relative group">
+                  {/* Logo Preview */}
+                  <div className="w-40 h-40 rounded-2xl border-2 border-dashed border-white/20 flex items-center justify-center bg-black/20 overflow-hidden relative">
+                    {logo ? (
+                      <img
+                        src={logo}
+                        alt="Company Logo"
+                        className="w-full h-full object-contain p-4"
+                      />
+                    ) : (
+                      <div className="text-center p-4">
+                        <ImageIcon size={32} className="mx-auto text-white/20 mb-2" />
+                        <span className="text-xs text-white/40">No Logo</span>
+                      </div>
+                    )}
+
+                    {/* Hover Overlay */}
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2">
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+                      >
+                        <Upload size={18} />
+                      </button>
+                      {logo && (
+                        <button
+                          onClick={handleRemoveLogo}
+                          className="p-2 rounded-full bg-red-500/20 hover:bg-red-500/40 text-red-500 transition-colors"
+                        >
+                          <X size={18} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 space-y-4 text-center sm:text-left">
                   <div>
+                    <h4 className="text-white font-medium mb-1">Company Logo</h4>
+                    <p className="text-sm text-white/50">
+                      This logo will appear on your dashboard, emails, and reports.
+                      <br />Recommended size: 512x512px (PNG, SVG).
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-center gap-3">
                     <input
                       ref={fileInputRef}
                       type="file"
                       accept="image/*"
                       onChange={handleLogoUpload}
                       className="hidden"
-                      id="logo-upload"
                     />
-                    <label
-                      htmlFor="logo-upload"
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-dark-card border border-dark-border rounded-lg text-dark-text hover:bg-dark-bg transition-colors cursor-pointer"
-                    >
-                      <Upload size={16} />
-                      {logo ? 'Change Logo' : 'Upload Logo'}
-                    </label>
-                  </div>
-                  {logo && (
                     <button
-                      onClick={handleRemoveLogo}
-                      className="px-4 py-2 bg-dark-card border border-red-500/50 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors text-sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-4 py-2 rounded-xl bg-white text-black font-semibold text-sm hover:bg-white/90 transition-colors"
                     >
-                      Remove Logo
+                      Upload New Logo
                     </button>
-                  )}
-                  <p className="text-xs text-dark-text-muted">
-                    Recommended: PNG or SVG format, transparent background. Max 5MB.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Color Settings Section */}
-          <div className={panelClass}>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Left Side - Color Palette Title and Selectors */}
-              <div>
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="p-2 bg-primary/10 rounded-lg">
-                    <Palette size={24} className="text-primary" />
-                  </div>
-                  <h2 className="text-xl font-semibold text-dark-text">Color Palette</h2>
-                </div>
-
-                {/* Color Selectors */}
-                <div className="space-y-6">
-                  {/* Primary Color */}
-                  <div>
-                    <label className="block text-sm font-medium text-dark-text mb-3">
-                      Primary Color
-                    </label>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="color"
-                        value={colors.primary}
-                        onChange={(e) => handleColorChange('primary', e.target.value)}
-                        className="w-16 h-16 rounded-lg border-2 border-dark-border cursor-pointer"
-                      />
-                      <div className="flex flex-col gap-1">
-                        <input
-                          type="text"
-                          value={colorInputs.primary}
-                          onChange={(e) => handleColorInputChange('primary', e.target.value)}
-                          placeholder="#000000"
-                          className="input w-32 font-mono text-sm"
-                          maxLength={7}
-                        />
-                        <p className="text-xs text-dark-text-muted">Hex code</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Secondary Color */}
-                  <div>
-                    <label className="block text-sm font-medium text-dark-text mb-3">
-                      Secondary Color
-                    </label>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="color"
-                        value={colors.secondary}
-                        onChange={(e) => handleColorChange('secondary', e.target.value)}
-                        className="w-16 h-16 rounded-lg border-2 border-dark-border cursor-pointer"
-                      />
-                      <div className="flex flex-col gap-1">
-                        <input
-                          type="text"
-                          value={colorInputs.secondary}
-                          onChange={(e) => handleColorInputChange('secondary', e.target.value)}
-                          placeholder="#000000"
-                          className="input w-32 font-mono text-sm"
-                          maxLength={7}
-                        />
-                        <p className="text-xs text-dark-text-muted">Hex code</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Background Color */}
-                  <div>
-                    <label className="block text-sm font-medium text-dark-text mb-3">
-                      Background Color
-                    </label>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="color"
-                        value={colors.background}
-                        onChange={(e) => handleColorChange('background', e.target.value)}
-                        className="w-16 h-16 rounded-lg border-2 border-dark-border cursor-pointer"
-                      />
-                      <div className="flex flex-col gap-1">
-                        <input
-                          type="text"
-                          value={colorInputs.background}
-                          onChange={(e) => handleColorInputChange('background', e.target.value)}
-                          placeholder="#000000"
-                          className="input w-32 font-mono text-sm"
-                          maxLength={7}
-                        />
-                        <p className="text-xs text-dark-text-muted">Hex code</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right Side - Live Preview */}
-              <div className="pr-4">
-                <div
-                  className="rounded-lg border-2 border-dark-border overflow-hidden"
-                  style={{ backgroundColor: colors.background }}
-                >
-                  {/* Header Preview */}
-                  <div
-                    className="pt-3 px-4 pb-8"
-                    style={{ backgroundColor: colors.primary }}
-                  >
-                    <div className="flex items-center justify-center mb-2 relative">
-                      <div className="h-12 flex items-center">
-                        {logo ? (
-                          <img
-                            src={logo}
-                            alt="Logo"
-                            className="h-full object-contain"
-                          />
-                        ) : (
-                          <img
-                            src="/DI-Code-Logo.png"
-                            alt="DI Code Logo"
-                            className="h-full object-contain"
-                          />
-                        )}
-                      </div>
-                    </div>
-                    <h4 className="text-sm font-bold mb-1" style={{ color: textColors.primary }}>
-                      Welcome back, John
-                    </h4>
-                    <p className="text-xs" style={{ color: textColors.primary, opacity: 0.8 }}>
-                      Continue your leadership journey
-                    </p>
-                  </div>
-
-                  {/* Progress Card Preview */}
-                  <div className="px-4 -mt-6 mb-3">
-                    <div
-                      className="rounded-lg p-3 shadow-lg"
-                      style={{
-                        backgroundColor: colors.secondary,
-                      }}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-semibold" style={{ color: textColors.secondary }}>
-                          Your Progress
-                        </span>
-                      </div>
-                      <div className="flex items-end gap-2">
-                        <div className="text-2xl font-bold" style={{ color: textColors.secondary }}>
-                          2/3
-                        </div>
-                        <div className="text-xs mb-1" style={{ color: textColors.secondary, opacity: 0.8 }}>
-                          modules completed
-                        </div>
-                      </div>
-                      <div 
-                        className="mt-2 rounded-full h-1"
-                        style={{ backgroundColor: `${textColors.secondary}33` }}
-                      >
-                        <div
-                          className="rounded-full h-1 transition-all"
-                          style={{ 
-                            width: '67%',
-                            backgroundColor: textColors.secondary,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Module Card Preview */}
-                  <div className="px-4 mb-4">
-                    <h5
-                      className="text-xs font-semibold mb-2"
-                      style={{ color: textColors.background }}
-                    >
-                      Your Learning Program
-                    </h5>
-                    <div
-                      className="rounded-lg p-3 border"
-                      style={{
-                        backgroundColor: colors.primary,
-                        borderColor: colors.primary,
-                      }}
-                    >
-                      <div className="flex gap-2 mb-2">
-                        <div
-                          className="w-12 h-12 rounded flex items-center justify-center flex-shrink-0"
-                          style={{
-                            backgroundColor: colors.secondary,
-                          }}
-                        >
-                          <span className="text-xs" style={{ color: textColors.secondary }}>▶</span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h6 className="text-xs font-semibold mb-1 line-clamp-1" style={{ color: textColors.primary }}>
-                            The Mentor Match
-                          </h6>
-                          <p className="text-xs line-clamp-1 mb-2" style={{ color: textColors.primary, opacity: 0.8 }}>
-                            Learn how to provide constructive feedback
-                          </p>
-                          <div className="flex gap-1 mb-2">
-                            <span 
-                              className="text-xs px-1.5 py-0.5 rounded"
-                              style={{ 
-                                backgroundColor: `${textColors.primary}33`,
-                                color: textColors.primary,
-                              }}
-                            >
-                              Empathy
-                            </span>
-                          </div>
-                        </div>
-                      </div>
+                    {logo && (
                       <button
-                        className="w-full rounded text-xs font-medium py-1.5"
-                        style={{
-                          backgroundColor: colors.secondary,
-                          color: textColors.secondary,
-                        }}
+                        onClick={handleRemoveLogo}
+                        className="px-4 py-2 rounded-xl border border-white/10 text-white/60 font-medium text-sm hover:text-red-400 hover:bg-white/5 transition-colors"
                       >
-                        Continue Module
+                        Remove
                       </button>
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
+
+            <div className="flex justify-end pt-4">
+              <button
+                onClick={handleSave}
+                disabled={isSaving}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-500 transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50"
+              >
+                {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                Save Changes
+              </button>
+            </div>
           </div>
+        );
 
-        </div>
+      case 'departments':
+        const isAllSelected = departments.length > 0 && selectedDepartments.length === departments.length;
+        const isSomeSelected = selectedDepartments.length > 0;
 
-        {/* Sidebar - Brand Preview */}
-        <div className="space-y-6">
-          {/* Color Preview Card */}
-          <div className={panelClass}>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 bg-blue-primary/10 rounded-lg">
-                <Building2 size={20} className="text-blue-primary" />
+        return (
+          <div className="space-y-6 animate-in fade-in duration-500">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-emerald-500/10">
+                <Layers size={24} className="text-emerald-400" />
               </div>
-              <h3 className="text-lg font-semibold text-dark-text">Brand Preview</h3>
+              <div>
+                <h3 className="text-xl font-semibold text-white">Departments</h3>
+                <p className="text-sm text-white/60">Organize your employees into groups</p>
+              </div>
             </div>
 
             <div className="space-y-4">
-              {/* Logo Preview */}
-              <div
-                className="p-6 rounded-lg border border-dark-border flex items-center justify-center"
-                style={{ backgroundColor: colors.background }}
-              >
-                {logo ? (
-                  <img
-                    src={logo}
-                    alt="Logo Preview"
-                    className="max-h-16 max-w-full object-contain"
-                  />
+              {/* Add Dept Input & Bulk Actions */}
+              <div className="flex items-center gap-2">
+                {isSomeSelected ? (
+                  <div className="flex-1 flex items-center justify-between px-4 py-3 rounded-xl bg-blue-500/10 border border-blue-500/20 transition-all animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center justify-center w-5 h-5 rounded bg-blue-500 text-white">
+                        <Check size={12} strokeWidth={3} />
+                      </div>
+                      <span className="text-sm font-medium text-blue-200">{selectedDepartments.length} selected</span>
+                    </div>
+                    <button
+                      onClick={handleBulkDelete}
+                      className="text-xs font-semibold text-red-400 hover:text-red-300 transition-colors flex items-center gap-1.5"
+                    >
+                      <Trash2 size={14} />
+                      Delete Selected
+                    </button>
+                  </div>
                 ) : (
-                  <img
-                    src="/DI-Code-Logo.png"
-                    alt="DI Code Logo"
-                    className="max-h-16 max-w-full object-contain"
-                  />
+                  <>
+                    <div className="flex-1 relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={16} />
+                      <input
+                        type="text"
+                        value={newDepartment}
+                        onChange={(e) => setNewDepartment(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && handleAddDepartment()}
+                        placeholder="Add a new department..."
+                        className="w-full rounded-xl border border-white/10 bg-white/5 pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all"
+                      />
+                    </div>
+                    <button
+                      onClick={handleAddDepartment}
+                      disabled={!newDepartment.trim()}
+                      className="px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+                    >
+                      <Plus size={18} />
+                      Add
+                    </button>
+                  </>
                 )}
               </div>
 
-              {/* Color Swatches */}
-              <div className="space-y-3">
-                <div>
-                  <p className="text-xs text-dark-text-muted mb-2">Primary</p>
-                  <div
-                    className="h-8 rounded border border-dark-border"
-                    style={{ backgroundColor: colors.primary }}
-                  />
-                  <p className="text-xs font-mono text-dark-text-muted mt-1">{colors.primary}</p>
+              {/* Dept List */}
+              <div className="rounded-xl border border-white/10 bg-white/5 overflow-hidden">
+                <div className="grid grid-cols-12 gap-4 px-4 py-3 border-b border-white/5 bg-white/5 text-xs font-semibold uppercase tracking-wider text-white/40">
+                  <div className="col-span-1 flex items-center justify-center">
+                    <button
+                      onClick={toggleAllDepartments}
+                      className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${isAllSelected
+                        ? 'bg-blue-500 border-blue-500 text-white'
+                        : 'border-white/20 hover:border-white/40'
+                        }`}
+                    >
+                      {isAllSelected && <Check size={10} strokeWidth={3} />}
+                    </button>
+                  </div>
+                  <div className="col-span-7">Department Name</div>
+                  <div className="col-span-3 text-right">Members</div>
+                  <div className="col-span-1 text-right">Actions</div>
                 </div>
-                <div>
-                  <p className="text-xs text-dark-text-muted mb-2">Secondary</p>
-                  <div
-                    className="h-8 rounded border border-dark-border"
-                    style={{ backgroundColor: colors.secondary }}
-                  />
-                  <p className="text-xs font-mono text-dark-text-muted mt-1">{colors.secondary}</p>
+
+                <div className="divide-y divide-white/5">
+                  {departments.length === 0 ? (
+                    <div className="py-12 text-center">
+                      <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-white/5 mb-3">
+                        <Layers size={20} className="text-white/20" />
+                      </div>
+                      <p className="text-sm text-white/40">No departments added yet.</p>
+                    </div>
+                  ) : (
+                    departments.map((dept) => {
+                      const isSelected = selectedDepartments.includes(dept);
+                      return (
+                        <div
+                          key={dept}
+                          className={`grid grid-cols-12 gap-4 px-4 py-3 items-center transition-colors ${isSelected ? 'bg-blue-500/5 hover:bg-blue-500/10' : 'hover:bg-white/5'
+                            }`}
+                        >
+                          <div className="col-span-1 flex items-center justify-center">
+                            <button
+                              onClick={() => toggleDepartment(dept)}
+                              className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${isSelected
+                                ? 'bg-blue-500 border-blue-500 text-white'
+                                : 'border-white/20 hover:border-white/40'
+                                }`}
+                            >
+                              {isSelected && <Check size={10} strokeWidth={3} />}
+                            </button>
+                          </div>
+                          <div className="col-span-7 flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                              <Layers size={14} className="text-emerald-400" />
+                            </div>
+                            <span className={`text-sm font-medium ${isSelected ? 'text-blue-200' : 'text-white'}`}>{dept}</span>
+                          </div>
+                          <div className="col-span-3 text-right">
+                            <span className="text-sm text-white/60">
+                              {deptCounts[dept] || 0}
+                            </span>
+                          </div>
+                          <div className="col-span-1 flex justify-end">
+                            <button
+                              onClick={() => handleRemoveDepartment(dept)}
+                              className="p-1.5 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                              title="Remove Department"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
-                <div>
-                  <p className="text-xs text-dark-text-muted mb-2">Background</p>
-                  <div
-                    className="h-8 rounded border border-dark-border"
-                    style={{ backgroundColor: colors.background }}
-                  />
-                  <p className="text-xs font-mono text-dark-text-muted mt-1">{colors.background}</p>
-                </div>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-500 transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50"
+                >
+                  {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                  Save Changes
+                </button>
               </div>
             </div>
           </div>
+        );
 
-          {/* Info Card */}
-          <div className={`${panelClass} bg-blue-primary/5 border-blue-primary/30`}>
-            <h3 className="text-sm font-semibold text-dark-text mb-2">Tips</h3>
-            <ul className="text-xs text-dark-text-muted space-y-1">
-              <li>• Use high-contrast colors for accessibility</li>
-              <li>• Test colors on different backgrounds</li>
-              <li>• Ensure text is readable on background</li>
-              <li>• Logo should work on light and dark themes</li>
-            </ul>
-          </div>
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="text-white p-6 md:p-10 min-h-[calc(100vh-140px)] flex flex-col">
+      <div className="max-w-6xl mx-auto flex-1 flex flex-col w-full">
+        <div className="flex flex-col lg:flex-row gap-8 flex-1">
+          {/* Sidebar */}
+          <aside className="w-full lg:w-64 flex-shrink-0 space-y-8 lg:sticky lg:top-0 h-fit">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-white/50 px-3 mb-3">Organization</p>
+              <div className="space-y-1">
+                {NAV_ITEMS.map((item) => {
+                  const isActive = activeTab === item.id;
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => setActiveTab(item.id)}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-sm font-medium transition-all ${isActive
+                        ? 'bg-white/15 text-white'
+                        : 'text-white/60 hover:text-white hover:bg-white/5'
+                        } `}
+                    >
+                      <Icon size={18} />
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
+
+          {/* Divider (Desktop) */}
+          <div className="hidden lg:block w-px bg-white/5 rounded-full self-stretch" />
+
+          {/* Main Content */}
+          <main className="flex-1 min-w-0 max-w-3xl flex flex-col">
+            {renderContent()}
+          </main>
         </div>
       </div>
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-lg bg-[#1A1A1A] border border-white/10 rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6">
+              <div className="flex items-start gap-4">
+                <div className="p-3 bg-red-500/10 rounded-xl">
+                  <AlertTriangle className="text-red-400" size={24} />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-xl font-semibold text-white mb-2">Delete Department{pendingDeleteDepartments.length > 1 ? 's' : ''}?</h3>
+                  <p className="text-white/60 text-sm leading-relaxed mb-6">
+                    You are about to delete{' '}
+                    <strong className="text-white">
+                      {pendingDeleteDepartments.length > 1
+                        ? `${pendingDeleteDepartments.length} departments`
+                        : `"${pendingDeleteDepartments[0]}"`
+                      }
+                    </strong>
+                    . This department contains employees. How would you like to handle their accounts?
+                  </p>
+
+                  <div className="space-y-4">
+                    {/* Option 1: Reassign */}
+                    <div
+                      className={`p-4 rounded-xl border transition-all cursor-pointer ${deleteAction === 'reassign'
+                        ? 'bg-blue-500/10 border-blue-500/50 ring-1 ring-blue-500/50'
+                        : 'bg-white/5 border-white/10 hover:border-white/20'
+                        }`}
+                      onClick={() => setDeleteAction('reassign')}
+                    >
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${deleteAction === 'reassign' ? 'border-blue-500' : 'border-white/40'
+                          }`}>
+                          {deleteAction === 'reassign' && <div className="w-2 h-2 rounded-full bg-blue-500" />}
+                        </div>
+                        <span className={`font-medium ${deleteAction === 'reassign' ? 'text-blue-200' : 'text-white'}`}>
+                          Reassign Users
+                        </span>
+                      </div>
+                      <p className="text-sm text-white/50 pl-7">
+                        Move all users in this department to another department. They will keep their accounts and data.
+                      </p>
+
+                      {deleteAction === 'reassign' && (
+                        <div className="mt-4 pl-7">
+                          <select
+                            value={targetReassignDepartment}
+                            onChange={(e) => setTargetReassignDepartment(e.target.value)}
+                            className="w-full bg-[#0A0A0A] border border-white/20 rounded-lg px-3 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 outline-none"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <option value="">Select a department...</option>
+                            {departments
+                              .filter(d => !pendingDeleteDepartments.includes(d))
+                              .map(d => (
+                                <option key={d} value={d}>{d}</option>
+                              ))
+                            }
+                          </select>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Option 2: Delete Users */}
+                    <div
+                      className={`p-4 rounded-xl border transition-all cursor-pointer ${deleteAction === 'delete_users'
+                        ? 'bg-red-500/10 border-red-500/50 ring-1 ring-red-500/50'
+                        : 'bg-white/5 border-white/10 hover:border-white/20'
+                        }`}
+                      onClick={() => setDeleteAction('delete_users')}
+                    >
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${deleteAction === 'delete_users' ? 'border-red-500' : 'border-white/40'
+                          }`}>
+                          {deleteAction === 'delete_users' && <div className="w-2 h-2 rounded-full bg-red-500" />}
+                        </div>
+                        <span className={`font-medium ${deleteAction === 'delete_users' ? 'text-red-200' : 'text-white'}`}>
+                          Delete Accounts
+                        </span>
+                      </div>
+                      <p className="text-sm text-white/50 pl-7">
+                        Permanently delete all user accounts in this department. <span className="text-red-400 font-medium">This cannot be undone.</span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="p-4 bg-white/5 border-t border-white/10 flex items-center justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setPendingDeleteDepartments([]);
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors"
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                disabled={isDeleting || (deleteAction === 'reassign' && !targetReassignDepartment)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                Confirm Deletion
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 export default Company;
-

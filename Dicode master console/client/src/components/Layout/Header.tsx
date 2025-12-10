@@ -1,11 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { cn } from '@/lib/utils';
 import NotificationCenter from '@/components/Notifications/NotificationCenter';
+import GlobalSearch from '@/components/Search/GlobalSearch';
+import { Avatar } from '@/components/ui/avatar';
 import {
   Search,
   LogOut,
@@ -22,6 +24,7 @@ import {
   Building2,
   Settings,
   HelpCircle,
+  BarChart3,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -30,14 +33,24 @@ const pageConfig: Record<string, { title: string; icon: LucideIcon }> = {
   '/': { title: 'Home', icon: Home },
   '/campaigns': { title: 'Campaigns', icon: LayoutGrid },
   '/campaigns/new': { title: 'New Campaign', icon: LayoutGrid },
+  '/campaign': { title: 'Campaign Details', icon: LayoutGrid },
+  '/campaign/edit': { title: 'Edit Campaign', icon: LayoutGrid },
   '/generate': { title: 'Video Generator', icon: Sparkles },
   '/videos': { title: 'Video Library', icon: Film },
   '/assets': { title: 'Prompt Assets', icon: FolderOpen },
   '/access': { title: 'Access Control', icon: Shield },
   '/clients': { title: 'Clients', icon: Building2 },
+  '/analytics': { title: 'Analytics', icon: BarChart3 },
   '/settings': { title: 'Profile Settings', icon: User },
   '/main-settings': { title: 'Main Settings', icon: Settings },
   '/help': { title: 'Help & Support', icon: HelpCircle },
+};
+
+// Parent path mapping for breadcrumb hierarchy
+const parentPaths: Record<string, string> = {
+  '/campaign': '/campaigns',
+  '/campaign/edit': '/campaigns',
+  '/campaigns/new': '/campaigns',
 };
 
 // Page title mapping (for backwards compatibility)
@@ -47,31 +60,70 @@ const pageTitles: Record<string, string> = Object.fromEntries(
 
 // Get breadcrumb from pathname
 function getBreadcrumb(pathname: string): { label: string; path: string; icon?: LucideIcon }[] {
-  const parts = pathname.split('/').filter(Boolean);
   const breadcrumb: { label: string; path: string; icon?: LucideIcon }[] = [];
-  
-  let currentPath = '';
-  for (const part of parts) {
-    currentPath += `/${part}`;
-    const config = pageConfig[currentPath];
-    const label = config?.title || part.charAt(0).toUpperCase() + part.slice(1);
-    const icon = config?.icon;
-    breadcrumb.push({ label, path: currentPath, icon });
+
+  // Check if this path has a parent that should be shown first
+  const parentPath = parentPaths[pathname];
+  if (parentPath) {
+    const parentConfig = pageConfig[parentPath];
+    if (parentConfig) {
+      breadcrumb.push({
+        label: parentConfig.title,
+        path: parentPath,
+        icon: parentConfig.icon,
+      });
+    }
   }
-  
+
+  // Add the current page
+  const config = pageConfig[pathname];
+  if (config) {
+    breadcrumb.push({
+      label: config.title,
+      path: pathname,
+      icon: breadcrumb.length === 0 ? config.icon : undefined, // Only show icon on first item
+    });
+  } else {
+    // Fallback: build from path segments
+    const parts = pathname.split('/').filter(Boolean);
+    let currentPath = '';
+    for (const part of parts) {
+      currentPath += `/${part}`;
+      const segmentConfig = pageConfig[currentPath];
+      const label = segmentConfig?.title || part.charAt(0).toUpperCase() + part.slice(1);
+      const icon = segmentConfig?.icon;
+      breadcrumb.push({ label, path: currentPath, icon });
+    }
+  }
+
   return breadcrumb;
 }
 
 export default function Header() {
   const router = useRouter();
-  const pathname = usePathname();
+  const rawPathname = usePathname();
+  // Normalize pathname: remove trailing slash (except for root)
+  const pathname = rawPathname === '/' ? '/' : rawPathname.replace(/\/$/, '');
   const { user, signOut } = useAuth();
   const { isCollapsed, toggleSidebar } = useSidebar();
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
 
   const breadcrumb = getBreadcrumb(pathname);
   const pageTitle = pageTitles[pathname] || breadcrumb[breadcrumb.length - 1]?.label || 'Dashboard';
+
+  // Handle Cmd+K keyboard shortcut
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setShowSearch(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const handleSignOut = async () => {
     try {
@@ -80,12 +132,6 @@ export default function Header() {
     } catch (error) {
       console.error('Error signing out:', error);
     }
-  };
-
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    // Implement search functionality
-    console.log('Search:', searchQuery);
   };
 
   return (
@@ -129,30 +175,28 @@ export default function Header() {
               );
             })
           ) : (
-            <span className="font-medium text-slate-900">{pageTitle}</span>
+            <span className="flex items-center gap-2 font-medium text-slate-900">
+              <Home className="h-4 w-4 text-slate-500" />
+              {pageTitle}
+            </span>
           )}
         </div>
       </div>
 
       {/* Right Section: Search + Notifications + User */}
       <div className="flex items-center gap-3">
-        {/* Search */}
-        <form onSubmit={handleSearch} className="hidden md:block">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search..."
-              className="h-9 w-64 rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-12 text-sm text-slate-700 placeholder:text-slate-400 transition focus:border-slate-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-100"
-            />
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-400">
-              <Command className="h-2.5 w-2.5" />
-              <span>K</span>
-            </div>
+        {/* Search Button */}
+        <button
+          onClick={() => setShowSearch(true)}
+          className="hidden md:flex items-center gap-2 h-9 w-64 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-400 transition hover:border-slate-300 hover:bg-white"
+        >
+          <Search className="h-4 w-4" />
+          <span className="flex-1 text-left">Search...</span>
+          <div className="flex items-center gap-0.5 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium">
+            <Command className="h-2.5 w-2.5" />
+            <span>K</span>
           </div>
-        </form>
+        </button>
 
         {/* Notifications */}
         <NotificationCenter />
@@ -164,9 +208,12 @@ export default function Header() {
               onClick={() => setShowUserMenu(!showUserMenu)}
               className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition hover:bg-slate-100"
             >
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-sky-400 to-violet-500 text-xs font-bold text-white">
-                {(user.displayName || user.email)?.[0].toUpperCase()}
-              </div>
+              <Avatar
+                src={user.photoURL}
+                name={user.displayName}
+                email={user.email}
+                className="h-8 w-8 text-xs"
+              />
               <div className="hidden text-left sm:block">
                 <p className="text-sm font-medium text-slate-900 leading-tight">
                   {user.displayName || user.email?.split('@')[0]}
@@ -220,6 +267,9 @@ export default function Header() {
           </div>
         )}
       </div>
+
+      {/* Global Search Modal */}
+      <GlobalSearch isOpen={showSearch} onClose={() => setShowSearch(false)} />
     </header>
   );
 }

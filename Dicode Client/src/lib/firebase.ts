@@ -66,7 +66,7 @@ const analytics: Analytics | undefined =
 const auth = getAuth(app);
 const db = getFirestore(app);
 const storage = getStorage(app);
-const functions = getFunctions(app);
+const functions = getFunctions(app, 'us-central1');
 
 // Connect to Functions emulator if in development
 if (import.meta.env.DEV && import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true') {

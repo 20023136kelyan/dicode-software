@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Check, X, Plus, ArrowRight, Pencil } from 'lucide-react';
+import { Check, X, Plus, ArrowRight, Pencil, LogOut } from 'lucide-react';
 
 interface OrganizationOnboardingProps {
   onComplete: (data: OrganizationData) => Promise<void>;
   onSuccess?: () => void;
+  onLogout?: () => void;
   userEmail: string;
   userName: string;
 }
@@ -64,6 +65,7 @@ const STEPS = [
 const OrganizationOnboarding: React.FC<OrganizationOnboardingProps> = ({
   onComplete,
   onSuccess,
+  onLogout,
   userEmail,
   userName,
 }) => {
@@ -255,10 +257,21 @@ const OrganizationOnboarding: React.FC<OrganizationOnboardingProps> = ({
           </div>
         </nav>
 
-        {/* User Info */}
-        <div className="border-t border-white/10 pt-6">
-          <div className="text-xs text-white/40">Signed in as</div>
-          <div className="mt-1 truncate text-sm font-medium text-white/80">{userEmail}</div>
+        {/* User Info & Sign Out */}
+        <div className="border-t border-white/10 pt-6 space-y-4">
+          <div>
+            <div className="text-xs text-white/40">Signed in as</div>
+            <div className="mt-1 truncate text-sm font-medium text-white/80">{userEmail}</div>
+          </div>
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white/50 transition-colors hover:bg-white/5 hover:text-white/80"
+            >
+              <LogOut size={16} />
+              Sign out
+            </button>
+          )}
         </div>
       </aside>
 

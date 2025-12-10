@@ -22,10 +22,21 @@ import {
   AlertTriangle,
   Loader2,
   Mail,
+  MoreVertical,
+  Plus,
+  Shield,
+  CheckCircle2,
+  AlertCircle,
+  CreditCard,
+  Globe,
+  Filter,
 } from 'lucide-react';
+import { Avatar } from '@/components/ui/avatar';
+import { TableRowSkeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/contexts/AuthContext';
 import { collection, getDocs, query, orderBy, where, deleteDoc, doc, writeBatch, documentId } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { logActivity } from '@/lib/firestore';
 import MainLayout from '@/components/Layout/MainLayout';
 import type { Organization, User } from '@/lib/types';
 
@@ -54,17 +65,17 @@ interface AdminUser {
 // Helper to format dates
 function formatDate(date: Date | string | number | undefined, long?: boolean): string {
   if (!date) return '—';
-  const d = typeof date === 'object' && 'toDate' in date 
-    ? (date as any).toDate() 
+  const d = typeof date === 'object' && 'toDate' in date
+    ? (date as any).toDate()
     : new Date(date);
-  return d.toLocaleDateString('en-US', long ? { 
-    month: 'long', 
-    day: 'numeric', 
-    year: 'numeric' 
-  } : { 
-    month: 'short', 
-    day: 'numeric', 
-    year: 'numeric' 
+  return d.toLocaleDateString('en-US', long ? {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  } : {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
   });
 }
 
@@ -120,6 +131,23 @@ export default function ClientsPage() {
     }
   }, [user]);
 
+  // Escape key handler for slide-over panel
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && selectedOrg && !deleting) {
+        setSelectedOrg(null);
+      }
+    };
+    if (selectedOrg) {
+      document.addEventListener('keydown', handleEscape);
+      document.body.style.overflow = 'hidden';
+    }
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      document.body.style.overflow = 'unset';
+    };
+  }, [selectedOrg, deleting]);
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -127,7 +155,7 @@ export default function ClientsPage() {
         getDocs(query(collection(db, 'organizations'), orderBy('name'))),
         getDocs(collection(db, 'campaigns'))
       ]);
-      
+
       const orgs = orgsSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
@@ -148,7 +176,7 @@ export default function ClientsPage() {
 
   const filteredOrganizations = useMemo(() => {
     const filtered = organizations.filter(org => {
-      const matchesSearch = !searchTerm || 
+      const matchesSearch = !searchTerm ||
         org.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         org.slug?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         org.industry?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -210,7 +238,7 @@ export default function ClientsPage() {
     if (sortField !== field) {
       return <ChevronsUpDown className="h-3.5 w-3.5 text-slate-300" />;
     }
-    return sortDirection === 'asc' 
+    return sortDirection === 'asc'
       ? <ChevronUp className="h-3.5 w-3.5 text-slate-600" />
       : <ChevronDown className="h-3.5 w-3.5 text-slate-600" />;
   };
@@ -277,14 +305,14 @@ export default function ClientsPage() {
   // Delete organization and all related data
   const handleDeleteOrganization = async () => {
     if (!selectedOrg) return;
-    
+
     setDeleting(true);
     setDeleteError(null);
-    
+
     try {
       const batch = writeBatch(db);
       const orgId = selectedOrg.id;
-      
+
       // 1. Delete all users belonging to this organization
       const usersSnapshot = await getDocs(
         query(collection(db, 'users'), where('organization', '==', orgId))
@@ -293,13 +321,13 @@ export default function ClientsPage() {
         batch.delete(userDoc.ref);
       });
       console.log(`Queued ${usersSnapshot.docs.length} users for deletion`);
-      
+
       // 2. Delete all campaigns that have this org in allowedOrganizations
       // and also delete related campaign items, enrollments, progress, and responses
-      const campaignsToDelete = campaigns.filter(c => 
+      const campaignsToDelete = campaigns.filter(c =>
         c.allowedOrganizations?.includes(orgId)
       );
-      
+
       for (const campaign of campaignsToDelete) {
         // Delete campaign items
         const itemsSnapshot = await getDocs(
@@ -308,7 +336,7 @@ export default function ClientsPage() {
         itemsSnapshot.docs.forEach(itemDoc => {
           batch.delete(itemDoc.ref);
         });
-        
+
         // Delete campaign enrollments
         const enrollmentsSnapshot = await getDocs(
           query(collection(db, 'campaignEnrollments'), where('campaignId', '==', campaign.id))
@@ -316,7 +344,7 @@ export default function ClientsPage() {
         enrollmentsSnapshot.docs.forEach(enrollDoc => {
           batch.delete(enrollDoc.ref);
         });
-        
+
         // Delete campaign progress
         const progressSnapshot = await getDocs(
           query(collection(db, 'campaignProgress'), where('campaignId', '==', campaign.id))
@@ -324,7 +352,7 @@ export default function ClientsPage() {
         progressSnapshot.docs.forEach(progressDoc => {
           batch.delete(progressDoc.ref);
         });
-        
+
         // Delete campaign responses
         const responsesSnapshot = await getDocs(
           query(collection(db, 'campaignResponses'), where('campaignId', '==', campaign.id))
@@ -332,24 +360,42 @@ export default function ClientsPage() {
         responsesSnapshot.docs.forEach(responseDoc => {
           batch.delete(responseDoc.ref);
         });
-        
+
         // Delete the campaign itself
         batch.delete(doc(db, 'campaigns', campaign.id));
       }
       console.log(`Queued ${campaignsToDelete.length} campaigns for deletion`);
-      
+
       // 3. Delete the organization document
       batch.delete(doc(db, 'organizations', orgId));
-      
+
       // Commit all deletions
       await batch.commit();
-      
+
+      // Log activity
+      if (user) {
+        await logActivity({
+          action: 'access_updated',
+          userId: user.uid,
+          userEmail: user.email || '',
+          userName: user.displayName || undefined,
+          resourceId: orgId,
+          resourceName: selectedOrg.name,
+          resourceType: 'access',
+          metadata: {
+            action: 'organization_deleted',
+            usersDeleted: usersSnapshot.docs.length,
+            campaignsDeleted: campaignsToDelete.length,
+          },
+        });
+      }
+
       // Update local state
       setOrganizations(prev => prev.filter(o => o.id !== orgId));
       setCampaigns(prev => prev.filter(c => !c.allowedOrganizations?.includes(orgId)));
       setSelectedOrg(null);
       setShowDeleteConfirm(false);
-      
+
       console.log(`Successfully deleted organization ${selectedOrg.name} and all related data`);
     } catch (error) {
       console.error('Failed to delete organization:', error);
@@ -362,14 +408,6 @@ export default function ClientsPage() {
   return (
     <MainLayout>
       <div className="space-y-6">
-        {/* Header */}
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Clients</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Manage client organizations using DiCode
-          </p>
-        </div>
-
         {/* Stats Cards */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl border border-slate-200 bg-white p-5">
@@ -455,18 +493,42 @@ export default function ClientsPage() {
         {/* Organizations List */}
         <div className="rounded-xl border border-slate-200 bg-white">
           {loading ? (
-            <div className="p-8">
-              <div className="space-y-4">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="flex items-center gap-4 animate-pulse">
-                    <div className="h-12 w-12 rounded-lg bg-slate-200" />
-                    <div className="flex-1 space-y-2">
-                      <div className="h-4 w-48 rounded bg-slate-200" />
-                      <div className="h-3 w-32 rounded bg-slate-200" />
-                    </div>
+            <div className="divide-y divide-slate-100">
+              {/* Table Header Skeleton */}
+              <div className="grid grid-cols-12 gap-4 px-6 py-3 bg-slate-50">
+                {['w-24', 'w-16', 'w-16', 'w-14', 'w-20', 'w-8'].map((width, i) => (
+                  <div key={i} className={`col-span-${i === 0 ? 4 : 2} ${i === 5 ? 'col-span-1' : ''}`}>
+                    <div className={`h-3 ${width} bg-slate-200 rounded animate-pulse`} />
                   </div>
                 ))}
               </div>
+              {/* Row Skeletons */}
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="grid grid-cols-12 gap-4 px-6 py-4 items-center">
+                  <div className="col-span-4 flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-lg bg-slate-200 animate-pulse" />
+                    <div className="space-y-2">
+                      <div className="h-4 w-32 bg-slate-200 rounded animate-pulse" />
+                      <div className="h-3 w-20 bg-slate-200 rounded animate-pulse" />
+                    </div>
+                  </div>
+                  <div className="col-span-2">
+                    <div className="h-4 w-20 bg-slate-200 rounded animate-pulse" />
+                  </div>
+                  <div className="col-span-2">
+                    <div className="h-4 w-16 bg-slate-200 rounded animate-pulse" />
+                  </div>
+                  <div className="col-span-2">
+                    <div className="h-6 w-16 bg-slate-200 rounded-full animate-pulse" />
+                  </div>
+                  <div className="col-span-1">
+                    <div className="h-4 w-20 bg-slate-200 rounded animate-pulse" />
+                  </div>
+                  <div className="col-span-1 flex justify-end">
+                    <div className="h-5 w-5 bg-slate-200 rounded animate-pulse" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : filteredOrganizations.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -482,35 +544,35 @@ export default function ClientsPage() {
             <div className="divide-y divide-slate-100">
               {/* Table Header */}
               <div className="grid grid-cols-12 gap-4 px-6 py-3 text-xs font-medium uppercase tracking-wide text-slate-500 bg-slate-50">
-                <button 
+                <button
                   onClick={() => handleSort('name')}
                   className="col-span-4 flex items-center gap-1.5 hover:text-slate-700 transition text-left"
                 >
                   Organization
                   <SortIcon field="name" />
                 </button>
-                <button 
+                <button
                   onClick={() => handleSort('industry')}
                   className="col-span-2 flex items-center gap-1.5 hover:text-slate-700 transition text-left"
                 >
                   Industry
                   <SortIcon field="industry" />
                 </button>
-                <button 
+                <button
                   onClick={() => handleSort('region')}
                   className="col-span-2 flex items-center gap-1.5 hover:text-slate-700 transition text-left"
                 >
                   Region
                   <SortIcon field="region" />
                 </button>
-                <button 
+                <button
                   onClick={() => handleSort('plan')}
                   className="col-span-2 flex items-center gap-1.5 hover:text-slate-700 transition text-left"
                 >
                   Plan
                   <SortIcon field="plan" />
                 </button>
-                <button 
+                <button
                   onClick={() => handleSort('createdAt')}
                   className="col-span-2 flex items-center gap-1.5 hover:text-slate-700 transition text-left"
                 >
@@ -588,28 +650,26 @@ export default function ClientsPage() {
       </div>
 
       {/* Slide-over Panel */}
-      <div 
-        className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-300 ${
-          selectedOrg ? 'opacity-100' : 'opacity-0 pointer-events-none'
-        }`}
+      <div
+        className={`fixed inset-0 bg-black/20 z-40 transition-opacity duration-300 ${selectedOrg ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
         onClick={() => setSelectedOrg(null)}
       />
-      
+
       {/* Panel */}
-      <div 
-        className={`fixed right-0 top-0 bottom-0 w-full max-w-lg bg-white shadow-xl z-50 overflow-y-auto transform transition-transform duration-300 ease-out ${
-          selectedOrg ? 'translate-x-0' : 'translate-x-full'
-        }`}
+      <div
+        className={`fixed right-0 top-0 bottom-0 w-full max-w-lg bg-white shadow-xl z-50 overflow-y-auto transform transition-transform duration-300 ease-out ${selectedOrg ? 'translate-x-0' : 'translate-x-full'
+          }`}
       >
         {selectedOrg && (
           <>
             {/* Header */}
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <div 
+                <div
                   className="flex h-12 w-12 items-center justify-center rounded-xl text-lg font-bold text-white"
-                  style={{ 
-                    background: selectedOrg.settings?.primaryColor 
+                  style={{
+                    background: selectedOrg.settings?.primaryColor
                       ? `linear-gradient(135deg, ${selectedOrg.settings.primaryColor}, ${selectedOrg.settings.secondaryColor || selectedOrg.settings.primaryColor})`
                       : 'linear-gradient(135deg, #475569, #1e293b)'
                   }}
@@ -621,7 +681,7 @@ export default function ClientsPage() {
                   <p className="text-sm text-slate-500">@{selectedOrg.slug}</p>
                 </div>
               </div>
-              <button 
+              <button
                 onClick={() => setSelectedOrg(null)}
                 className="p-2 rounded-lg hover:bg-slate-100 transition"
               >
@@ -766,7 +826,7 @@ export default function ClientsPage() {
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-slate-500">Primary Color</span>
                     <div className="flex items-center gap-2">
-                      <div 
+                      <div
                         className="h-5 w-5 rounded border border-slate-200"
                         style={{ backgroundColor: selectedOrg.settings?.primaryColor || '#475569' }}
                       />
@@ -779,7 +839,7 @@ export default function ClientsPage() {
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-slate-500">Secondary Color</span>
                       <div className="flex items-center gap-2">
-                        <div 
+                        <div
                           className="h-5 w-5 rounded border border-slate-200"
                           style={{ backgroundColor: selectedOrg.settings.secondaryColor }}
                         />
@@ -797,7 +857,6 @@ export default function ClientsPage() {
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-sm font-semibold text-slate-900">Administrators</h3>
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                    {selectedOrg.adminIds?.length || 0}
                   </span>
                 </div>
                 {loadingAdmins ? (
@@ -819,9 +878,17 @@ export default function ClientsPage() {
                         key={admin.id}
                         className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2.5"
                       >
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-slate-900 truncate">{admin.name}</p>
-                          <p className="text-xs text-slate-500 truncate">{admin.email}</p>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <Avatar
+                            src={admin.avatar}
+                            name={admin.name}
+                            email={admin.email}
+                            className="h-8 w-8 text-xs shrink-0"
+                          />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-slate-900 truncate">{admin.name}</p>
+                            <p className="text-xs text-slate-500 truncate">{admin.email}</p>
+                          </div>
                         </div>
                         <a
                           href={`mailto:${admin.email || ''}`}
@@ -842,7 +909,13 @@ export default function ClientsPage() {
                         key={index}
                         className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2.5"
                       >
-                        <span className="text-sm text-slate-700 truncate min-w-0">{adminId}</span>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <Avatar
+                            email={adminId}
+                            className="h-8 w-8 text-xs shrink-0"
+                          />
+                          <span className="text-sm text-slate-700 truncate min-w-0">{adminId}</span>
+                        </div>
                         <a
                           href={`mailto:${adminId.includes('@') ? adminId : ''}`}
                           onClick={(e) => e.stopPropagation()}
@@ -865,7 +938,7 @@ export default function ClientsPage() {
                   <Edit2 className="h-4 w-4" />
                   Edit Client
                 </button>
-                <button 
+                <button
                   onClick={() => setShowDeleteConfirm(true)}
                   className="flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-white px-4 py-2.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50"
                 >
@@ -879,82 +952,84 @@ export default function ClientsPage() {
       </div>
 
       {/* Delete Confirmation Modal */}
-      {showDeleteConfirm && selectedOrg && (
-        <>
-          <div 
-            className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4"
-            onClick={() => !deleting && setShowDeleteConfirm(false)}
-          >
-            <div 
-              className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6"
-              onClick={e => e.stopPropagation()}
+      {
+        showDeleteConfirm && selectedOrg && (
+          <>
+            <div
+              className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4"
+              onClick={() => !deleting && setShowDeleteConfirm(false)}
             >
-              <div className="flex items-center gap-4 mb-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-100">
-                  <AlertTriangle className="h-6 w-6 text-rose-600" />
+              <div
+                className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-100">
+                    <AlertTriangle className="h-6 w-6 text-rose-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900">Delete Organization</h3>
+                    <p className="text-sm text-slate-500">This action cannot be undone</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-900">Delete Organization</h3>
-                  <p className="text-sm text-slate-500">This action cannot be undone</p>
-                </div>
-              </div>
-              
-              <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-100">
-                <p className="text-sm text-slate-700 mb-3">
-                  You are about to permanently delete <span className="font-semibold">{selectedOrg.name}</span>. This will also delete:
-                </p>
-                <ul className="text-sm text-slate-600 space-y-1.5">
-                  <li className="flex items-center gap-2">
-                    <span className="h-1.5 w-1.5 rounded-full bg-rose-400" />
-                    All users belonging to this organization
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <span className="h-1.5 w-1.5 rounded-full bg-rose-400" />
-                    {selectedOrgCampaigns.length} campaign{selectedOrgCampaigns.length !== 1 ? 's' : ''} assigned to this organization
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <span className="h-1.5 w-1.5 rounded-full bg-rose-400" />
-                    All campaign enrollments, progress, and responses
-                  </li>
-                </ul>
-              </div>
 
-              {deleteError && (
-                <div className="mb-4 p-3 rounded-lg bg-rose-100 text-sm text-rose-700">
-                  {deleteError}
+                <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-100">
+                  <p className="text-sm text-slate-700 mb-3">
+                    You are about to permanently delete <span className="font-semibold">{selectedOrg.name}</span>. This will also delete:
+                  </p>
+                  <ul className="text-sm text-slate-600 space-y-1.5">
+                    <li className="flex items-center gap-2">
+                      <span className="h-1.5 w-1.5 rounded-full bg-rose-400" />
+                      All users belonging to this organization
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="h-1.5 w-1.5 rounded-full bg-rose-400" />
+                      {selectedOrgCampaigns.length} campaign{selectedOrgCampaigns.length !== 1 ? 's' : ''} assigned to this organization
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="h-1.5 w-1.5 rounded-full bg-rose-400" />
+                      All campaign enrollments, progress, and responses
+                    </li>
+                  </ul>
                 </div>
-              )}
-              
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowDeleteConfirm(false)}
-                  disabled={deleting}
-                  className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleDeleteOrganization}
-                  disabled={deleting}
-                  className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-rose-700 disabled:opacity-50"
-                >
-                  {deleting ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Deleting...
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 className="h-4 w-4" />
-                      Delete Organization
-                    </>
-                  )}
-                </button>
+
+                {deleteError && (
+                  <div className="mb-4 p-3 rounded-lg bg-rose-100 text-sm text-rose-700">
+                    {deleteError}
+                  </div>
+                )}
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    disabled={deleting}
+                    className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDeleteOrganization}
+                    disabled={deleting}
+                    className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-rose-700 disabled:opacity-50"
+                  >
+                    {deleting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Deleting...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="h-4 w-4" />
+                        Delete Organization
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        </>
-      )}
-    </MainLayout>
+          </>
+        )
+      }
+    </MainLayout >
   );
 }

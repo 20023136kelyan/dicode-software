@@ -15,8 +15,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "DICode Video Generator",
-  description: "Create amazing videos with OpenAI's Sora 2 API",
+  title: "DiCode Master Console",
+  description: "Behavioral coaching campaign management platform - Create AI videos, manage campaigns, and track employee development",
   icons: {
     icon: "/dicode_logo.png",
   },

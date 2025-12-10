@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNotification } from '@/contexts/NotificationContext';
 import MainLayout from '@/components/Layout/MainLayout';
 import {
   User,
@@ -13,7 +14,6 @@ import {
   Moon,
   Sun,
   Key,
-  Smartphone,
   Clock,
   Globe,
   Check,
@@ -21,47 +21,106 @@ import {
   Camera,
   LogOut,
   AlertTriangle,
+  Loader2,
+  CheckCircle,
+  X,
 } from 'lucide-react';
 
 type Theme = 'light' | 'dark' | 'system';
 
 interface NotificationSetting {
-  id: string;
+  id: 'campaign_updates' | 'video_generation' | 'team_activity' | 'system_alerts';
   label: string;
   description: string;
   enabled: boolean;
 }
 
+const DEFAULT_NOTIFICATIONS: NotificationSetting[] = [
+  {
+    id: 'campaign_updates',
+    label: 'Campaign Updates',
+    description: 'Get notified when campaigns are published or updated',
+    enabled: true,
+  },
+  {
+    id: 'video_generation',
+    label: 'Video Generation',
+    description: 'Receive alerts when video generation completes',
+    enabled: true,
+  },
+  {
+    id: 'team_activity',
+    label: 'Team Activity',
+    description: 'Stay informed about team member actions',
+    enabled: false,
+  },
+  {
+    id: 'system_alerts',
+    label: 'System Alerts',
+    description: 'Important system notifications and updates',
+    enabled: true,
+  },
+];
+
 export default function SettingsPage() {
-  const { user, signOut } = useAuth();
+  const { 
+    user, 
+    userProfile, 
+    profileLoading, 
+    signOut, 
+    updateDisplayName, 
+    updateAvatar, 
+    updateNotificationPreferences 
+  } = useAuth();
+  const { info: showInfo } = useNotification();
+  
   const [activeSection, setActiveSection] = useState('profile');
   const [theme, setTheme] = useState<Theme>('light');
-  const [notifications, setNotifications] = useState<NotificationSetting[]>([
-    {
-      id: 'campaign_updates',
-      label: 'Campaign Updates',
-      description: 'Get notified when campaigns are published or updated',
-      enabled: true,
-    },
-    {
-      id: 'video_generation',
-      label: 'Video Generation',
-      description: 'Receive alerts when video generation completes',
-      enabled: true,
-    },
-    {
-      id: 'team_activity',
-      label: 'Team Activity',
-      description: 'Stay informed about team member actions',
-      enabled: false,
-    },
-    {
-      id: 'system_alerts',
-      label: 'System Alerts',
-      description: 'Important system notifications and updates',
-      enabled: true,
-    },
-  ]);
+  
+  // Profile state
+  const [displayName, setDisplayName] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileSaved, setProfileSaved] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  
+  // Avatar state
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarProgress, setAvatarProgress] = useState(0);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Notification state
+  const [notifications, setNotifications] = useState<NotificationSetting[]>(DEFAULT_NOTIFICATIONS);
+  const [savingNotifications, setSavingNotifications] = useState<string | null>(null);
+  
+  // Browser notifications state
+  const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(false);
+  const [requestingBrowserNotifications, setRequestingBrowserNotifications] = useState(false);
+
+  // Load initial data from userProfile
+  useEffect(() => {
+    if (userProfile) {
+      setDisplayName(userProfile.displayName || user?.displayName || '');
+      
+      // Map notification preferences to state
+      const prefs = userProfile.notificationPreferences;
+      setNotifications(prev => prev.map(n => ({
+        ...n,
+        enabled: prefs[n.id] ?? n.enabled,
+      })));
+      
+      setBrowserNotificationsEnabled(prefs.browser_notifications ?? false);
+    } else if (user) {
+      setDisplayName(user.displayName || '');
+    }
+  }, [userProfile, user]);
+
+  // Check browser notification permission on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setBrowserNotificationsEnabled(Notification.permission === 'granted');
+    }
+  }, []);
 
   const sections = [
     { id: 'profile', label: 'Profile', icon: User },
@@ -70,10 +129,108 @@ export default function SettingsPage() {
     { id: 'security', label: 'Security', icon: Shield },
   ];
 
-  const toggleNotification = (id: string) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, enabled: !n.enabled } : n))
-    );
+  const handleSaveProfile = async () => {
+    if (!displayName.trim()) {
+      setProfileError('Display name is required');
+      return;
+    }
+
+    setSavingProfile(true);
+    setProfileError(null);
+    setProfileSaved(false);
+
+    try {
+      await updateDisplayName(displayName.trim());
+      setProfileSaved(true);
+      setTimeout(() => setProfileSaved(false), 3000);
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : 'Failed to save profile');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleAvatarClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingAvatar(true);
+    setAvatarProgress(0);
+    setAvatarError(null);
+
+    try {
+      await updateAvatar(file, (progress) => {
+        setAvatarProgress(progress);
+      });
+    } catch (error) {
+      setAvatarError(error instanceof Error ? error.message : 'Failed to upload avatar');
+    } finally {
+      setUploadingAvatar(false);
+      setAvatarProgress(0);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const toggleNotification = async (id: NotificationSetting['id']) => {
+    const notification = notifications.find(n => n.id === id);
+    if (!notification) return;
+
+    const newValue = !notification.enabled;
+    
+    // Optimistic update
+    setNotifications(prev => prev.map(n => 
+      n.id === id ? { ...n, enabled: newValue } : n
+    ));
+    
+    setSavingNotifications(id);
+
+    try {
+      await updateNotificationPreferences({ [id]: newValue });
+    } catch (error) {
+      // Revert on error
+      setNotifications(prev => prev.map(n => 
+        n.id === id ? { ...n, enabled: !newValue } : n
+      ));
+      console.error('Failed to update notification preference:', error);
+    } finally {
+      setSavingNotifications(null);
+    }
+  };
+
+  const requestBrowserNotifications = async () => {
+    if (!('Notification' in window)) {
+      showInfo('Not Supported', 'Your browser does not support notifications.');
+      return;
+    }
+
+    setRequestingBrowserNotifications(true);
+
+    try {
+      const permission = await Notification.requestPermission();
+      const granted = permission === 'granted';
+      setBrowserNotificationsEnabled(granted);
+      
+      // Save preference to Firestore
+      await updateNotificationPreferences({ browser_notifications: granted });
+      
+      if (granted) {
+        new Notification('Notifications Enabled', {
+          body: 'You will now receive browser notifications from DiCode.',
+          icon: '/favicon.png',
+        });
+      }
+    } catch (error) {
+      console.error('Failed to request notification permission:', error);
+    } finally {
+      setRequestingBrowserNotifications(false);
+    }
   };
 
   const themeOptions: { value: Theme; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -82,18 +239,13 @@ export default function SettingsPage() {
     { value: 'system', label: 'System', icon: Monitor },
   ];
 
+  // Get current avatar URL
+  const avatarUrl = userProfile?.photoURL || user?.photoURL;
+
   return (
     <MainLayout>
       <div className="min-h-[calc(100vh-4rem)] bg-slate-50/50 p-6">
         <div className="mx-auto max-w-5xl">
-          {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-2xl font-semibold text-slate-900">Profile Settings</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Manage your account settings and preferences
-            </p>
-          </div>
-
           <div className="flex flex-col gap-6 lg:flex-row">
             {/* Sidebar Navigation */}
             <nav className="w-full shrink-0 lg:w-56">
@@ -133,24 +285,47 @@ export default function SettingsPage() {
                     <div className="flex flex-col items-start gap-6 sm:flex-row">
                       {/* Avatar */}
                       <div className="relative">
-                        <div className="flex h-24 w-24 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-400 to-violet-500 text-3xl font-bold text-white shadow-lg shadow-violet-500/20">
-                          {user?.photoURL ? (
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleAvatarChange}
+                          className="hidden"
+                        />
+                        <div className="flex h-24 w-24 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-400 to-violet-500 text-3xl font-bold text-white shadow-lg shadow-violet-500/20 overflow-hidden">
+                          {uploadingAvatar ? (
+                            <div className="flex flex-col items-center justify-center">
+                              <Loader2 className="h-6 w-6 animate-spin" />
+                              <span className="text-xs mt-1">{Math.round(avatarProgress)}%</span>
+                            </div>
+                          ) : avatarUrl ? (
                             <img
-                              src={user.photoURL}
-                              alt={user.displayName || 'User'}
-                              className="h-full w-full rounded-2xl object-cover"
+                              src={avatarUrl}
+                              alt={displayName || 'User'}
+                              className="h-full w-full object-cover"
                             />
                           ) : (
-                            (user?.displayName || user?.email)?.[0].toUpperCase()
+                            (displayName || user?.email)?.[0]?.toUpperCase() || '?'
                           )}
                         </div>
-                        <button className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-lg border-2 border-white bg-slate-900 text-white shadow-lg transition hover:bg-slate-800">
+                        <button 
+                          onClick={handleAvatarClick}
+                          disabled={uploadingAvatar}
+                          className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-lg border-2 border-white bg-slate-900 text-white shadow-lg transition hover:bg-slate-800 disabled:opacity-50"
+                        >
                           <Camera className="h-4 w-4" />
                         </button>
                       </div>
 
                       {/* Info */}
                       <div className="flex-1 space-y-4">
+                        {avatarError && (
+                          <div className="flex items-center gap-2 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                            <X className="h-4 w-4" />
+                            {avatarError}
+                          </div>
+                        )}
+                        
                         <div>
                           <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-slate-500">
                             Display Name
@@ -158,11 +333,15 @@ export default function SettingsPage() {
                           <div className="flex items-center gap-3">
                             <input
                               type="text"
-                              defaultValue={user?.displayName || ''}
+                              value={displayName}
+                              onChange={(e) => setDisplayName(e.target.value)}
                               placeholder="Your name"
                               className="h-10 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-900 placeholder:text-slate-400 transition focus:border-slate-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-100"
                             />
                           </div>
+                          {profileError && (
+                            <p className="mt-1.5 text-xs text-rose-600">{profileError}</p>
+                          )}
                         </div>
 
                         <div>
@@ -185,9 +364,26 @@ export default function SettingsPage() {
                       </div>
                     </div>
 
-                    <div className="mt-6 flex justify-end border-t border-slate-100 pt-6">
-                      <button className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800">
-                        Save Changes
+                    <div className="mt-6 flex items-center justify-end gap-3 border-t border-slate-100 pt-6">
+                      {profileSaved && (
+                        <div className="flex items-center gap-1.5 text-sm text-emerald-600">
+                          <CheckCircle className="h-4 w-4" />
+                          Saved successfully
+                        </div>
+                      )}
+                      <button 
+                        onClick={handleSaveProfile}
+                        disabled={savingProfile || profileLoading}
+                        className="flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-50"
+                      >
+                        {savingProfile ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Saving...
+                          </>
+                        ) : (
+                          'Save Changes'
+                        )}
                       </button>
                     </div>
                   </div>
@@ -291,19 +487,26 @@ export default function SettingsPage() {
                         </div>
                         <button
                           onClick={() => toggleNotification(notification.id)}
-                          className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                          disabled={savingNotifications === notification.id}
+                          className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
                             notification.enabled
                               ? 'bg-emerald-500'
                               : 'bg-slate-200'
                           }`}
                         >
-                          <span
-                            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
-                              notification.enabled
-                                ? 'left-[22px]'
-                                : 'left-0.5'
-                            }`}
-                          />
+                          {savingNotifications === notification.id ? (
+                            <span className="absolute inset-0 flex items-center justify-center">
+                              <Loader2 className="h-3 w-3 animate-spin text-slate-500" />
+                            </span>
+                          ) : (
+                            <span
+                              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                                notification.enabled
+                                  ? 'left-[22px]'
+                                  : 'left-0.5'
+                              }`}
+                            />
+                          )}
                         </button>
                       </div>
                     ))}
@@ -312,16 +515,34 @@ export default function SettingsPage() {
                   <div className="mt-6 rounded-lg bg-sky-50 p-4">
                     <div className="flex gap-3">
                       <Bell className="h-5 w-5 shrink-0 text-sky-600" />
-                      <div>
+                      <div className="flex-1">
                         <p className="text-sm font-medium text-sky-900">
                           Browser Notifications
                         </p>
                         <p className="mt-0.5 text-xs text-sky-700">
                           Enable browser notifications to receive real-time updates even when the app is in the background.
                         </p>
-                        <button className="mt-2 text-xs font-medium text-sky-600 hover:text-sky-700">
-                          Enable Browser Notifications →
-                        </button>
+                        {browserNotificationsEnabled ? (
+                          <div className="mt-2 flex items-center gap-1.5 text-xs font-medium text-emerald-600">
+                            <CheckCircle className="h-3.5 w-3.5" />
+                            Browser notifications enabled
+                          </div>
+                        ) : (
+                          <button 
+                            onClick={requestBrowserNotifications}
+                            disabled={requestingBrowserNotifications}
+                            className="mt-2 flex items-center gap-1.5 text-xs font-medium text-sky-600 hover:text-sky-700 disabled:opacity-50"
+                          >
+                            {requestingBrowserNotifications ? (
+                              <>
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                Requesting permission...
+                              </>
+                            ) : (
+                              'Enable Browser Notifications →'
+                            )}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -548,4 +769,3 @@ export default function SettingsPage() {
     </MainLayout>
   );
 }
-

@@ -23,7 +23,7 @@ interface SidebarContextType {
 
 const SidebarContext = createContext<SidebarContextType>({
   isCollapsed: false,
-  toggleSidebar: () => {},
+  toggleSidebar: () => { },
 });
 
 export const useSidebar = () => useContext(SidebarContext);
@@ -80,14 +80,12 @@ const Sidebar: React.FC = () => {
   return (
     <>
       <aside
-        className={`fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-white/[0.06] bg-dark-card transition-all duration-300 ease-in-out ${
-          isCollapsed ? 'w-[72px]' : 'w-64'
-        }`}
+        className={`fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-white/[0.06] bg-dark-card transition-all duration-300 ease-in-out ${isCollapsed ? 'w-[72px]' : 'w-64'
+          }`}
       >
         {/* Logo Header */}
-        <div className={`flex h-14 items-center border-b border-white/[0.06] px-4 ${
-          isCollapsed ? 'justify-center' : 'justify-between'
-        }`}>
+        <div className={`flex h-14 items-center border-b border-white/[0.06] px-4 ${isCollapsed ? 'justify-center' : 'justify-between'
+          }`}>
           {isCollapsed ? (
             <button
               onClick={toggleSidebar}
@@ -127,10 +125,9 @@ const Sidebar: React.FC = () => {
         {/* Quick Action Button */}
         <div className={`p-3 ${isCollapsed && 'px-2'}`}>
           <NavLink
-            to="/admin/campaigns"
-            className={`flex items-center justify-center gap-2 rounded-lg bg-primary font-medium text-dark-bg shadow-sm transition hover:bg-primary-dark ${
-              isCollapsed ? 'h-10 w-10 mx-auto' : 'h-10 px-4'
-            }`}
+            to="/admin/campaigns?tab=create"
+            className={`flex items-center justify-center gap-2 rounded-lg bg-primary font-medium text-dark-bg shadow-sm transition hover:bg-primary-dark ${isCollapsed ? 'h-10 w-10 mx-auto' : 'h-10 px-4'
+              }`}
             title={isCollapsed ? 'New Campaign' : undefined}
           >
             <Plus className="h-4 w-4" />
@@ -149,11 +146,10 @@ const Sidebar: React.FC = () => {
                 <NavLink
                   key={item.path}
                   to={item.path}
-                  className={`group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
-                    active
-                      ? 'bg-primary text-dark-bg'
-                      : 'text-dark-text-muted hover:bg-dark-card hover:text-dark-text'
-                  } ${isCollapsed && 'justify-center px-0'}`}
+                  className={`group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${active
+                    ? 'bg-primary text-dark-bg'
+                    : 'text-dark-text-muted hover:bg-white/5 hover:text-dark-text'
+                    } ${isCollapsed && 'justify-center px-0'}`}
                   title={isCollapsed ? item.label : undefined}
                 >
                   <Icon className={`h-5 w-5 flex-shrink-0 ${active ? 'text-dark-bg' : ''}`} />
@@ -170,7 +166,7 @@ const Sidebar: React.FC = () => {
                   {isCollapsed && item.badge && (
                     <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-violet-500" />
                   )}
-                  
+
                   {/* Tooltip for collapsed state */}
                   {isCollapsed && (
                     <div className="pointer-events-none absolute left-full ml-2 hidden rounded-md bg-dark-card border border-dark-border px-2 py-1 text-xs font-medium text-dark-text opacity-0 shadow-lg transition-opacity group-hover:opacity-100 lg:block z-50">
@@ -192,14 +188,13 @@ const Sidebar: React.FC = () => {
             {/* DI Copilot */}
             <button
               onClick={() => setIsCopilotOpen(true)}
-              className={`group relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-dark-text-muted transition-all hover:bg-dark-card hover:text-dark-text ${
-                isCollapsed && 'justify-center px-0'
-              }`}
+              className={`group relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-dark-text-muted transition-all hover:bg-dark-card hover:text-dark-text ${isCollapsed && 'justify-center px-0'
+                }`}
               title={isCollapsed ? 'DI Copilot' : undefined}
             >
               <MessageSquare className="h-5 w-5 flex-shrink-0" />
               {!isCollapsed && <span>DI Copilot</span>}
-              
+
               {/* Tooltip for collapsed state */}
               {isCollapsed && (
                 <div className="pointer-events-none absolute left-full ml-2 hidden rounded-md bg-dark-card border border-dark-border px-2 py-1 text-xs font-medium text-dark-text opacity-0 shadow-lg transition-opacity group-hover:opacity-100 lg:block z-50">
@@ -209,23 +204,24 @@ const Sidebar: React.FC = () => {
             </button>
 
             {/* Help & Support */}
-            <button
-              onClick={() => window.open('mailto:support@di-code.de', '_blank')}
-              className={`group relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-dark-text-muted transition-all hover:bg-dark-card hover:text-dark-text ${
-                isCollapsed && 'justify-center px-0'
-              }`}
+            <NavLink
+              to="/admin/help"
+              className={({ isActive }) => `group relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${isActive
+                ? 'bg-primary text-dark-bg'
+                : 'text-dark-text-muted hover:bg-dark-card hover:text-dark-text'
+                } ${isCollapsed && 'justify-center px-0'}`}
               title={isCollapsed ? 'Help & Support' : undefined}
             >
               <HelpCircle className="h-5 w-5 flex-shrink-0" />
               {!isCollapsed && <span>Help & Support</span>}
-              
+
               {/* Tooltip for collapsed state */}
               {isCollapsed && (
                 <div className="pointer-events-none absolute left-full ml-2 hidden rounded-md bg-dark-card border border-dark-border px-2 py-1 text-xs font-medium text-dark-text opacity-0 shadow-lg transition-opacity group-hover:opacity-100 lg:block z-50">
                   Help & Support
                 </div>
               )}
-            </button>
+            </NavLink>
           </div>
 
           {/* Expand toggle when collapsed */}

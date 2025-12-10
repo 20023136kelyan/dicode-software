@@ -9,11 +9,8 @@ export default defineConfig({
   target: "node20",
   platform: "node",
   dts: false,
-  // Removed external: ["@/app"] so tsup will try to bundle the imported code
-  noExternal: [/(.*)/], // Bundle everything except node_modules marked as external by default? 
-  // Actually, tsup by default bundles relative imports.
-  // The issue is likely that @/ aliases are treated as external packages if not resolved.
-  // We don't want to bundle firebase-functions or firebase-admin, so let's be specific.
+  // Bundle everything by default (including @ alias) except the explicit externals below
+  noExternal: [/(.*)/],
   external: [
     "firebase-functions",
     "firebase-admin", 
