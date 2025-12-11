@@ -361,7 +361,15 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (
         isDiCodeStaff() ||
         profileId == request.auth.uid ||
-        (resource.data != null && getUserOrganization() != null && resource.data.organizationId == getUserOrganization())
+        // Check if userSkillProfiles document's organizationId matches requester's organization
+        (resource.data != null && resource.data.organizationId != null && resource.data.organizationId == getUserOrganization()) ||
+        // Check if the profileId (userId) belongs to a user in the same organization
+        // This handles cases where userSkillProfiles document doesn't exist yet or has mismatched organizationId
+        (exists(/databases/$(database)/documents/users/$(profileId)) &&
+         get(/databases/$(database)/documents/users/$(profileId)).data.organization == getUserOrganization()) ||
+        // Allow org admins to read profiles of users in their organization
+        (exists(/databases/$(database)/documents/users/$(profileId)) &&
+         isOrgAdmin(get(/databases/$(database)/documents/users/$(profileId)).data.organization))
       );
       // Users can create their own skill profile (profileId must match their uid)
       allow create: if isAuthenticated() && profileId == request.auth.uid;
