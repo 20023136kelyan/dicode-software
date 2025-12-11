@@ -179,6 +179,7 @@ export function buildEnrollmentFromData(id: string, data: any): CampaignEnrollme
     totalModules: data.totalModules || data.totalModuleCount || 0,
     completedModules: data.completedModules || 0,
     moduleProgress: parseModuleProgressData(data.moduleProgress),
+    xpEarned: data.xpEarned, // XP earned for this campaign (set by cloud function on completion)
     metadata: data.metadata || { autoEnrolled: false },
   };
 }
@@ -2068,13 +2069,55 @@ export async function updateInvitationStatus(
 
 /**
  * Revoke (delete) an invitation
+ * Also deletes the associated Firebase Auth account and Firestore user document
  */
 export async function revokeInvitation(invitationId: string): Promise<void> {
   logFirestoreOperation('DELETE', INVITATIONS_COLLECTION, { id: invitationId });
 
   const docRef = doc(db, INVITATIONS_COLLECTION, invitationId);
-  await deleteDoc(docRef);
 
+  // First, get the invitation to find the email
+  const invitationSnap = await getDoc(docRef);
+  if (!invitationSnap.exists()) {
+    console.log(`Invitation ${invitationId} not found, nothing to revoke`);
+    return;
+  }
+
+  const invitation = invitationSnap.data();
+  const email = invitation.email?.toLowerCase();
+
+  if (email) {
+    // Find the user document by email
+    const usersQuery = query(
+      collection(db, USERS_COLLECTION),
+      where('email', '==', email)
+    );
+    const usersSnapshot = await getDocs(usersQuery);
+
+    if (!usersSnapshot.empty) {
+      const userId = usersSnapshot.docs[0].id;
+      console.log(`[revokeInvitation] Found user ${userId} for email ${email}, deleting account...`);
+
+      // Call deleteEmployeeAccount cloud function to clean up Auth + Firestore
+      const deleteEmployeeAccount = httpsCallable<
+        { userId: string },
+        { success: boolean }
+      >(functions, 'deleteEmployeeAccount');
+
+      try {
+        await deleteEmployeeAccount({ userId });
+        console.log(`✅ Firebase Auth account and user document deleted for: ${email}`);
+      } catch (error) {
+        console.error(`Failed to delete employee account for ${email}:`, error);
+        // Continue to delete invitation even if account deletion fails
+      }
+    } else {
+      console.log(`[revokeInvitation] No user found for email ${email}`);
+    }
+  }
+
+  // Delete the invitation document
+  await deleteDoc(docRef);
   console.log(`✅ Invitation revoked:`, invitationId);
 }
 
@@ -3109,6 +3152,9 @@ export async function getCampaignResponses(campaignId: string, organizationId?: 
         answer: data.answer,
         answeredAt: timestampToDate(data.answeredAt),
         metadata: data.metadata,
+        // Q2 SJT-specific fields (stored at top level for easier querying)
+        selectedOptionId: data.selectedOptionId,
+        intentScore: data.intentScore,
       };
     });
 
@@ -3150,6 +3196,9 @@ export async function getUserCampaignResponses(
         answer: data.answer,
         answeredAt: timestampToDate(data.answeredAt),
         metadata: data.metadata,
+        // Q2 SJT-specific fields (stored at top level for easier querying)
+        selectedOptionId: data.selectedOptionId,
+        intentScore: data.intentScore,
       };
     });
 
@@ -4162,27 +4211,6 @@ const BADGE_DEFINITIONS = [
   { id: 'xp-1000', name: 'XP Hunter', description: 'Earn 1000 XP', icon: '💎', criteria: { type: 'xp', threshold: 1000 } },
 ];
 
-/**
- * @deprecated Use server-computed level from `userStats` collection instead.
- * Calculate level from total XP
- */
-export function calculateLevelFromXP(totalXP: number): { level: number; title: string; tier: string; xpForNextLevel: number; currentLevelXP: number } {
-  const xpPerLevel = 100;
-  const level = Math.floor(totalXP / xpPerLevel) + 1;
-  const currentLevelXP = totalXP % xpPerLevel;
-  const xpForNextLevel = xpPerLevel;
-
-  // Determine tier and title
-  let title = 'Beginner';
-  let tier = 'beginner';
-
-  if (level >= 51) { title = 'Master'; tier = 'master'; }
-  else if (level >= 31) { title = 'Expert'; tier = 'expert'; }
-  else if (level >= 16) { title = 'Practitioner'; tier = 'practitioner'; }
-  else if (level >= 6) { title = 'Learner'; tier = 'learner'; }
-
-  return { level, title, tier, xpForNextLevel, currentLevelXP };
-}
 
 /**
  * Get or create a user's skill profile
@@ -4360,7 +4388,7 @@ export async function getCampaignCompletionSummary(
     return null;
   }
 
-  // Get user's responses for this campaign
+  // Get all responses for this campaign and filter by user
   const responses = await getCampaignResponses(campaignId, organizationId);
   const userResponses = responses.filter(r => r.userId === userId);
 
@@ -4378,7 +4406,7 @@ export async function getCampaignCompletionSummary(
   const estimatedTimePerModule = 5 * 60; // 5 minutes in seconds
   const timeSpent = totalModules * estimatedTimePerModule;
 
-  return {
+  const result = {
     campaignId,
     campaignTitle: campaign.title,
     completedAt: userEnrollment.completedAt || new Date(),
@@ -4400,6 +4428,8 @@ export async function getCampaignCompletionSummary(
       averageOrgScore: averageScore - 5, // Mock
     },
   };
+
+  return result;
 }
 
 /**

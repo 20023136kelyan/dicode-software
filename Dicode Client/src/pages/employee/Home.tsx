@@ -44,16 +44,6 @@ const getLevelTitle = (level: number): string => {
   return 'Master';
 };
 
-// Calculate level from total XP
-const calculateLevel = (totalXP: number): { level: number; currentXP: number; xpToNextLevel: number } => {
-  // Level thresholds: each level requires progressively more XP
-  const xpPerLevel = 100; // Base XP per level
-  const level = Math.floor(totalXP / xpPerLevel) + 1;
-  const currentXP = totalXP % xpPerLevel;
-  const xpToNextLevel = xpPerLevel;
-  return { level, currentXP, xpToNextLevel };
-};
-
 // Helper to format time ago
 const formatTimeAgo = (date: Date): string => {
   const now = new Date();

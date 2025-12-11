@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { X, ChevronUp, Loader, Check } from 'lucide-react';
 import {
@@ -11,7 +11,8 @@ import {
   checkUserEnrollment,
   enrollUserInCampaign,
   setModuleVideoFinished,
-  incrementModuleQuestionProgress
+  incrementModuleQuestionProgress,
+  getUserProfile
 } from '@/lib/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCampaignResponsesRealtime } from '@/hooks/useEnrollmentRealtime';
@@ -46,8 +47,11 @@ interface Slide {
 const VideoModule: React.FC = () => {
   const { moduleId } = useParams(); // This is campaignId
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams(); // Add search params
   const { user } = useAuth();
   const containerRef = useRef<HTMLDivElement>(null);
+
+
 
   // Campaign and video data
   const [campaign, setCampaign] = useState<Campaign | null>(null);
@@ -107,7 +111,23 @@ const VideoModule: React.FC = () => {
 
         // For org campaigns, auto-enroll if needed (safety net)
         if (!enrollment) {
-          await enrollUserInCampaign(moduleId, user.id, user.organization || '', 'system', true);
+          // Get user's organization - fetch from Firestore if not in hydrated user
+          let userOrgId = user.organization;
+          if (!userOrgId) {
+            const profile = await getUserProfile(user.id);
+            userOrgId = profile?.organization || '';
+          }
+
+          // Validate user's org is in campaign's allowedOrganizations
+          const allowedOrgs = campaignData.allowedOrganizations || [];
+          if (userOrgId && allowedOrgs.length > 0 && !allowedOrgs.includes(userOrgId)) {
+            console.warn('[auto-enroll] User org not in campaign allowedOrganizations');
+            setLoadError('You do not have access to this campaign');
+            setIsLoading(false);
+            return;
+          }
+
+          await enrollUserInCampaign(moduleId, user.id, userOrgId, 'system', true);
           enrollment = await checkUserEnrollment(moduleId, user.id);
         }
 
@@ -157,14 +177,14 @@ const VideoModule: React.FC = () => {
         // Build slides (Video -> Q1 -> Q2 -> Video 2 -> ...)
         const generatedSlides: Slide[] = [];
         let globalIndex = 0;
-        
+
         // Track the first slide index for each module (by itemId)
         const moduleStartIndices: Record<string, number> = {};
 
         videosData.forEach((video) => {
           // Record the starting index for this module
           moduleStartIndices[video.itemId] = globalIndex;
-          
+
           // Add Video Slide
           generatedSlides.push({
             id: `video-${video.id}`,
@@ -193,7 +213,11 @@ const VideoModule: React.FC = () => {
 
         // Find the first incomplete module to start from
         let startingSlideIndex = 0;
-        if (enrollment?.moduleProgress) {
+        const targetItemId = searchParams.get('item');
+
+        if (targetItemId && moduleStartIndices[targetItemId] !== undefined) {
+          startingSlideIndex = moduleStartIndices[targetItemId];
+        } else if (enrollment?.moduleProgress) {
           // Find the first module that isn't completed
           for (const item of sortedItems) {
             const moduleState = enrollment.moduleProgress[item.id];
@@ -209,7 +233,7 @@ const VideoModule: React.FC = () => {
         setSlides(generatedSlides);
         setCurrentSlideIndex(startingSlideIndex);
         setIsLoading(false);
-        
+
         // Scroll to the starting position after a brief delay to ensure DOM is ready
         if (startingSlideIndex > 0) {
           setTimeout(() => {
@@ -238,12 +262,61 @@ const VideoModule: React.FC = () => {
     };
   }, [moduleId, user]);
 
+  // State to track auto-scrolling to prevent lock interference
+  const [isAutoScrolling, setIsAutoScrolling] = useState(false);
+  const [isScrolling, setIsScrolling] = useState(false);
+  const [isAligned, setIsAligned] = useState(true);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const scrollToSlide = (index: number) => {
+    if (index >= slides.length) {
+      // End of campaign - go to campaign details to show completion summary
+      navigate(`/employee/campaign/${moduleId}`);
+      return;
+    }
+    if (containerRef.current) {
+      setIsAutoScrolling(true);
+      containerRef.current.scrollTo({
+        top: index * containerRef.current.clientHeight,
+        behavior: 'smooth'
+      });
+
+      // Reset auto-scrolling state after animation finishes
+      setTimeout(() => {
+        setIsAutoScrolling(false);
+        // Ensure aligned state is reset to true after auto-scroll
+        setIsAligned(true);
+      }, 1000); // 1s should cover smooth scroll duration
+    }
+  };
+
   // Handle Scroll Snap detection
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const handleScroll = () => {
+      // Always set scrolling true on any movement
+      setIsScrolling(true);
+      setIsAligned(false);
+
+      // Clear existing timeout
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+
+      // Set timeout to clear scrolling state when movement stops
+      scrollTimeoutRef.current = setTimeout(() => {
+        setIsScrolling(false);
+
+        // Check if we are aligned with a slide
+        if (container) {
+          const currentScroll = container.scrollTop;
+          const slideHeight = container.clientHeight;
+          const targetScroll = Math.round(currentScroll / slideHeight) * slideHeight;
+          const isSnapAligned = Math.abs(currentScroll - targetScroll) < 10; // 10px tolerance
+          setIsAligned(isSnapAligned);
+        }
+      }, 150); // Short debounce to detect stop
+
       const index = Math.round(container.scrollTop / container.clientHeight);
       if (index !== currentSlideIndex && index >= 0 && index < slides.length) {
         setCurrentSlideIndex(index);
@@ -251,7 +324,10 @@ const VideoModule: React.FC = () => {
     };
 
     container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    };
   }, [slides.length, currentSlideIndex]);
 
   // Pre-fill responses from saved responses when slides and savedResponses are ready
@@ -269,13 +345,13 @@ const VideoModule: React.FC = () => {
           const compositeKey = `${videoId}_${questionId}`;
           const saved = savedResponses[compositeKey];
           if (saved) {
-            // For SJT questions, reconstruct the full response object from metadata
-            // because we only save intentScore as the answer value
-            const isSJT = question.type === 'behavioral-intent' &&
-                          saved.metadata?.selectedOptionId;
-            if (isSJT && saved.metadata) {
+            // For SJT questions, reconstruct the full response object
+            // selectedOptionId is at TOP LEVEL (not in metadata) - check both for backwards compat
+            const selectedOptionId = saved.selectedOptionId || saved.metadata?.selectedOptionId;
+            const isSJT = question.type === 'behavioral-intent' && selectedOptionId;
+            if (isSJT) {
               preFilledResponses[compositeKey] = {
-                selectedOptionId: saved.metadata.selectedOptionId!,
+                selectedOptionId: selectedOptionId!,
                 intentScore: saved.answer as number
               };
             } else {
@@ -336,10 +412,10 @@ const VideoModule: React.FC = () => {
 
     if (!campaign || !user || !currentSlide) return;
 
-    console.log(`📝 Current slide info:`, { 
-      itemId: currentSlide.itemId, 
+    console.log(`📝 Current slide info:`, {
+      itemId: currentSlide.itemId,
       questionTarget: currentSlide.questionTarget,
-      videoId: currentSlide.videoId 
+      videoId: currentSlide.videoId
     });
 
     setSavingResponse(compositeKey);
@@ -390,19 +466,7 @@ const VideoModule: React.FC = () => {
     }
   };
 
-  const scrollToSlide = (index: number) => {
-    if (index >= slides.length) {
-      // End of campaign - go to campaign details to show completion summary
-      navigate(`/employee/campaign/${moduleId}`);
-      return;
-    }
-    if (containerRef.current) {
-      containerRef.current.scrollTo({
-        top: index * containerRef.current.clientHeight,
-        behavior: 'smooth'
-      });
-    }
-  };
+
 
   // Loading state - skeleton that matches the video experience
   if (isLoading) {
@@ -438,6 +502,13 @@ const VideoModule: React.FC = () => {
     )
   }
 
+  // Calculate scroll lock state
+  const currentSlide = slides[currentSlideIndex];
+  const isQuestion = currentSlide?.type === 'question';
+  const currentQuestionId = isQuestion ? (currentSlide.content as Question).id : null;
+  const currentResponseKey = isQuestion && currentSlide ? `${currentSlide.videoId}_${currentQuestionId}` : '';
+  const isLocked = !isAutoScrolling && !isScrolling && isAligned && isQuestion && responses[currentResponseKey] === undefined;
+
   return (
     <div className="fixed inset-0 bg-black text-white overflow-hidden">
       {/* Close Button */}
@@ -451,7 +522,8 @@ const VideoModule: React.FC = () => {
       {/* Main Feed Container */}
       <div
         ref={containerRef}
-        className="h-full w-full overflow-y-scroll snap-y snap-mandatory scroll-smooth no-scrollbar"
+        className={`h-full w-full snap-y snap-mandatory scroll-smooth no-scrollbar ${isLocked ? 'overflow-hidden' : 'overflow-y-scroll'
+          }`}
         style={{ scrollSnapType: 'y mandatory' }}
       >
         {slides.map((slide, index) => {
@@ -617,8 +689,8 @@ const QuestionSlide = ({
   }, [response]);
 
   // Progress percentage for the bar
-  const progressPercent = questionIndex !== undefined && totalQuestions 
-    ? ((questionIndex + 1) / totalQuestions) * 100 
+  const progressPercent = questionIndex !== undefined && totalQuestions
+    ? ((questionIndex + 1) / totalQuestions) * 100
     : 0;
 
   return (
@@ -626,30 +698,43 @@ const QuestionSlide = ({
       {/* Progress bar */}
       {questionIndex !== undefined && totalQuestions !== undefined && (
         <div className="absolute top-10 left-6 right-20 h-2 bg-white/10 rounded-full overflow-hidden">
-          <motion.div 
+          <motion.div
             className="h-full bg-gradient-to-r from-[#00A3FF] to-[#00D4FF] rounded-full"
             initial={{ width: 0 }}
             animate={{ width: `${progressPercent}%` }}
             transition={{ duration: 0.3 }}
           />
-            </div>
-          )}
+        </div>
+      )}
 
       <div className="w-full max-w-sm mx-auto">
         {/* Question Counter */}
         {questionIndex !== undefined && totalQuestions !== undefined && (
-          <motion.div 
-            className="mb-5"
+          <motion.div
+            className="mb-5 flex items-center gap-3"
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
           >
-            <span className="text-[#00A3FF] text-base font-semibold">Question {questionIndex + 1}</span>
-            <span className="text-white/30 text-base">/{totalQuestions}</span>
+            <div>
+              <span className="text-[#00A3FF] text-base font-semibold">Question {questionIndex + 1}</span>
+              <span className="text-white/30 text-base">/{totalQuestions}</span>
+            </div>
+
+            {/* Answered Checkmark */}
+            {isAnswered && (
+              <motion.div
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className="flex items-center justify-center w-6 h-6 rounded-full bg-green-500 shadow-lg shadow-green-500/20"
+              >
+                <Check size={14} className="text-white" strokeWidth={3} />
+              </motion.div>
+            )}
           </motion.div>
         )}
 
         {/* Context Card */}
-        <motion.div 
+        <motion.div
           className="bg-gradient-to-br from-white/8 to-white/4 backdrop-blur-sm rounded-2xl p-4 mb-6 border border-white/5"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -672,12 +757,12 @@ const QuestionSlide = ({
                 );
               })()}
             </p>
-        </div>
+          </div>
         </motion.div>
 
         {/* Question Prompt */}
         {data.type === 'behavioral-intent' && data.options && data.options.length > 0 && (
-          <motion.h3 
+          <motion.h3
             className="text-white font-semibold text-lg mb-4"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -690,7 +775,7 @@ const QuestionSlide = ({
         <div className={`${isAnswered ? 'pointer-events-none' : ''}`}>
           {/* Q1 - Behavioral Perception (7-point Likert scale) */}
           {data.type === 'behavioral-perception' && (
-            <motion.div 
+            <motion.div
               className="space-y-5"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -723,58 +808,57 @@ const QuestionSlide = ({
             </motion.div>
           )}
 
-          {/* Q2 - Behavioral Intent (SJT Multiple Choice) - Tall 2x2 Grid */}
+          {/* Q2 - Behavioral Intent (SJT Multiple Choice) - Vertical List */}
           {data.type === 'behavioral-intent' && data.options && data.options.length > 0 && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-3">
               {data.options.map((option, idx) => {
                 const isSelected = selectedOptionId === option.id;
-                
+
                 return (
                   <motion.button
-                  key={option.id}
-                  onClick={() => !isAnswered && onAnswer({
-                    selectedOptionId: option.id,
-                    intentScore: option.intentScore
-                  })}
-                  disabled={isAnswered}
+                    key={option.id}
+                    onClick={() => !isAnswered && onAnswer({
+                      selectedOptionId: option.id,
+                      intentScore: option.intentScore
+                    })}
+                    disabled={isAnswered}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.1 + idx * 0.05 }}
                     whileTap={{ scale: 0.98 }}
-                  className={`
-                      relative rounded-3xl p-4 transition-all duration-200 min-h-[160px] flex flex-col
+                    className={`
+                      relative rounded-2xl p-4 transition-all duration-200 min-h-[60px] flex items-center text-left
                       ${isSelected
                         ? isAnswered
                           ? 'bg-gradient-to-br from-[#00A3FF]/30 to-[#0077B3]/20 ring-1 ring-[#00A3FF]/50'
                           : 'bg-gradient-to-br from-[#00A3FF] to-[#0077B3] ring-2 ring-[#00A3FF] shadow-xl shadow-[#00A3FF]/30'
-                      : isAnswered
+                        : isAnswered
                           ? 'bg-white/5'
                           : 'bg-gradient-to-br from-white/10 to-white/5 hover:from-white/15 hover:to-white/8 active:scale-[0.98]'}
                     `}
                   >
-                    {/* Selection indicator - show check when answered */}
-                    {isSelected && isAnswered && (
-                      <motion.div 
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        className="absolute top-3 left-3 w-6 h-6 rounded-full flex items-center justify-center shadow-lg bg-[#00A3FF]/70"
-                      >
-                        <Check size={14} className="text-white" strokeWidth={3} />
-                      </motion.div>
-                    )}
-                    
+                    {/* Selection indicator - checkmark in circle */}
+                    <div className="flex-shrink-0 mr-4">
+                      {isSelected ? (
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center shadow-lg bg-white/20">
+                          <Check size={14} className="text-white" strokeWidth={3} />
+                        </div>
+                      ) : (
+                        <div className={`w-6 h-6 rounded-full border-2 ${isAnswered ? 'border-white/10' : 'border-white/30'}`} />
+                      )}
+                    </div>
+
                     {/* Option content */}
-                    <div className="flex flex-col items-center justify-center flex-1 text-center px-2">
+                    <div className="flex-1 min-w-0">
                       {/* Option text */}
-                      <span className={`text-[11px] leading-snug transition-all ${
-                        isSelected
-                          ? isAnswered
-                            ? 'text-white/80 font-medium'
-                            : 'text-white font-medium'
-                          : isAnswered
-                            ? 'text-white/30'
-                            : 'text-white/70'
-                      }`}>
+                      <span className={`block text-sm leading-snug truncate transition-all ${isSelected
+                        ? isAnswered
+                          ? 'text-white/80 font-medium'
+                          : 'text-white font-medium'
+                        : isAnswered
+                          ? 'text-white/30'
+                          : 'text-white/90'
+                        }`}>
                         {option.text}
                       </span>
                     </div>
@@ -786,7 +870,7 @@ const QuestionSlide = ({
 
           {/* Fallback for Q2 without options (legacy support) */}
           {data.type === 'behavioral-intent' && (!data.options || data.options.length === 0) && (
-            <motion.div 
+            <motion.div
               className="space-y-5"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -824,7 +908,7 @@ const QuestionSlide = ({
 
           {/* Q3 - Qualitative (Free text) */}
           {data.type === 'qualitative' && (
-            <motion.div 
+            <motion.div
               className="space-y-4"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -860,7 +944,7 @@ const QuestionSlide = ({
 
         {/* Saving indicator */}
         {isSaving && (
-          <motion.div 
+          <motion.div
             className="mt-6 flex justify-center"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -872,34 +956,10 @@ const QuestionSlide = ({
           </motion.div>
         )}
 
-        {/* Answered indicator */}
-        {isAnswered && !isSaving && (
-          <motion.div 
-            className="mt-6 flex justify-center"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
-            <div className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-r from-green-500/20 to-green-600/20 border border-green-500/30 text-green-400 text-sm font-medium shadow-lg shadow-green-500/10">
-              <Check size={16} strokeWidth={3} />
-              <span>Answer saved</span>
-            </div>
-          </motion.div>
-        )}
+
 
         {/* Swipe hint */}
-        {isAnswered && !isSaving && (
-          <motion.div 
-            className="mt-4 flex justify-center"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.5 }}
-          >
-            <div className="flex flex-col items-center text-white/30 text-xs">
-              <ChevronUp size={20} className="animate-bounce" />
-              <span>Swipe up for next</span>
-          </div>
-          </motion.div>
-        )}
+
       </div>
     </div>
   );

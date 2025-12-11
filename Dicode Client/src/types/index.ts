@@ -482,6 +482,7 @@ export interface CampaignEnrollment {
   totalModules?: number;
   completedModules?: number;
   moduleProgress?: Record<string, ModuleProgress>;
+  xpEarned?: number; // Total XP earned for completing this campaign (set by cloud function)
   metadata: {
     enrolledBy?: string; // Admin who enrolled the user (if manual enrollment)
     autoEnrolled: boolean; // Whether user was auto-enrolled when campaign published

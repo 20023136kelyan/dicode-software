@@ -127,24 +127,6 @@ const MobileProfile: React.FC = () => {
     }
   };
 
-  // Calculate progress to next level based on score thresholds
-  const getLevelProgress = (level: number, score: number) => {
-    const thresholds: Record<number, { min: number; max: number }> = {
-      1: { min: 0, max: 50 },    // Level 1 -> 2 requires score >= 50
-      2: { min: 50, max: 65 },   // Level 2 -> 3 requires score >= 65
-      3: { min: 65, max: 80 },   // Level 3 -> 4 requires score >= 80
-      4: { min: 80, max: 90 },   // Level 4 -> 5 requires score >= 90
-      5: { min: 90, max: 100 },  // Max level
-    };
-    
-    const current = thresholds[level] || thresholds[1];
-    const range = current.max - current.min;
-    const progress = Math.min(100, Math.max(0, ((score - current.min) / range) * 100));
-    const pointsToNext = level < 5 ? Math.max(0, current.max - score) : 0;
-    
-    return { progress, pointsToNext, nextLevel: level < 5 ? level + 1 : null };
-  };
-
   return (
     <div className="min-h-screen lg:hidden pb-24 bg-black">
 
@@ -252,36 +234,28 @@ const MobileProfile: React.FC = () => {
               <h2 className="text-white font-semibold mb-4">Competency Progress</h2>
               {hasRealCompetencyData ? (
                 <div className="space-y-4">
-                  {topCompetencies.map((competency, index) => {
-                    const { progress, pointsToNext, nextLevel } = getLevelProgress(competency.level, competency.currentScore);
-                    
-                    return (
-                      <div key={competency.competencyId}>
-                        <div className="flex justify-between items-center text-sm mb-1.5">
-                          <span className="text-white">{competency.competencyName}</span>
-                          <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${getLevelColor(competency.level)}`}>
-                            Lv.{competency.level}
-                          </span>
+                  {topCompetencies.map((competency, index) => (
+                    <div key={competency.competencyId}>
+                      <div className="flex justify-between items-center text-sm mb-1.5">
+                        <span className="text-white">{competency.competencyName}</span>
+                        <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${getLevelColor(competency.level)}`}>
+                          Lv.{competency.level}
+                        </span>
+                      </div>
+                      <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                        <motion.div
+                          className="h-full bg-white rounded-full"
+                          initial={{ width: 0 }}
+                          animate={{ width: `${competency.currentScore}%` }}
+                          transition={{ duration: 0.5, delay: index * 0.1 }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-[10px] text-white/30 mt-1">
+                        <span>{competency.assessedSkillCount}/{competency.skillCount} skills assessed</span>
+                        <span>{Math.round(competency.currentScore)}%</span>
+                      </div>
                     </div>
-                    <div className="h-2 bg-white/10 rounded-full overflow-hidden">
-                      <motion.div
-                            className="h-full bg-white rounded-full"
-                        initial={{ width: 0 }}
-                            animate={{ width: `${progress}%` }}
-                        transition={{ duration: 0.5, delay: index * 0.1 }}
-                      />
-                    </div>
-                        <div className="flex justify-between text-[10px] text-white/30 mt-1">
-                          <span>{competency.assessedSkillCount}/{competency.skillCount} skills assessed</span>
-                          {nextLevel ? (
-                            <span>{Math.round(pointsToNext)} pts to Lv.{nextLevel}</span>
-                          ) : (
-                            <span>Max level reached</span>
-                          )}
-                  </div>
-              </div>
-                    );
-                  })}
+                  ))}
                 </div>
               ) : (
                 <div className="text-center py-6">

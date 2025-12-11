@@ -247,7 +247,7 @@ export const DesktopLayout: React.FC<DesktopLayoutProps> = ({
                   stroke="#60a5fa"
                   strokeWidth="2"
                   strokeLinecap="round"
-                  strokeDasharray={`${(streakStats.xpInCurrentLevel / streakStats.xpToNextLevel) * 100.5} 100.5`}
+                  strokeDasharray={`${Math.min(100.5, (streakStats.xpInCurrentLevel / streakStats.xpToNextLevel) * 100.5)} 100.5`}
                 />
               </svg>
               <div className="absolute inset-1">
@@ -315,8 +315,8 @@ export const DesktopLayout: React.FC<DesktopLayoutProps> = ({
                   <button
                     onClick={() => setNotificationFilter('all')}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${notificationFilter === 'all'
-                        ? 'bg-white/10 text-white'
-                        : 'text-white/50 hover:bg-white/5'
+                      ? 'bg-white/10 text-white'
+                      : 'text-white/50 hover:bg-white/5'
                       }`}
                   >
                     All
@@ -330,8 +330,8 @@ export const DesktopLayout: React.FC<DesktopLayoutProps> = ({
                   <button
                     onClick={() => setNotificationFilter('unread')}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${notificationFilter === 'unread'
-                        ? 'bg-white/10 text-white'
-                        : 'text-white/50 hover:bg-white/5'
+                      ? 'bg-white/10 text-white'
+                      : 'text-white/50 hover:bg-white/5'
                       }`}
                   >
                     Unread
@@ -360,6 +360,9 @@ export const DesktopLayout: React.FC<DesktopLayoutProps> = ({
                         onClick={() => {
                           markAsRead(notification.id);
                           setIsNotificationsOpen(false);
+                          if (notification.actionUrl) {
+                            navigate(notification.actionUrl);
+                          }
                         }}
                         className={`w-full px-6 py-4 text-left hover:bg-white/5 transition-colors border-b border-white/5 ${!notification.read ? 'bg-blue-500/5' : ''
                           }`}
@@ -368,10 +371,10 @@ export const DesktopLayout: React.FC<DesktopLayoutProps> = ({
                           {/* Icon/Avatar */}
                           <div className="relative flex-shrink-0">
                             <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${notification.type === 'achievement' ? 'bg-gradient-to-br from-amber-400 to-orange-500' :
-                                notification.type === 'reminder' ? 'bg-gradient-to-br from-blue-400 to-blue-600' :
-                                  notification.type === 'streak' ? 'bg-gradient-to-br from-orange-400 to-red-500' :
-                                    notification.type === 'campaign' ? 'bg-gradient-to-br from-purple-400 to-purple-600' :
-                                      'bg-gradient-to-br from-gray-400 to-gray-600'
+                              notification.type === 'reminder' ? 'bg-gradient-to-br from-blue-400 to-blue-600' :
+                                notification.type === 'streak' ? 'bg-gradient-to-br from-orange-400 to-red-500' :
+                                  notification.type === 'campaign' ? 'bg-gradient-to-br from-purple-400 to-purple-600' :
+                                    'bg-gradient-to-br from-gray-400 to-gray-600'
                               }`}>
                               {notification.type === 'achievement' ? <Trophy size={20} className="text-white" /> :
                                 notification.type === 'reminder' ? <Target size={20} className="text-white" /> :

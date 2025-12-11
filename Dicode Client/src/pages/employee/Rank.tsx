@@ -389,7 +389,7 @@ const Rank: React.FC = () => {
                 <div className="mt-4">
                   <div className="flex justify-between text-xs text-white/40 mb-1.5">
                     <span>Progress to Level {userStats.level + 1}</span>
-                    <span>{Math.round((userStats.xpInCurrentLevel / userStats.xpToNextLevel) * 100)}%</span>
+                    <span>{Math.min(100, Math.round((userStats.xpInCurrentLevel / userStats.xpToNextLevel) * 100))}%</span>
                   </div>
                   <div className="h-2 bg-black/20 rounded-full overflow-hidden">
                     <motion.div

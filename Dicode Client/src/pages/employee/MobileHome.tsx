@@ -37,15 +37,15 @@ const MobileHome: React.FC = () => {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
   // Get real-time notifications
-  const { 
-    notifications: rawNotifications, 
+  const {
+    notifications: rawNotifications,
     unreadCount,
     markAsRead,
     markAllAsRead,
   } = useEmployeeNotifications(user?.id || '');
-  
+
   // Convert to UI format
-  const notifications = useMemo(() => 
+  const notifications = useMemo(() =>
     rawNotifications.map(convertToUINotification),
     [rawNotifications]
   );
@@ -70,11 +70,11 @@ const MobileHome: React.FC = () => {
   const badgeStats = useMemo(() => {
     const completedCampaigns = enrollments.filter(e => e.status === 'completed').length;
     const skillsArray = Object.values(skillScores.skills || {});
-    const maxSkillLevel = skillsArray.length > 0 
+    const maxSkillLevel = skillsArray.length > 0
       ? Math.max(...skillsArray.map(s => s.level || 1))
       : 0;
     const skillsAtLevel3Plus = skillsArray.filter(s => (s.level || 1) >= 3).length;
-    
+
     return {
       currentStreak: streakStats.currentStreak,
       completedCampaigns,
@@ -123,11 +123,11 @@ const MobileHome: React.FC = () => {
   // Recalculate badges once per session (to catch any missed badges)
   useEffect(() => {
     if (!user?.id) return;
-    
+
     // Only run once per session
     const sessionKey = `badges_recalculated_${user.id}`;
     if (sessionStorage.getItem(sessionKey)) return;
-    
+
     recalculateBadges(user.id)
       .then((result) => {
         if (result.newBadges.length > 0) {
@@ -292,7 +292,7 @@ const MobileHome: React.FC = () => {
               </p>
             </div>
           </div>
-          
+
           {/* Right: Notification */}
           <button
             onClick={() => setIsNotificationsOpen(true)}
@@ -364,9 +364,12 @@ const MobileHome: React.FC = () => {
         onNotificationClick={(notification) => {
           // Mark as read when clicked
           markAsRead(notification.id);
-          // Close sheet and navigate based on type
+          // Close sheet and navigate based on type or actionUrl
           setIsNotificationsOpen(false);
-          if (notification.type === 'campaign') {
+
+          if (notification.actionUrl) {
+            navigate(notification.actionUrl);
+          } else if (notification.type === 'campaign') {
             navigate('/employee/learn');
           }
         }}

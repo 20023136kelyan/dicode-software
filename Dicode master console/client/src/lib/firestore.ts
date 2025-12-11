@@ -282,6 +282,7 @@ export async function getAllCampaignsList(): Promise<Campaign[]> {
       description: data.description,
       skillFocus: data.skillFocus,
       items: [], // Optimized: Don't fetch items for list view
+      itemIds: data.itemIds || [], // Include itemIds for module count display
       allowedOrganizations: data.allowedOrganizations,
       selectedSkills: data.selectedSkills,
       schedule: data.schedule,
@@ -292,7 +293,7 @@ export async function getAllCampaignsList(): Promise<Campaign[]> {
         createdAt: timestampToDate(data.metadata.createdAt),
         updatedAt: timestampToDate(data.metadata.updatedAt),
       },
-    };
+    } as any; // Type assertion to allow itemIds property
   });
 }
 

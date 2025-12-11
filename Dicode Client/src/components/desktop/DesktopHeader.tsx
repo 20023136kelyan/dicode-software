@@ -32,7 +32,7 @@ const DesktopHeader: React.FC<DesktopHeaderProps> = ({ onNotificationClick }) =>
     // Helper to calculate XP progress for the ring
     const xpProgress = useMemo(() => {
         if (!streakStats.xpToNextLevel) return 0;
-        return (streakStats.xpInCurrentLevel / streakStats.xpToNextLevel) * 100;
+        return Math.min(100, (streakStats.xpInCurrentLevel / streakStats.xpToNextLevel) * 100);
     }, [streakStats.xpInCurrentLevel, streakStats.xpToNextLevel]);
 
     return (
@@ -107,7 +107,7 @@ const DesktopHeader: React.FC<DesktopHeaderProps> = ({ onNotificationClick }) =>
                             stroke="#60a5fa"
                             strokeWidth="2"
                             strokeLinecap="round"
-                            strokeDasharray={`${xpProgress * 1.005} 100.5`}
+                            strokeDasharray={`${Math.min(100.5, xpProgress * 1.005)} 100.5`}
                         />
                     </svg>
                     <div className="absolute inset-1">

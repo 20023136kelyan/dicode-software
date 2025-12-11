@@ -143,6 +143,9 @@ export function useCampaignResponsesRealtime(
             answer: data.answer,
             answeredAt: data.answeredAt?.toDate ? data.answeredAt.toDate() : new Date(data.answeredAt),
             metadata: data.metadata,
+            // Q2 (behavioral-intent) SJT specific fields - stored at top level for easier querying
+            ...(data.selectedOptionId && { selectedOptionId: data.selectedOptionId }),
+            ...(data.intentScore !== undefined && { intentScore: data.intentScore }),
           };
           // Map by videoId_questionId for unique lookup (questions may have same IDs across videos)
           const compositeKey = `${data.videoId}_${data.questionId}`;

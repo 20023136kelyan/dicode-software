@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
-import { 
-  collection, 
-  query, 
-  where, 
-  orderBy, 
-  onSnapshot, 
-  doc, 
-  updateDoc, 
+import {
+  collection,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  doc,
+  updateDoc,
   writeBatch,
   limit,
   Timestamp
@@ -58,7 +58,7 @@ export function useEmployeeNotifications(userId: string): UseEmployeeNotificatio
       q,
       (snapshot) => {
         const notificationList: EmployeeNotification[] = [];
-        
+
         snapshot.forEach((doc) => {
           const data = doc.data();
           notificationList.push({
@@ -77,11 +77,11 @@ export function useEmployeeNotifications(userId: string): UseEmployeeNotificatio
             resourceId: data.resourceId,
             resourceName: data.resourceName,
             metadata: data.metadata,
-            createdAt: data.createdAt instanceof Timestamp 
-              ? data.createdAt.toDate() 
+            createdAt: data.createdAt instanceof Timestamp
+              ? data.createdAt.toDate()
               : data.createdAt,
-            expiresAt: data.expiresAt instanceof Timestamp 
-              ? data.expiresAt.toDate() 
+            expiresAt: data.expiresAt instanceof Timestamp
+              ? data.expiresAt.toDate()
               : data.expiresAt,
           });
         });
@@ -123,7 +123,7 @@ export function useEmployeeNotifications(userId: string): UseEmployeeNotificatio
     try {
       const batch = writeBatch(db);
       const unreadNotifications = notifications.filter(n => !n.read);
-      
+
       unreadNotifications.forEach((notification) => {
         const notificationRef = doc(db, EMPLOYEE_NOTIFICATIONS_COLLECTION, notification.id);
         batch.update(notificationRef, {
@@ -162,10 +162,11 @@ export function convertToUINotification(notification: EmployeeNotification): {
   message: string;
   timestamp: Date;
   read: boolean;
+  actionUrl?: string;
 } {
   // Map EmployeeNotificationType to UI notification type
   let uiType: 'achievement' | 'reminder' | 'campaign' | 'streak' | 'system' = 'system';
-  
+
   switch (notification.type) {
     case 'badge_earned':
     case 'level_up':
@@ -191,15 +192,46 @@ export function convertToUINotification(notification: EmployeeNotification): {
       break;
   }
 
+  // Determine action URL if not provided
+  let actionUrl = notification.actionUrl;
+
+  if (!actionUrl) {
+    switch (notification.type) {
+      case 'badge_earned':
+      case 'level_up':
+      case 'skill_mastered':
+        actionUrl = '/employee/badges';
+        break;
+      case 'new_campaign':
+      case 'campaign_reminder':
+      case 'campaign_completed':
+        if (notification.resourceId) {
+          actionUrl = `/employee/campaign/${notification.resourceId}`;
+        } else {
+          actionUrl = '/employee/learn';
+        }
+        break;
+      case 'streak_milestone':
+      case 'streak_at_risk':
+      case 'streak_broken':
+        actionUrl = '/employee/profile';
+        break;
+      default:
+        // Keep undefined or set default
+        break;
+    }
+  }
+
   return {
     id: notification.id,
     type: uiType,
     title: notification.title,
     message: notification.message,
-    timestamp: notification.createdAt instanceof Date 
-      ? notification.createdAt 
+    timestamp: notification.createdAt instanceof Date
+      ? notification.createdAt
       : new Date(notification.createdAt as string | number),
     read: notification.read,
+    actionUrl,
   };
 }
 

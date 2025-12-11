@@ -15,8 +15,8 @@ const EmployeeLayoutContent: React.FC = () => {
   const isCompletionScreen = searchParams.get('completion') === 'true';
 
   // Hide bottom nav on full-screen pages (video module, campaign details, subviews, completion, etc.) or when copilot is open
-  const hideBottomNav = 
-    location.pathname.includes('/module/') || 
+  const hideBottomNav =
+    location.pathname.includes('/module/') ||
     location.pathname.includes('/campaign/') ||
     location.pathname.includes('/comparison/') ||
     location.pathname.includes('/edit-profile') ||

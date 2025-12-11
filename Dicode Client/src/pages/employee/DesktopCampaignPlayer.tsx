@@ -19,7 +19,8 @@ import {
   setModuleVideoFinished,
   incrementModuleQuestionProgress,
   getCampaignCompletionSummary,
-  getCampaignProgress
+  getCampaignProgress,
+  getUserProfile
 } from '@/lib/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCampaignResponsesRealtime, useEnrollmentRealtime } from '@/hooks/useEnrollmentRealtime';
@@ -218,7 +219,23 @@ const DesktopCampaignPlayer: React.FC = () => {
 
         // For org campaigns, auto-enroll if needed
         if (!currentEnrollment) {
-          await enrollUserInCampaign(campaignId, user.id, user.organization || '', 'system', true);
+          // Get user's organization - fetch from Firestore if not in hydrated user
+          let userOrgId = user.organization;
+          if (!userOrgId) {
+            const profile = await getUserProfile(user.id);
+            userOrgId = profile?.organization || '';
+          }
+
+          // Validate user's org is in campaign's allowedOrganizations
+          const allowedOrgs = campaignData.allowedOrganizations || [];
+          if (userOrgId && allowedOrgs.length > 0 && !allowedOrgs.includes(userOrgId)) {
+            console.warn('[auto-enroll] User org not in campaign allowedOrganizations');
+            setLoadError('You do not have access to this campaign');
+            setIsLoading(false);
+            return;
+          }
+
+          await enrollUserInCampaign(campaignId, user.id, userOrgId, 'system', true);
           currentEnrollment = await checkUserEnrollment(campaignId, user.id);
         }
 
@@ -367,11 +384,8 @@ const DesktopCampaignPlayer: React.FC = () => {
     return () => { isMounted = false; };
   }, [campaignId, user]);
 
-  // Pre-fill responses logic (Fixed: reconstruct SJT object from metadata)
+  // Pre-fill responses logic (reconstruct SJT object from saved response)
   useEffect(() => {
-    // Debug: Log saved responses
-    console.log('[PreFill] savedResponses:', savedResponses, 'slides.length:', slides.length);
-
     if (slides.length > 0 && Object.keys(savedResponses).length > 0) {
       const preFilledResponses: Record<string, any> = {};
       slides.forEach((slide) => {
@@ -381,13 +395,12 @@ const DesktopCampaignPlayer: React.FC = () => {
           const key = `${slide.videoId}_${questionId}`;
           const saved = savedResponses[key];
           if (saved) {
-            // For SJT questions, reconstruct the full response object from metadata
-            // because we only save intentScore as the answer value
-            const isSJT = question.type === 'behavioral-intent' &&
-                          saved.metadata?.selectedOptionId;
-            if (isSJT && saved.metadata) {
+            // For SJT questions, reconstruct the full response object
+            // selectedOptionId is at TOP LEVEL of saved response (not in metadata)
+            const isSJT = question.type === 'behavioral-intent' && saved.selectedOptionId;
+            if (isSJT) {
               preFilledResponses[key] = {
-                selectedOptionId: saved.metadata.selectedOptionId!,
+                selectedOptionId: saved.selectedOptionId,
                 intentScore: saved.answer
               };
             } else {
@@ -402,13 +415,15 @@ const DesktopCampaignPlayer: React.FC = () => {
     }
   }, [slides, savedResponses]);
 
-  // Load completion summary when campaign is completed
+  // Load completion summary when campaign is completed OR when completion view is shown
+  // (to handle race condition where Cloud Function hasn't updated enrollment status yet)
   useEffect(() => {
     const loadCompletionSummary = async () => {
       if (!campaignId || !user?.id || !user?.organization) return;
 
-      // If enrollment is completed, fetch summary
-      if (enrollment?.status === 'completed') {
+      // Fetch summary if enrollment is completed OR if completion view is being shown
+      // This handles the race condition where user just finished but status isn't updated yet
+      if (enrollment?.status === 'completed' || viewMode === 'completion') {
         try {
           const summary = await getCampaignCompletionSummary(user.id, campaignId, user.organization);
           setCompletionSummary(summary);
@@ -432,7 +447,7 @@ const DesktopCampaignPlayer: React.FC = () => {
     };
 
     loadCompletionSummary();
-  }, [campaignId, user?.id, user?.organization, enrollment?.status, enrollment?.completedAt]);
+  }, [campaignId, user?.id, user?.organization, enrollment?.status, enrollment?.completedAt, viewMode]);
 
   useEffect(() => {
     if (viewMode === 'completion' && !showConfetti) {
@@ -720,8 +735,8 @@ const DesktopCampaignPlayer: React.FC = () => {
   const renderCompletionView = () => {
     if (!completionSummary && !enrollment) return null;
 
-    // Fallback data if summary fetch fails or is pending
-    const xpEarned = completionSummary?.xpEarned || 50;
+    // Use XP from enrollment (set by cloud function) if available, with fallbacks
+    const xpEarned = enrollment?.xpEarned || completionSummary?.xpEarned || 50;
     const modulesCompleted = completionSummary?.modulesCompleted || enrollment?.completedModules || 0;
     const questionsAnswered = completionSummary?.questionsAnswered || 0;
 
@@ -1217,7 +1232,7 @@ const ModuleSummary = ({ questions, videoId, responses, savedResponses }: Module
 
     // For SJT questions, we need to handle multiple response formats:
     // 1. Local response: { selectedOptionId, intentScore }
-    // 2. Saved response: { answer: intentScore, metadata: { selectedOptionId, ... } }
+    // 2. Saved response: { selectedOptionId at top level, answer: intentScore }
     if (question.type === 'behavioral-intent' && question.options) {
       let selectedOptionId: string | undefined;
 
@@ -1225,9 +1240,9 @@ const ModuleSummary = ({ questions, videoId, responses, savedResponses }: Module
       if (localResponse && typeof localResponse === 'object' && 'selectedOptionId' in localResponse) {
         selectedOptionId = (localResponse as any).selectedOptionId;
       }
-      // Fallback to saved response metadata
-      else if (savedResponse?.metadata?.selectedOptionId) {
-        selectedOptionId = savedResponse.metadata.selectedOptionId;
+      // Fallback to saved response - selectedOptionId is at TOP LEVEL (not in metadata)
+      else if (savedResponse?.selectedOptionId) {
+        selectedOptionId = savedResponse.selectedOptionId;
       }
 
       if (!selectedOptionId) return 'Not answered';

@@ -62,8 +62,8 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
             onDragEnd={handleDragEnd}
           >
             {/* Handle Bar */}
-            <div className="flex justify-center pt-3 pb-2 flex-shrink-0">
-              <div className="w-10 h-1 rounded-full bg-white/30" />
+            <div className="flex justify-center pt-[max(3.5rem,calc(env(safe-area-inset-top)+1.5rem))] pb-4 flex-shrink-0">
+              <div className="w-12 h-1.5 rounded-full bg-white/40" />
             </div>
 
             {/* Title */}

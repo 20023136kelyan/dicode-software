@@ -12,7 +12,10 @@ import {
   Tooltip,
   ResponsiveContainer,
   Cell,
-  LabelList
+  LabelList,
+  PieChart,
+  Pie,
+  Legend
 } from 'recharts';
 import AICopilot from '@/components/shared/AICopilot';
 import { useAuth } from '@/contexts/AuthContext';
@@ -29,6 +32,8 @@ interface ComparisonData {
   videoId?: string;
   type?: 'behavioral-perception' | 'behavioral-intent' | 'qualitative' | 'scale' | 'multiple-choice' | 'text';
   textResponses?: string[]; // For qualitative questions - all responses for word cloud
+  // Q2 (behavioral-intent) specific: map option ID to letter label + text for legend
+  optionLabels?: Record<string, { letter: string; text: string }>;
 }
 
 interface VideoGroup {
@@ -162,18 +167,139 @@ const LikertDistributionChart = ({
 };
 
 /**
- * Choice Distribution Chart - Shows horizontal bar distribution for multiple choice
+ * Q2 Pie Chart - Shows pie chart for behavioral-intent questions
+ * Highlights user's slice with "--you" label
+ */
+const Q2PieChart = ({
+  distribution,
+  userAnswer,
+  totalResponses,
+  optionLabels
+}: {
+  distribution: Record<string, number>;
+  userAnswer: string;
+  totalResponses: number;
+  optionLabels?: Record<string, { letter: string; text: string }>;
+}) => {
+  if (!optionLabels) return null;
+
+  // Build pie chart data from distribution
+  const pieData = Object.entries(distribution).map(([letter, count]) => {
+    const percentage = totalResponses > 0 ? Math.round((count / totalResponses) * 100) : 0;
+    const isUser = letter === String(userAnswer);
+    const optionInfo = Object.values(optionLabels).find(opt => opt.letter === letter);
+    
+    return {
+      name: letter,
+      value: count,
+      percentage,
+      isUser,
+      text: optionInfo?.text || '',
+      fill: isUser ? '#00A3FF' : `rgba(255,255,255,${0.2 + (count / totalResponses) * 0.3})`
+    };
+  }).sort((a, b) => a.name.localeCompare(b.name)); // Sort by letter A, B, C, D
+
+  const userSlice = pieData.find(d => d.isUser);
+
+  // Colors for non-user slices
+  const colors = ['rgba(255,255,255,0.2)', 'rgba(255,255,255,0.3)', 'rgba(255,255,255,0.25)', 'rgba(255,255,255,0.35)'];
+  pieData.forEach((d, idx) => {
+    if (!d.isUser) {
+      d.fill = colors[idx % colors.length];
+    }
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* Pie Chart */}
+      <div className="h-64 relative">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={pieData}
+              cx="50%"
+              cy="50%"
+              labelLine={false}
+              label={false}
+              outerRadius={80}
+              fill="#8884d8"
+              dataKey="value"
+            >
+              {pieData.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={entry.fill} stroke={entry.isUser ? '#00A3FF' : 'transparent'} strokeWidth={entry.isUser ? 2 : 0} />
+              ))}
+            </Pie>
+            <Tooltip 
+              content={({ active, payload }) => {
+                if (active && payload && payload[0]) {
+                  const data = payload[0].payload;
+                  return (
+                    <div className="bg-[#1a1a1a] border border-white/10 rounded-lg px-3 py-2 shadow-lg">
+                      <p className="text-white text-sm font-medium">{data.name}: {data.value} responses</p>
+                      <p className="text-white/50 text-xs">{data.percentage}%</p>
+                    </div>
+                  );
+                }
+                return null;
+              }}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+        
+        {/* "--you" label pointing to user's slice */}
+        {userSlice && (
+          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+            <div className="text-xs text-[#00A3FF] font-medium">--you</div>
+          </div>
+        )}
+      </div>
+
+      {/* Options List */}
+      <div className="space-y-2">
+        {pieData.map((data) => {
+          const optionInfo = Object.values(optionLabels).find(opt => opt.letter === data.name);
+          return (
+            <div key={data.name} className="flex items-start gap-3 text-sm">
+              <span className={`font-semibold flex-shrink-0 ${data.isUser ? 'text-[#00A3FF]' : 'text-white/70'}`}>
+                {data.name}.
+              </span>
+              <span className={`line-clamp-2 flex-1 ${data.isUser ? 'text-white' : 'text-white/50'}`}>
+                {optionInfo?.text || ''}
+              </span>
+              <span className={`text-xs flex-shrink-0 ${data.isUser ? 'text-[#00A3FF]' : 'text-white/40'}`}>
+                {data.percentage}%
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Choice Distribution Chart - Shows horizontal bar distribution for multiple choice (non-Q2)
  * Uses Recharts horizontal BarChart to show response distribution
  */
 const ChoiceDistributionChart = ({
   distribution,
   userAnswer,
-  totalResponses
+  totalResponses,
+  optionLabels
 }: {
   distribution: Record<string, number>;
   userAnswer: string;
   totalResponses: number;
+  // Q2 specific: map letter -> { letter, text } for legend
+  optionLabels?: Record<string, { letter: string; text: string }>;
 }) => {
+  // Check if this is a Q2 question with letter labels
+  const isQ2WithLabels = optionLabels && Object.keys(optionLabels).length > 0;
+
+  // For Q2, build legend data from optionLabels (sorted by letter)
+  const legendData = isQ2WithLabels
+    ? Object.values(optionLabels).sort((a, b) => a.letter.localeCompare(b.letter))
+    : null;
   // Prepare data for Recharts (sorted by count, limited to top 6)
   const chartData = Object.entries(distribution)
     .sort((a, b) => b[1] - a[1])
@@ -258,7 +384,7 @@ const ChoiceDistributionChart = ({
       <div className="flex items-center gap-4 text-xs">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded bg-[#00A3FF]" />
-          <span className="text-white/70">Your choice</span>
+          <span className="text-white/70">Your choice{isQ2WithLabels && `: ${userAnswer}`}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded bg-white/25" />
@@ -266,6 +392,23 @@ const ChoiceDistributionChart = ({
         </div>
         <span className="text-white/40 ml-auto">{totalResponses} total</span>
       </div>
+
+      {/* Q2 Option Labels Legend - Shows what each letter means */}
+      {legendData && (
+        <div className="bg-white/5 rounded-lg p-3 space-y-1.5">
+          <p className="text-xs text-white/40 font-medium mb-2">Options:</p>
+          {legendData.map(({ letter, text }) => (
+            <div key={letter} className="flex items-start gap-2 text-xs">
+              <span className={`font-semibold flex-shrink-0 ${letter === userAnswer ? 'text-[#00A3FF]' : 'text-white/70'}`}>
+                {letter}.
+              </span>
+              <span className={`line-clamp-3 ${letter === userAnswer ? 'text-white' : 'text-white/50'}`}>
+                {text}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Explanation */}
       <p className="text-sm text-white/50 leading-relaxed">
@@ -408,7 +551,14 @@ const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, emb
         campaign.items.forEach(item => videoIds.add(item.videoId));
 
         // 3. Fetch Videos and Build Question Map
-        const questionMap = new Map<string, { text: string; videoId: string; type?: string }>();
+        // Use composite key (videoId_questionId) to handle same questionIds across different videos
+        const questionMap = new Map<string, {
+          text: string;
+          videoId: string;
+          questionId: string;
+          type?: string;
+          options?: Array<{ id: string; text: string; intentScore: number }>;
+        }>();
         const videoTitleMap = new Map<string, string>();
 
         await Promise.all(
@@ -418,10 +568,15 @@ const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, emb
               if (video) {
                 videoTitleMap.set(vid, video.title);
                 video.questions?.forEach(q => {
-                  questionMap.set(q.id, {
+                  // Use composite key: videoId_questionId
+                  const compositeKey = `${vid}_${q.id}`;
+                  questionMap.set(compositeKey, {
                     text: q.statement || 'Question',
                     videoId: vid,
-                    type: q.type
+                    questionId: q.id,
+                    type: q.type,
+                    // Store options for Q2 behavioral-intent questions
+                    options: q.type === 'behavioral-intent' ? q.options : undefined
                   });
                 });
               }
@@ -434,22 +589,41 @@ const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, emb
         // Fallback for legacy items
         campaign.items.forEach(item => {
           item.questions?.forEach(q => {
-            if (!questionMap.has(q.id)) {
-              questionMap.set(q.id, { text: q.question, videoId: item.videoId });
+            const compositeKey = `${item.videoId}_${q.id}`;
+            if (!questionMap.has(compositeKey)) {
+              questionMap.set(compositeKey, { text: q.question, videoId: item.videoId, questionId: q.id });
             }
           });
         });
 
         // 4. Load Responses
+        console.log('[PeerComparison] Debug - Fetching responses for campaign:', moduleId, 'org:', user.organization);
         const allResponses = await getCampaignResponses(moduleId, user.organization);
+        console.log('[PeerComparison] Debug - All responses count:', allResponses.length);
+        console.log('[PeerComparison] Debug - All responses userIds:', [...new Set(allResponses.map(r => r.userId))]);
+        console.log('[PeerComparison] Debug - All responses organizationIds:', [...new Set(allResponses.map(r => r.organizationId))]);
+        
         const userResponsesRaw = await getUserCampaignResponses(moduleId, user.id);
 
-        // Deduplicate user responses - keep only the most recent answer per question
+        // Debug: Log campaign videoIds vs response videoIds
+        console.log('[PeerComparison] Debug - Campaign videoIds:', Array.from(videoIds));
+        console.log('[PeerComparison] Debug - User responses raw count:', userResponsesRaw.length);
+        console.log('[PeerComparison] Debug - User response videoIds:', [...new Set(userResponsesRaw.map(r => r.videoId))]);
+        console.log('[PeerComparison] Debug - User responses details:', userResponsesRaw.map(r => ({
+          questionId: r.questionId,
+          videoId: r.videoId,
+          answer: r.answer,
+          selectedOptionId: r.selectedOptionId
+        })));
+
+        // Deduplicate user responses - keep only the most recent answer per video+question combo
+        // Use composite key (videoId_questionId) since same questionIds can exist across different videos
         const userResponsesMap = new Map<string, any>();
         userResponsesRaw.forEach(response => {
-          const existing = userResponsesMap.get(response.questionId);
+          const compositeKey = `${response.videoId}_${response.questionId}`;
+          const existing = userResponsesMap.get(compositeKey);
           if (!existing || response.answeredAt > existing.answeredAt) {
-            userResponsesMap.set(response.questionId, response);
+            userResponsesMap.set(compositeKey, response);
           }
         });
         const userResponses = Array.from(userResponsesMap.values());
@@ -461,57 +635,131 @@ const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, emb
         }
         const { getUsersByOrganization } = await import('@/lib/firestore');
         const orgUsers = await getUsersByOrganization(user.organization);
+        console.log('[PeerComparison] Debug - Org users count:', orgUsers.length);
+        console.log('[PeerComparison] Debug - Org users IDs:', orgUsers.map(u => u.id));
+        
         const userRoleMap = new Map<string, string>();
         orgUsers.forEach((u: any) => userRoleMap.set(u.id, u.role || 'employee'));
 
         const currentUserRole = (user as any).role || 'employee';
+        console.log('[PeerComparison] Debug - Current user role:', currentUserRole);
 
         // Filter responses: Only include responses from users with the SAME role
         const relevantResponses = allResponses.filter(r => {
           const responderRole = userRoleMap.get(r.userId) || 'employee';
-          return responderRole === currentUserRole;
+          const matches = responderRole === currentUserRole;
+          if (!matches) {
+            console.log('[PeerComparison] Debug - Filtered out response:', {
+              userId: r.userId,
+              responderRole,
+              currentUserRole,
+              inUserRoleMap: userRoleMap.has(r.userId)
+            });
+          }
+          return matches;
         });
+        
+        console.log('[PeerComparison] Debug - Relevant responses after role filter:', relevantResponses.length);
+        console.log('[PeerComparison] Debug - Relevant response userIds:', [...new Set(relevantResponses.map(r => r.userId))]);
 
-        // 6. Group filtered responses
+        // 6. Group filtered responses using composite key (videoId_questionId)
         const responsesByQuestion = new Map<string, any[]>();
         relevantResponses.forEach(response => {
-          const existing = responsesByQuestion.get(response.questionId) || [];
+          const compositeKey = `${response.videoId}_${response.questionId}`;
+          const existing = responsesByQuestion.get(compositeKey) || [];
           existing.push(response);
-          responsesByQuestion.set(response.questionId, existing);
+          responsesByQuestion.set(compositeKey, existing);
         });
 
         // 7. Build Comparison Data
         const comparisonData: ComparisonData[] = [];
 
+        // Debug: Log questionMap keys vs user response composite keys
+        console.log('[PeerComparison] Debug - questionMap keys:', Array.from(questionMap.keys()));
+        console.log('[PeerComparison] Debug - userResponse composite keys:', userResponses.map(r => `${r.videoId}_${r.questionId}`));
+
         userResponses.forEach(userResponse => {
           const questionId = userResponse.questionId;
-          const allQuestionResponses = responsesByQuestion.get(questionId) || [];
-          const questionInfo = questionMap.get(questionId);
+          const videoId = userResponse.videoId;
+          const compositeKey = `${videoId}_${questionId}`;
+
+          // Use composite key for lookups
+          const allQuestionResponses = responsesByQuestion.get(compositeKey) || [];
+          const questionInfo = questionMap.get(compositeKey);
+
+          // Debug: Log each response's data for tracing
+          console.log('[PeerComparison] Debug - Processing response:', {
+            compositeKey,
+            questionId,
+            videoId,
+            questionInfoFound: !!questionInfo,
+            responsesFound: allQuestionResponses.length
+          });
 
           const distribution: Record<string | number, number> = {};
           const textResponses: string[] = [];
+          let optionLabels: Record<string, { letter: string; text: string }> | undefined;
 
-          allQuestionResponses.forEach(r => {
-            const answer = String(r.answer);
-            distribution[answer] = (distribution[answer] || 0) + 1;
+          // For Q2 (behavioral-intent), use selectedOptionId to build distribution with letter labels
+          const isQ2 = questionInfo?.type === 'behavioral-intent';
 
-            // Collect text responses for qualitative questions
-            if (questionInfo?.type === 'qualitative' || questionInfo?.type === 'text') {
-              textResponses.push(String(r.answer));
+          if (isQ2 && questionInfo?.options) {
+            // Build option ID -> letter label mapping (A, B, C, etc.)
+            optionLabels = {};
+            questionInfo.options.forEach((opt, idx) => {
+              const letter = String.fromCharCode(65 + idx); // A, B, C, ...
+              optionLabels![opt.id] = { letter, text: opt.text };
+            });
+
+            // Build distribution using letter labels
+            allQuestionResponses.forEach(r => {
+              const optionId = r.selectedOptionId;
+              if (optionId && optionLabels![optionId]) {
+                const letter = optionLabels![optionId].letter;
+                distribution[letter] = (distribution[letter] || 0) + 1;
+              }
+            });
+          } else {
+            // For Q1 and Q3, use answer directly
+            allQuestionResponses.forEach(r => {
+              const answer = String(r.answer);
+              distribution[answer] = (distribution[answer] || 0) + 1;
+
+              // Collect text responses for qualitative questions
+              if (questionInfo?.type === 'qualitative' || questionInfo?.type === 'text') {
+                textResponses.push(String(r.answer));
+              }
+            });
+          }
+
+          // For Q2, convert user's selectedOptionId to letter label
+          let userAnswer: string | number | boolean = userResponse.answer;
+          if (isQ2 && userResponse.selectedOptionId && optionLabels) {
+            const userOptLabel = optionLabels[userResponse.selectedOptionId];
+            if (userOptLabel) {
+              userAnswer = userOptLabel.letter;
             }
-          });
+          }
 
           comparisonData.push({
             questionId,
             question: questionInfo?.text || userResponse.metadata?.questionText || 'Question',
-            userAnswer: userResponse.answer,
+            userAnswer,
             answerDistribution: distribution,
             totalResponses: allQuestionResponses.length,
-            videoId: userResponse.videoId || questionInfo?.videoId,
+            videoId: videoId, // Use videoId from user response directly
             type: questionInfo?.type as any,
-            textResponses: textResponses.length > 0 ? textResponses : undefined
+            textResponses: textResponses.length > 0 ? textResponses : undefined,
+            optionLabels: isQ2 ? optionLabels : undefined
           });
         });
+
+        // Debug: Log comparisonData before grouping
+        console.log('[PeerComparison] Debug - comparisonData before grouping:', comparisonData.map(c => ({
+          questionId: c.questionId,
+          videoId: c.videoId,
+          totalResponses: c.totalResponses
+        })));
 
         // 8. Group by Video
         const groups: VideoGroup[] = [];
@@ -544,6 +792,15 @@ const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, emb
             comparisons: unknownComps
           });
         }
+
+        // Debug: Log final groups
+        console.log('[PeerComparison] Debug - Final groups:', groups.map(g => ({
+          videoId: g.videoId,
+          videoTitle: g.videoTitle,
+          comparisonCount: g.comparisons.length,
+          hasData: g.comparisons.length > 0
+        })));
+        console.log('[PeerComparison] Debug - comparisonsByVideo keys:', Array.from(comparisonsByVideo.keys()));
 
         setComparisonGroups(groups);
         setIsLoading(false);
@@ -583,30 +840,58 @@ const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, emb
 
   // Determine chart type and render appropriate visualization
   const renderQuestionVisualization = (comparison: ComparisonData) => {
-    const hasEnoughData = comparison.totalResponses >= 3;
+    // Show comparison if there's at least 1 other response (2 total = user + 1 peer)
+    const hasEnoughData = comparison.totalResponses >= 2;
 
     if (!hasEnoughData) {
+      // For Q2, show the option text along with the letter
+      let displayAnswer = String(comparison.userAnswer);
+      if (comparison.type === 'behavioral-intent' && comparison.optionLabels) {
+        // userAnswer is a letter (A, B, C...) - find the matching option text
+        const optEntry = Object.values(comparison.optionLabels).find(
+          opt => opt.letter === String(comparison.userAnswer)
+        );
+        if (optEntry) {
+          displayAnswer = `${optEntry.letter}. ${optEntry.text}`;
+        }
+      }
+
       return (
         <div className="bg-white/5 rounded-lg p-4 text-center">
           <p className="text-white/60 text-sm">
-            Your response: <span className="text-white font-medium">{String(comparison.userAnswer)}</span>
+            Your response: <span className="text-white font-medium">{displayAnswer}</span>
           </p>
           <p className="text-white/40 text-xs mt-2">
-            Gathering more perspectives ({comparison.totalResponses}/3 needed)
+            {comparison.totalResponses === 1 
+              ? 'Waiting for other colleagues to respond'
+              : `Gathering more perspectives (${comparison.totalResponses} responses)`}
           </p>
         </div>
       );
     }
 
-    // Q2: Multiple Choice (behavioral-intent) - bar chart
+    // Q2: Multiple Choice (behavioral-intent) - pie chart with letter labels
     // Check this FIRST because behavioral-intent stores intentScore (1-7) as answer
     // which would otherwise be detected as a Likert scale
-    if (comparison.type === 'behavioral-intent' || comparison.type === 'multiple-choice') {
+    if (comparison.type === 'behavioral-intent') {
+      return (
+        <Q2PieChart
+          distribution={comparison.answerDistribution}
+          userAnswer={String(comparison.userAnswer)}
+          totalResponses={comparison.totalResponses}
+          optionLabels={comparison.optionLabels}
+        />
+      );
+    }
+
+    // Other multiple choice questions (non-Q2)
+    if (comparison.type === 'multiple-choice') {
       return (
         <ChoiceDistributionChart
           distribution={comparison.answerDistribution}
           userAnswer={String(comparison.userAnswer)}
           totalResponses={comparison.totalResponses}
+          optionLabels={comparison.optionLabels}
         />
       );
     }
@@ -886,7 +1171,7 @@ const PeerComparison: React.FC<PeerComparisonProps> = ({ campaignIdOverride, emb
                       <span className="flex-shrink-0 w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center text-xs font-medium text-white/60">
                         {idx + 1}
                       </span>
-                      <p className="text-sm text-white/80 leading-relaxed">{comparison.question}</p>
+                      <p className="text-sm text-white/80 leading-relaxed line-clamp-3">{comparison.question}</p>
                     </div>
                   </div>
 

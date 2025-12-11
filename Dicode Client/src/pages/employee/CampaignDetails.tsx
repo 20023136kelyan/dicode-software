@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -17,7 +17,7 @@ import {
   Flame,
   X
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -33,7 +33,7 @@ import type { Campaign, Video } from '@/types';
 
 // Helper to check if completion celebration was already shown
 const getCompletionShownKey = (campaignId: string, completedAt: string) =>
-  `campaign_completion_shown_${campaignId}_${completedAt}`;
+  `campaign_completion_shown_${campaignId}_${completedAt} `;
 
 const wasCompletionShown = (campaignId: string, completedAt: string | undefined): boolean => {
   if (!completedAt) return false;
@@ -50,7 +50,7 @@ const markCompletionShown = (campaignId: string, completedAt: string | undefined
 // Helper to check if streak celebration was already shown today
 const getStreakCelebrationTodayKey = () => {
   const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-  return `streak_celebration_shown_${today}`;
+  return `streak_celebration_shown_${today} `;
 };
 
 const wasStreakCelebrationShownToday = (): boolean => {
@@ -96,7 +96,24 @@ const CampaignDetails: React.FC = () => {
 
   // Get user streak stats
   const { stats: streakStats } = useUserStatsRealtime(user?.id || '');
+  const [isFabVisible, setIsFabVisible] = useState(true);
+  const lastScrollY = useRef(0);
+  const { scrollY } = useScroll();
+  const headerOpacity = useTransform(scrollY, [200, 300], [0, 1]);
+  const headerBgOpacity = useTransform(scrollY, [0, 200], [0, 1]);
+  const headerBlur = useTransform(scrollY, [0, 200], ['blur(0px)', 'blur(12px)']);
 
+  useEffect(() => {
+    return scrollY.onChange((latest) => {
+      const isScrollingUp = latest < lastScrollY.current;
+      if (latest < 50 || isScrollingUp) {
+        setIsFabVisible(true);
+      } else if (latest > 50 && !isScrollingUp) {
+        setIsFabVisible(false);
+      }
+      lastScrollY.current = latest;
+    });
+  }, [scrollY]);
   // Update enrollment access when enrollment is first loaded
   useEffect(() => {
     if (enrollment && campaignId && user?.id) {
@@ -139,7 +156,7 @@ const CampaignDetails: React.FC = () => {
         if (!alreadyShown) {
           // First time seeing this completion - show celebration
           setShowCompletionScreen(true);
-          
+
           // Trigger confetti celebration
           confetti({
             particleCount: 200,
@@ -213,9 +230,29 @@ const CampaignDetails: React.FC = () => {
     setShowStreakCelebration(false);
   }, [campaignId, completionSummary, enrollment?.completedAt]);
 
-  const handleStart = () => {
+  const handleStart = (moduleId?: string) => {
     if (!campaign) return;
-    navigate(`/employee/module/${campaign.id}`);
+
+    // If specific module requested, go there using query param
+    if (moduleId) {
+      navigate(`/employee/module/${campaign.id}?item=${moduleId}`);
+      return;
+    }
+
+    // Otherwise find first incomplete module (continue learning logic)
+    const firstIncomplete = campaign.items.find(item => {
+      const state = moduleProgressMap[item.id];
+      return !state?.completed;
+    });
+
+    // Default to first incomplete, or first item if all complete
+    const targetId = firstIncomplete?.id || campaign.items[0]?.id;
+    if (targetId) {
+      navigate(`/employee/module/${campaign.id}?item=${targetId}`);
+    } else {
+      // Fallback if no items
+      navigate(`/employee/module/${campaign.id}`);
+    }
   };
 
   if (isLoading || isLoadingEnrollment) {
@@ -397,11 +434,10 @@ const CampaignDetails: React.FC = () => {
                 return (
                   <div key={day} className="flex flex-col items-center gap-2">
                     <div
-                      className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-                        isActive
-                          ? 'bg-gradient-to-b from-rose-400 to-rose-600'
-                          : 'bg-white/10'
-                      } ${isToday ? 'ring-2 ring-rose-400 ring-offset-2 ring-offset-black' : ''}`}
+                      className={`w - 10 h - 10 rounded - full flex items - center justify - center transition - all ${isActive
+                        ? 'bg-gradient-to-b from-rose-400 to-rose-600'
+                        : 'bg-white/10'
+                        } ${isToday ? 'ring-2 ring-rose-400 ring-offset-2 ring-offset-black' : ''} `}
                     >
                       {isActive ? (
                         <Check size={18} className="text-white" />
@@ -437,7 +473,7 @@ const CampaignDetails: React.FC = () => {
                   <p className="text-xs text-white/40">Quizzes</p>
                 </div>
                 <div className="text-center border-l border-white/10">
-                  <p className="text-xl font-bold text-white">{completionSummary?.xpEarned || 0}</p>
+                  <p className="text-xl font-bold text-white">{enrollment?.xpEarned || completionSummary?.xpEarned || 0}</p>
                   <p className="text-xs text-white/40">XP</p>
                 </div>
               </div>
@@ -461,6 +497,9 @@ const CampaignDetails: React.FC = () => {
 
   // Render Completion Summary View (only on first view)
   if (isComplete && completionSummary && showCompletionScreen && !showReviewMode) {
+    // Use XP from enrollment (set by cloud function) if available, with fallback to calculated value
+    const xpEarned = enrollment?.xpEarned || completionSummary.xpEarned || 0;
+
     return (
       <div className="min-h-screen bg-black flex flex-col">
         {/* Streak Celebration Overlay */}
@@ -504,7 +543,7 @@ const CampaignDetails: React.FC = () => {
               transition={{ delay: 0.3 }}
               className="text-center mb-2"
             >
-              <h1 className="text-6xl font-bold text-white mb-1">+{completionSummary.xpEarned}</h1>
+              <h1 className="text-6xl font-bold text-white mb-1">+{xpEarned}</h1>
               <p className="text-2xl font-semibold text-white">XP Earned</p>
               <p className="text-white/50 mt-1">{campaign.title}</p>
             </motion.div>
@@ -527,7 +566,7 @@ const CampaignDetails: React.FC = () => {
                   <p className="text-xs text-white/40">Questions</p>
                 </div>
                 <div className="text-center border-l border-white/10">
-                  <p className="text-xl font-bold text-amber-400">+{completionSummary.xpEarned}</p>
+                  <p className="text-xl font-bold text-amber-400">+{xpEarned}</p>
                   <p className="text-xs text-white/40">XP</p>
                 </div>
               </div>
@@ -560,7 +599,7 @@ const CampaignDetails: React.FC = () => {
               transition={{ delay: 0.65 }}
               onClick={() => {
                 handleDismissCompletion();
-                navigate(`/employee/comparison/${campaign.id}`);
+                navigate(`/ employee / comparison / ${campaign.id} `);
               }}
               className="w-full py-4 bg-white text-black font-semibold rounded-2xl mb-3"
             >
@@ -576,9 +615,45 @@ const CampaignDetails: React.FC = () => {
   const heroImage = campaign.items[0] ? videoMap[campaign.items[0].videoId]?.thumbnailUrl : null;
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden lg:hidden">
-      {/* Hero Section with Background Image - Fixed */}
-      <div className="relative h-[40vh] flex-shrink-0 flex flex-col">
+    <div className="min-h-screen bg-black lg:hidden pb-32">
+      {/* Sticky Header */}
+      <motion.div
+        className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between p-4"
+        style={{
+          backgroundColor: `rgba(0, 0, 0, ${headerBgOpacity})`,
+          backdropFilter: headerBlur,
+          WebkitBackdropFilter: headerBlur
+        }}
+      >
+        <button
+          onClick={() => navigate('/employee/learn')}
+          className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center relative z-20"
+        >
+          <ArrowLeft size={20} className="text-white" />
+        </button>
+
+        {/* Centered Title (Fades in) */}
+        <motion.div
+          className="absolute inset-0 flex items-center justify-center pointer-events-none"
+          style={{ opacity: headerOpacity }}
+        >
+          <h1 className="text-white font-semibold text-lg max-w-[60%] truncate">
+            {campaign.title}
+          </h1>
+        </motion.div>
+
+        {hasStarted && (
+          <button
+            onClick={() => navigate(`/employee/comparison/${campaign.id}`)}
+            className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center relative z-20"
+          >
+            <BarChart3 size={20} className="text-white" />
+          </button>
+        )}
+      </motion.div>
+
+      {/* Hero Section with Background Image - Scrolls naturally */}
+      <div className="relative h-[45vh] w-full">
         {/* Background Image */}
         {heroImage ? (
           <div className="absolute inset-0">
@@ -587,7 +662,7 @@ const CampaignDetails: React.FC = () => {
               alt={campaign.title}
               className="w-full h-full object-cover blur-sm scale-105"
             />
-            <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/40 to-black" />
+            <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-black/40 to-black" />
           </div>
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-[#1a1a2e] via-[#16213e] to-[#0f3460]">
@@ -595,26 +670,8 @@ const CampaignDetails: React.FC = () => {
           </div>
         )}
 
-        {/* Header */}
-        <div className="relative z-10 flex items-center justify-between p-4">
-          <button
-            onClick={() => navigate('/employee/learn')}
-            className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center"
-          >
-            <ArrowLeft size={20} className="text-white" />
-          </button>
-          {hasStarted && (
-            <button
-              onClick={() => navigate(`/employee/comparison/${campaign.id}`)}
-              className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm flex items-center justify-center"
-            >
-              <BarChart3 size={20} className="text-white" />
-            </button>
-          )}
-        </div>
-
         {/* Hero Content */}
-        <div className="relative z-10 flex-1 flex flex-col justify-end p-6 pb-8">
+        <div className="absolute bottom-0 left-0 right-0 p-6 pb-12 z-10">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -630,39 +687,38 @@ const CampaignDetails: React.FC = () => {
             )}
 
             {/* Stats Pills */}
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 bg-black/40 backdrop-blur-sm rounded-full pl-1 pr-4 py-1">
-                <div className="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center">
-                  <BookOpen size={16} className="text-white" />
+            <div className="flex items-center gap-2 -ml-2">
+              <div className="flex items-center gap-2 bg-black/40 backdrop-blur-sm rounded-full pl-1 pr-3.5 py-1">
+                <div className="w-7 h-7 rounded-full bg-black/60 flex items-center justify-center">
+                  <BookOpen size={14} className="text-white" />
                 </div>
-                <span className="text-white font-medium">{totalVideos} lessons</span>
+                <span className="text-white text-sm font-medium whitespace-nowrap">{totalVideos} lessons</span>
               </div>
-              <div className="flex items-center gap-2 bg-black/40 backdrop-blur-sm rounded-full pl-1 pr-4 py-1">
-                <div className="w-8 h-8 rounded-full bg-black/60 flex items-center justify-center">
-                  <Clock size={16} className="text-white" />
+              <div className="flex items-center gap-2 bg-black/40 backdrop-blur-sm rounded-full pl-1 pr-3.5 py-1">
+                <div className="w-7 h-7 rounded-full bg-black/60 flex items-center justify-center">
+                  <Clock size={14} className="text-white" />
                 </div>
-                <span className="text-white font-medium">{totalEstimatedMinutes} mins</span>
+                <span className="text-white text-sm font-medium whitespace-nowrap">{totalEstimatedMinutes} mins</span>
               </div>
               {hasStarted && (
-                <div className={`flex items-center gap-2 backdrop-blur-sm rounded-full pl-1 pr-4 py-1 ${
-                  progress === 100 ? 'bg-green-500/40' : 'bg-black/40'
-                }`}>
+                <div className={`flex items-center gap-2 backdrop-blur-sm rounded-full pl-1 pr-3.5 py-1 ${progress === 100 ? 'bg-green-500/40' : 'bg-black/40'
+                  }`}>
                   {progress === 100 ? (
-                    <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center">
-                      <Check size={16} className="text-white" />
+                    <div className="w-7 h-7 rounded-full bg-green-500 flex items-center justify-center">
+                      <Check size={14} className="text-white" />
                     </div>
                   ) : (
                     <ProgressRing
                       progress={progress}
-                      size={32}
+                      size={28}
                       strokeWidth={3}
                       color="stroke-white"
                       bgColor="stroke-white/20"
                       showPercentage={false}
                     />
                   )}
-                  <span className="text-white font-medium">
-                    {progress === 100 ? 'Complete' : `${progress}%`}
+                  <span className="text-white text-sm font-medium whitespace-nowrap">
+                    {progress === 100 ? 'Complete' : `${progress}% `}
                   </span>
                 </div>
               )}
@@ -671,198 +727,197 @@ const CampaignDetails: React.FC = () => {
         </div>
       </div>
 
-      {/* Bottom Sheet */}
-      <div className="relative z-20 -mt-8 bg-black rounded-t-[32px] flex-1 flex flex-col overflow-hidden min-h-0">
-        {/* Drag Handle - Fixed */}
-        <div className="flex justify-center py-3 flex-shrink-0">
+      {/* Bottom Sheet - Modules List */}
+      <div className="relative z-20 -mt-8 bg-black rounded-t-[32px] px-6 pb-8 min-h-[50vh]">
+        {/* Drag Handle - Visual only */}
+        <div className="flex justify-center py-3">
           <div className="w-10 h-1 rounded-full bg-white/20" />
         </div>
 
-        {/* Title - Fixed */}
-        <div className="px-6 pb-4 flex-shrink-0">
+        {/* Title */}
+        <div className="pb-4">
           <h2 className="text-white font-semibold text-lg">
-            {hasStarted ? 'Continue learning:' : 'What you\'ll learn:'}
+            Modules
           </h2>
         </div>
 
-        {/* Module List - Scrollable */}
-        <div className="relative flex-1 min-h-0">
+        {/* Module List */}
+        <div className="relative">
           {/* Top fade overlay */}
-          <div className="absolute top-0 left-0 right-0 h-12 bg-gradient-to-b from-black to-transparent z-10 pointer-events-none" />
-          
-          <div className="h-full px-6 pb-28 overflow-y-auto scrollbar-hide">
-          <div className="relative">
-            {/* Timeline line - spans from center of first dot to center of last dot */}
-            <div className="absolute left-[11px] top-[56px] bottom-[56px] w-0.5 bg-white/10" />
 
-            {/* Completed portion of timeline */}
-            {firstIncompleteIndex > 0 && (
-              <div
-                className="absolute left-[11px] top-[56px] w-0.5 bg-green-500"
-                style={{
-                  height: `calc(${((firstIncompleteIndex) / campaign.items.length) * 100}% - 112px)`
-                }}
-              />
-            )}
+          {/* Timeline line - spans from center of first dot to center of last dot */}
+          <div className="absolute left-[11px] top-[56px] bottom-[56px] w-0.5 bg-white/10" />
 
-            <div className="space-y-0">
-              {campaign.items.map((item, index) => {
-                const chapterNum = index + 1;
-                const videoMeta = videoMap[item.videoId];
-                const moduleTitle = videoMeta?.title || `Module ${chapterNum}`;
-                const moduleState = moduleProgressMap[item.id];
-                const completed = !!moduleState?.completed;
-                const isCurrent = !completed && firstIncompleteIndex === index && !isComplete;
-                const isLocked = !completed && firstIncompleteIndex !== -1 && index > firstIncompleteIndex;
+          {/* Completed portion of timeline */}
+          {firstIncompleteIndex > 0 && (
+            <div
+              className="absolute left-[11px] top-[56px] w-0.5 bg-green-500"
+              style={{
+                height: `calc(${((firstIncompleteIndex) / campaign.items.length) * 100}% - 112px)`
+              }}
+            />
+          )}
 
-                // Module metadata
-                const thumbnailUrl = videoMeta?.thumbnailUrl;
-                const videoDuration = videoMeta?.duration ? Math.ceil(videoMeta.duration / 60) : 3;
-                const questionCount = videoMeta?.questions?.length || 3;
-                const moduleXP = 25 + (questionCount * 5); // Base XP + per question
+          <div className="space-y-0">
+            {campaign.items.map((item, index) => {
+              const chapterNum = index + 1;
+              const videoMeta = videoMap[item.videoId];
+              const moduleTitle = videoMeta?.title || `Module ${chapterNum} `;
+              const moduleState = moduleProgressMap[item.id];
+              const completed = !!moduleState?.completed;
+              const isCurrent = !completed && firstIncompleteIndex === index && !isComplete;
+              const isLocked = !completed && firstIncompleteIndex !== -1 && index > firstIncompleteIndex;
 
-                // Calculate per-module progress (like desktop)
-                const questionTarget = moduleState?.questionTarget || questionCount;
-                const progressRatio = moduleState
-                  ? ((moduleState.videoFinished ? 1 : 0) +
-                    Math.min(moduleState.questionsAnswered || 0, questionTarget)) /
-                    (questionTarget + 1)
-                  : 0;
-                const moduleProgressPercent = Math.round(progressRatio * 100);
-                const hasPartialProgress = moduleProgressPercent > 0 && !completed;
+              // Module metadata
+              const thumbnailUrl = videoMeta?.thumbnailUrl;
+              const videoDuration = videoMeta?.duration ? Math.ceil(videoMeta.duration / 60) : 3;
+              const questionCount = videoMeta?.questions?.length || 3;
+              const moduleXP = 25 + (questionCount * 5); // Base XP + per question
 
-                return (
-                  <motion.div
-                    key={item.id}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.05 }}
-                    className="relative flex items-center gap-4 py-3"
-                  >
-                    {/* Timeline dot with module number */}
-                    <div className={`relative z-10 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      isCurrent
-                        ? 'bg-[#00A3FF] ring-4 ring-[#00A3FF]/20'
-                        : 'bg-[#1a1a1a] border-2 border-white/20'
+              // Calculate per-module progress (like desktop)
+              const questionTarget = moduleState?.questionTarget || questionCount;
+              const progressRatio = moduleState
+                ? ((moduleState.videoFinished ? 1 : 0) +
+                  Math.min(moduleState.questionsAnswered || 0, questionTarget)) /
+                (questionTarget + 1)
+                : 0;
+              const moduleProgressPercent = Math.round(progressRatio * 100);
+              const hasPartialProgress = moduleProgressPercent > 0 && !completed;
+
+              return (
+                <motion.div
+                  key={item.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  className="relative flex items-center gap-4 py-3"
+                >
+                  {/* Timeline dot with module number */}
+                  <div className={`relative z-10 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${isCurrent
+                    ? 'bg-[#00A3FF] ring-4 ring-[#00A3FF]/20'
+                    : 'bg-[#1a1a1a] border-2 border-white/20'
                     }`}>
-                      <span className={`text-xs font-bold ${
-                        isCurrent ? 'text-white' : 'text-white/40'
+                    <span className={`text-xs font-bold ${isCurrent ? 'text-white' : 'text-white/40'
                       }`}>
-                        {chapterNum}
-                      </span>
-                    </div>
+                      {chapterNum}
+                    </span>
+                  </div>
 
-                    {/* Module Card */}
-                    <div
-                      onClick={() => !isLocked && handleStart()}
-                      className={`flex-1 p-3 rounded-2xl transition-colors ${
-                        isCurrent
-                          ? 'bg-[#00A3FF]/10 border border-[#00A3FF]/30'
-                          : 'bg-[#1a1a1a]'
+                  {/* Module Card */}
+                  <div
+                    onClick={() => !isLocked && handleStart(item.id)}
+                    className={`flex-1 p-3 rounded-2xl transition-colors ${isCurrent
+                      ? 'bg-[#00A3FF]/10 border border-[#00A3FF]/30'
+                      : 'bg-[#1a1a1a]'
                       } ${isLocked ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-white/10'}`}
-                    >
-                      <div className="flex gap-3">
-                        {/* Thumbnail */}
-                        <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 bg-white/5">
-                          {thumbnailUrl ? (
-                            <img
-                              src={thumbnailUrl}
-                              alt={moduleTitle}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                              <BookOpen size={20} className="text-white/20" />
-                            </div>
-                          )}
-                          {/* Status overlay */}
-                          {completed && (
-                            <div className="absolute inset-0 bg-green-500/80 flex items-center justify-center">
-                              <Check size={24} className="text-white" />
-                            </div>
-                          )}
-                          {isLocked && (
-                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                              <Lock size={18} className="text-white/50" />
-                            </div>
-                          )}
-                        </div>
+                  >
+                    <div className="flex gap-3">
+                      {/* Thumbnail */}
+                      <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 bg-white/5">
+                        {thumbnailUrl ? (
+                          <img
+                            src={thumbnailUrl}
+                            alt={moduleTitle}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <BookOpen size={20} className="text-white/20" />
+                          </div>
+                        )}
+                        {/* Status overlay */}
+                        {completed && (
+                          <div className="absolute inset-0 bg-green-500/80 flex items-center justify-center">
+                            <Check size={24} className="text-white" />
+                          </div>
+                        )}
+                        {isLocked && (
+                          <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                            <Lock size={18} className="text-white/50" />
+                          </div>
+                        )}
+                      </div>
 
-                        {/* Info */}
-                        <div className="flex-1 min-w-0">
-                          {/* Module number */}
-                          <p className="text-white/40 text-xs mb-0.5">Module {chapterNum}</p>
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        {/* Module number */}
+                        <p className="text-white/40 text-xs mb-0.5">Module {chapterNum}</p>
 
-                          {/* Title */}
-                          <p className={`font-medium text-sm leading-tight ${completed || isCurrent ? 'text-white' : 'text-white/60'}`}>
-                            {moduleTitle}
-                          </p>
+                        {/* Title */}
+                        <p className={`font-medium text-sm leading-tight ${completed || isCurrent ? 'text-white' : 'text-white/60'}`}>
+                          {moduleTitle}
+                        </p>
 
-                          {/* Metadata row */}
-                          <div className="flex items-center gap-3 mt-2">
-                            <div className="flex items-center gap-1 text-white/40">
-                              <Clock size={12} />
-                              <span className="text-xs">{videoDuration}m</span>
-                            </div>
-                            <div className="flex items-center gap-1 text-white/40">
-                              <MessageCircle size={12} />
-                              <span className="text-xs">{questionCount}</span>
-                            </div>
-                            <div className="flex items-center gap-1 text-[#00A3FF]/70">
-                              <Zap size={12} />
-                              <span className="text-xs">+{moduleXP}</span>
-                            </div>
+                        {/* Metadata row */}
+                        <div className="flex items-center gap-3 mt-2">
+                          <div className="flex items-center gap-1 text-white/40">
+                            <Clock size={12} />
+                            <span className="text-xs">{videoDuration}m</span>
+                          </div>
+                          <div className="flex items-center gap-1 text-white/40">
+                            <MessageCircle size={12} />
+                            <span className="text-xs">{questionCount}</span>
+                          </div>
+                          <div className="flex items-center gap-1 text-[#00A3FF]/70">
+                            <Zap size={12} />
+                            <span className="text-xs">+{moduleXP}</span>
                           </div>
                         </div>
+                      </div>
 
-                        {/* Right side - Progress ring or Status */}
-                        <div className="flex items-center">
-                          {completed ? (
-                            <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
-                              <Check size={18} className="text-green-400" />
-                            </div>
-                          ) : isCurrent ? (
-                            <div className="w-10 h-10 rounded-full bg-[#00A3FF] flex items-center justify-center">
-                              <Play size={16} className="text-white ml-0.5" fill="white" />
-                            </div>
-                          ) : hasPartialProgress ? (
-                            <ProgressRing
-                              progress={moduleProgressPercent}
-                              size={40}
-                              strokeWidth={3}
-                              color="stroke-[#00A3FF]"
-                              bgColor="stroke-white/10"
-                              showPercentage={false}
-                            >
-                              <span className="text-[10px] font-bold text-white">{moduleProgressPercent}%</span>
-                            </ProgressRing>
-                          ) : !isLocked ? (
-                            <ChevronRight size={20} className="text-white/30" />
-                          ) : null}
-                        </div>
+                      {/* Right side - Progress ring or Status */}
+                      <div className="flex items-center">
+                        {completed ? (
+                          <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                            <Check size={18} className="text-green-400" />
+                          </div>
+                        ) : isCurrent ? (
+                          <div className="w-10 h-10 rounded-full bg-[#00A3FF] flex items-center justify-center">
+                            <Play size={16} className="text-white ml-0.5" fill="white" />
+                          </div>
+                        ) : hasPartialProgress ? (
+                          <ProgressRing
+                            progress={moduleProgressPercent}
+                            size={40}
+                            strokeWidth={3}
+                            color="stroke-[#00A3FF]"
+                            bgColor="stroke-white/10"
+                            showPercentage={false}
+                          >
+                            <span className="text-[10px] font-bold text-white">{moduleProgressPercent}%</span>
+                          </ProgressRing>
+                        ) : !isLocked ? (
+                          <ChevronRight size={20} className="text-white/30" />
+                        ) : null}
                       </div>
                     </div>
-                  </motion.div>
-                );
-              })}
-            </div>
-            </div>
+                  </div>
+                </motion.div>
+              );
+            })}
           </div>
         </div>
-
-        {/* Fixed Bottom CTA */}
-        <div className="fixed bottom-0 left-0 right-0 px-6 pt-6 pb-6 z-30 bg-gradient-to-t from-black via-black to-transparent pointer-events-none">
-          <motion.button
-            onClick={handleStart}
-            className="w-full py-4 bg-white text-black font-semibold rounded-2xl flex items-center justify-center gap-2 pointer-events-auto"
-            whileTap={{ scale: 0.98 }}
-          >
-            <Play size={20} fill="black" />
-            {hasStarted ? 'Continue learning' : 'Start campaign'}
-          </motion.button>
-        </div>
       </div>
-    </div>
+
+
+      {/* Fixed Bottom CTA */}
+      <div className="fixed bottom-0 left-0 right-0 px-6 pt-6 pb-6 z-30 bg-gradient-to-t from-black via-black to-transparent pointer-events-none">
+        <motion.button
+          onClick={() => handleStart()}
+          className="w-full py-4 bg-white text-black font-semibold rounded-2xl flex items-center justify-center gap-2 pointer-events-auto shadow-lg shadow-black/20"
+          whileTap={{ scale: 0.98 }}
+          initial={{ y: 0, opacity: 1 }}
+          animate={{
+            y: isFabVisible ? 0 : 100,
+            opacity: isFabVisible ? 1 : 0
+          }}
+          transition={{ duration: 0.3 }}
+        >
+          <Play size={20} fill="black" />
+          {hasStarted ? 'Continue learning' : 'Start campaign'}
+        </motion.button>
+      </div>
+    </div >
   );
 };
 

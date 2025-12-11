@@ -32,6 +32,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { getUserSkillProfile } from '@/lib/firestore';
 import { useUserEnrollmentsRealtime } from '@/hooks/useEnrollmentRealtime';
+import { useUserStatsWithFallback } from '@/hooks/useUserStats';
 import { Skeleton } from '@/components/shared/Skeleton';
 
 // Level titles based on XP thresholds
@@ -43,15 +44,6 @@ const getLevelTitle = (level: number): string => {
   return 'Master';
 };
 
-// Calculate level from total XP
-const calculateLevel = (totalXP: number): { level: number; currentXP: number; xpToNextLevel: number } => {
-  const xpPerLevel = 100;
-  const level = Math.floor(totalXP / xpPerLevel) + 1;
-  const currentXP = totalXP % xpPerLevel;
-  const xpToNextLevel = xpPerLevel;
-  return { level, currentXP, xpToNextLevel };
-};
-
 const EmployeeAnalytics: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -59,6 +51,7 @@ const EmployeeAnalytics: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   
   const { enrollments } = useUserEnrollmentsRealtime(user?.id || '');
+  const { stats: streakStats } = useUserStatsWithFallback(user?.id || '', enrollments);
 
   useEffect(() => {
     const loadData = async () => {
@@ -76,48 +69,29 @@ const EmployeeAnalytics: React.FC = () => {
     loadData();
   }, [user?.id, user?.organization]);
 
-  // Calculate stats
+  // Calculate stats - use server-computed stats for level/XP/streak
   const stats = useMemo(() => {
-    if (!skillProfile) {
-      const completedModules = enrollments.reduce((acc, e) => acc + (e.completedModules || 0), 0);
-      const totalXP = completedModules * 25;
-      const { level, currentXP, xpToNextLevel } = calculateLevel(totalXP);
-      
-      return {
-        level,
-        currentXP,
-        xpToNextLevel,
-        totalXP,
-        currentStreak: 0,
-        longestStreak: 0,
-        modulesCompleted: completedModules,
-        campaignsCompleted: enrollments.filter(e => e.status === 'completed').length,
-        averageScore: 0,
-        badges: [],
-        badgeDetails: [],
-        questionsAnswered: 0,
-        totalWatchTime: 0,
-      };
-    }
-
-    const { level, currentXP, xpToNextLevel } = calculateLevel(skillProfile.totalXP || 0);
+    const completedModules = enrollments.reduce((acc, e) => acc + (e.completedModules || 0), 0);
+    const campaignsCompleted = enrollments.filter(e => e.status === 'completed').length;
     
     return {
-      level,
-      currentXP,
-      xpToNextLevel,
-      totalXP: skillProfile.totalXP || 0,
-      currentStreak: skillProfile.streak?.currentStreak || 0,
-      longestStreak: skillProfile.streak?.longestStreak || 0,
-      modulesCompleted: skillProfile.stats?.modulesCompleted || 0,
-      campaignsCompleted: skillProfile.stats?.campaignsCompleted || 0,
-      averageScore: skillProfile.stats?.averageScore || 0,
-      badges: skillProfile.badges || [],
-      badgeDetails: skillProfile.badgeDetails || [],
-      questionsAnswered: skillProfile.stats?.questionsAnswered || 0,
-      totalWatchTime: skillProfile.stats?.totalWatchTime || 0,
+      // Use server-computed stats (from userStats collection)
+      level: streakStats.level,
+      currentXP: streakStats.xpInCurrentLevel,
+      xpToNextLevel: streakStats.xpToNextLevel,
+      totalXP: streakStats.totalXp,
+      currentStreak: streakStats.currentStreak,
+      longestStreak: streakStats.longestStreak,
+      modulesCompleted: completedModules,
+      campaignsCompleted,
+      // Use skillProfile for other stats if available, otherwise defaults
+      averageScore: skillProfile?.stats?.averageScore || 0,
+      badges: skillProfile?.badges || [],
+      badgeDetails: skillProfile?.badgeDetails || [],
+      questionsAnswered: skillProfile?.stats?.questionsAnswered || 0,
+      totalWatchTime: skillProfile?.stats?.totalWatchTime || 0,
     };
-  }, [skillProfile, enrollments]);
+  }, [skillProfile, enrollments, streakStats]);
 
   // Prepare competency data for radar chart
   const competencyData = useMemo(() => {

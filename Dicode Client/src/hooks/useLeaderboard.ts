@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, query, where, orderBy, limit, onSnapshot, getDocs } from 'firebase/firestore';
+import { collection, query, where, orderBy, limit, onSnapshot, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export interface LeaderboardEntry {
@@ -72,7 +72,7 @@ export function useLeaderboard(
           });
         });
 
-        // Now listen to userStats for these users
+        // Now query userStats for these users by userId
         const userIds = Array.from(userMap.keys());
 
         if (userIds.length === 0) {
@@ -82,84 +82,127 @@ export function useLeaderboard(
           return;
         }
 
-        // Firestore 'in' queries are limited to 30 items
-        // For larger orgs, we'd need pagination or a different approach
-        const statsQuery = query(
-          collection(db, 'userStats'),
-          where('organizationId', '==', organizationId),
-          orderBy('totalXp', 'desc'),
-          limit(maxEntries)
-        );
+        // Store all stats data
+        const allStats = new Map<string, any>();
 
-        unsubscribe = onSnapshot(
-          statsQuery,
-          (snapshot) => {
-            if (isCancelled) return;
+        // Function to process and update leaderboard
+        const updateLeaderboard = () => {
+          if (isCancelled) return;
 
-            const entries: LeaderboardEntry[] = [];
-            let rank = 1;
+          const entries: LeaderboardEntry[] = [];
 
-            snapshot.docs.forEach((doc) => {
-              const data = doc.data();
-              const userId = doc.id;
-              const userInfo = userMap.get(userId);
+          // Add entries for users with stats
+          allStats.forEach((data, userId) => {
+            const userInfo = userMap.get(userId);
+            if (userInfo) {
+              entries.push({
+                userId,
+                name: userInfo.name,
+                avatar: userInfo.avatar,
+                role: userInfo.role,
+                department: userInfo.department,
+                totalXp: data.totalXp || 0,
+                level: data.level || 1,
+                levelTitle: data.levelTitle || 'Newcomer',
+                levelTier: data.levelTier || 'newcomer',
+                rank: 0, // Will be set after sorting
+                totalCompletedCampaigns: data.totalCompletedCampaigns || 0,
+                currentStreak: data.currentStreak || 0,
+              });
+            }
+          });
 
-              if (userInfo) {
-                entries.push({
-                  userId,
-                  name: userInfo.name,
-                  avatar: userInfo.avatar,
-                  role: userInfo.role,
-                  department: userInfo.department,
-                  totalXp: data.totalXp || 0,
-                  level: data.level || 1,
-                  levelTitle: data.levelTitle || 'Newcomer',
-                  levelTier: data.levelTier || 'newcomer',
-                  rank: rank++,
-                  totalCompletedCampaigns: data.totalCompletedCampaigns || 0,
-                  currentStreak: data.currentStreak || 0,
-                });
+          // Also add users who have no stats yet (0 XP)
+          userMap.forEach((userInfo, userId) => {
+            if (!allStats.has(userId)) {
+              entries.push({
+                userId,
+                name: userInfo.name,
+                avatar: userInfo.avatar,
+                role: userInfo.role,
+                department: userInfo.department,
+                totalXp: 0,
+                level: 1,
+                levelTitle: 'Newcomer',
+                levelTier: 'newcomer',
+                rank: 0, // Will be set after sorting
+                totalCompletedCampaigns: 0,
+                currentStreak: 0,
+              });
+            }
+          });
+
+          // Sort by totalXp descending and assign ranks
+          entries.sort((a, b) => b.totalXp - a.totalXp);
+          entries.forEach((entry, index) => {
+            entry.rank = index + 1;
+          });
+
+          // Limit to maxEntries
+          const limitedEntries = entries.slice(0, maxEntries);
+
+          setLeaderboard(limitedEntries);
+          setUserRank(limitedEntries.find(e => e.userId === currentUserId) || null);
+          setError(null);
+          setIsLoading(false);
+        };
+
+        // Fetch userStats documents by userId (using document references)
+        // Firestore doesn't support querying by document ID with 'in', so we fetch individually
+        // For better performance with many users, we could batch these, but individual listeners
+        // are fine for real-time updates
+        const unsubscribes: (() => void)[] = [];
+        let loadedCount = 0;
+
+        userIds.forEach((userId) => {
+          const userStatsRef = doc(db, 'userStats', userId);
+          
+          const userUnsubscribe = onSnapshot(
+            userStatsRef,
+            (docSnapshot) => {
+              if (isCancelled) return;
+
+              if (docSnapshot.exists()) {
+                allStats.set(userId, docSnapshot.data());
+              } else {
+                // User has no stats document - remove from map if it was there
+                allStats.delete(userId);
               }
-            });
 
-            // Also add users who have no stats yet (0 XP)
-            userMap.forEach((userInfo, userId) => {
-              if (!entries.find(e => e.userId === userId)) {
-                entries.push({
-                  userId,
-                  name: userInfo.name,
-                  avatar: userInfo.avatar,
-                  role: userInfo.role,
-                  department: userInfo.department,
-                  totalXp: 0,
-                  level: 1,
-                  levelTitle: 'Newcomer',
-                  levelTier: 'newcomer',
-                  rank: entries.length + 1,
-                  totalCompletedCampaigns: 0,
-                  currentStreak: 0,
-                });
+              loadedCount++;
+              
+              // Update leaderboard once all documents have been checked
+              if (loadedCount === userIds.length) {
+                updateLeaderboard();
+              } else {
+                // Update in real-time as documents load
+                updateLeaderboard();
               }
-            });
+            },
+            (err) => {
+              if (isCancelled) return;
+              console.error(`Error fetching userStats for ${userId}:`, err);
+              loadedCount++;
+              
+              // Still update if this was the last document
+              if (loadedCount === userIds.length) {
+                updateLeaderboard();
+              }
+              
+              if (loadedCount === userIds.length) {
+                setError(err);
+                setIsLoading(false);
+              }
+            }
+          );
 
-            // Re-sort and re-rank after adding missing users
-            entries.sort((a, b) => b.totalXp - a.totalXp);
-            entries.forEach((entry, index) => {
-              entry.rank = index + 1;
-            });
+          unsubscribes.push(userUnsubscribe);
+        });
 
-            setLeaderboard(entries);
-            setUserRank(entries.find(e => e.userId === currentUserId) || null);
-            setError(null);
-            setIsLoading(false);
-          },
-          (err) => {
-            if (isCancelled) return;
-            console.error('Error fetching leaderboard:', err);
-            setError(err);
-            setIsLoading(false);
-          }
-        );
+        // Combined unsubscribe function
+        unsubscribe = () => {
+          unsubscribes.forEach(unsub => unsub());
+        };
       } catch (err) {
         if (isCancelled) return;
         console.error('Error setting up leaderboard:', err);

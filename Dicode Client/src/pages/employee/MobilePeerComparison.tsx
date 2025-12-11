@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, MessageCircle, Users, CheckCircle, Video as VideoIcon, Trophy, TrendingUp, Target, Sparkles } from 'lucide-react';
+import { ArrowLeft, MessageCircle, Users, Video as VideoIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  ResponsiveContainer
+} from 'recharts';
 import { useAuth } from '@/contexts/AuthContext';
 import { getCampaignResponses, getUserCampaignResponses, getCampaign, getVideo } from '@/lib/firestore';
 import AICopilot from '@/components/shared/AICopilot';
@@ -14,8 +21,10 @@ interface ComparisonData {
   totalResponses: number;
   isUserInMajority: boolean;
   videoId?: string;
-  type?: 'scale' | 'multiple-choice' | 'text';
+  type?: 'scale' | 'multiple-choice' | 'text' | 'behavioral-intent' | 'behavioral-perception' | 'qualitative';
   averageScore?: number;
+  // Q2 (behavioral-intent) specific: map option ID to letter label + text for legend
+  optionLabels?: Record<string, { letter: string; text: string }>;
 }
 
 interface VideoGroup {
@@ -46,46 +55,6 @@ const MobilePeerComparison: React.FC<MobilePeerComparisonProps> = ({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [campaignTitle, setCampaignTitle] = useState<string>('Campaign');
 
-  // Calculate overall stats
-  const overallStats = React.useMemo(() => {
-    let totalUserScore = 0;
-    let totalTeamScore = 0;
-    let count = 0;
-
-    comparisonGroups.forEach(group => {
-      group.comparisons.forEach(comp => {
-        if (comp.averageScore !== undefined && typeof comp.userAnswer === 'number') {
-          totalUserScore += comp.userAnswer;
-          totalTeamScore += comp.averageScore;
-          count++;
-        }
-      });
-    });
-
-    if (count === 0) return null;
-
-    const yourAvg = totalUserScore / count;
-    const teamAvg = totalTeamScore / count;
-
-    // Calculate percentile (simplified - assumes normal distribution)
-    const difference = yourAvg - teamAvg;
-    let percentile = 50;
-    if (difference > 0.5) percentile = 15;
-    else if (difference > 0.3) percentile = 25;
-    else if (difference > 0.1) percentile = 35;
-    else if (difference < -0.5) percentile = 85;
-    else if (difference < -0.3) percentile = 75;
-    else if (difference < -0.1) percentile = 60;
-
-    return {
-      yourScore: yourAvg,
-      teamAverage: teamAvg,
-      percentile,
-      totalResponses: comparisonGroups.reduce((sum, g) =>
-        sum + Math.max(...g.comparisons.map(c => c.totalResponses)), 0
-      ),
-    };
-  }, [comparisonGroups]);
 
   useEffect(() => {
     const loadComparisonData = async () => {
@@ -105,7 +74,14 @@ const MobilePeerComparison: React.FC<MobilePeerComparisonProps> = ({
         const videoIds = new Set<string>();
         campaign.items.forEach(item => videoIds.add(item.videoId));
 
-        const questionMap = new Map<string, { text: string; videoId: string; type?: string }>();
+        // Use composite key (videoId_questionId) to handle same questionIds across different videos
+        const questionMap = new Map<string, {
+          text: string;
+          videoId: string;
+          questionId: string;
+          type?: string;
+          options?: Array<{ id: string; text: string; intentScore: number }>;
+        }>();
         const videoTitleMap = new Map<string, string>();
 
         await Promise.all(
@@ -115,10 +91,14 @@ const MobilePeerComparison: React.FC<MobilePeerComparisonProps> = ({
               if (video) {
                 videoTitleMap.set(vid, video.title);
                 video.questions?.forEach(q => {
-                  questionMap.set(q.id, {
+                  const compositeKey = `${vid}_${q.id}`;
+                  questionMap.set(compositeKey, {
                     text: q.statement || 'Question',
                     videoId: vid,
-                    type: q.type
+                    questionId: q.id,
+                    type: q.type,
+                    // Store options for Q2 behavioral-intent questions
+                    options: q.type === 'behavioral-intent' ? q.options : undefined
                   });
                 });
               }
@@ -130,8 +110,9 @@ const MobilePeerComparison: React.FC<MobilePeerComparisonProps> = ({
 
         campaign.items.forEach(item => {
           item.questions?.forEach(q => {
-            if (!questionMap.has(q.id)) {
-              questionMap.set(q.id, { text: q.question, videoId: item.videoId });
+            const compositeKey = `${item.videoId}_${q.id}`;
+            if (!questionMap.has(compositeKey)) {
+              questionMap.set(compositeKey, { text: q.question, videoId: item.videoId, questionId: q.id });
             }
           });
         });
@@ -139,61 +120,104 @@ const MobilePeerComparison: React.FC<MobilePeerComparisonProps> = ({
         const allResponses = await getCampaignResponses(moduleId, user.organization);
         const userResponsesRaw = await getUserCampaignResponses(moduleId, user.id);
 
+        // Deduplicate user responses using composite key (videoId_questionId)
         const userResponsesMap = new Map<string, any>();
         userResponsesRaw.forEach(response => {
-          const existing = userResponsesMap.get(response.questionId);
+          const compositeKey = `${response.videoId}_${response.questionId}`;
+          const existing = userResponsesMap.get(compositeKey);
           if (!existing || response.answeredAt > existing.answeredAt) {
-            userResponsesMap.set(response.questionId, response);
+            userResponsesMap.set(compositeKey, response);
           }
         });
         const userResponses = Array.from(userResponsesMap.values());
 
+        // Group responses using composite key (videoId_questionId)
         const responsesByQuestion = new Map<string, any[]>();
         allResponses.forEach(response => {
-          const existing = responsesByQuestion.get(response.questionId) || [];
+          const compositeKey = `${response.videoId}_${response.questionId}`;
+          const existing = responsesByQuestion.get(compositeKey) || [];
           existing.push(response);
-          responsesByQuestion.set(response.questionId, existing);
+          responsesByQuestion.set(compositeKey, existing);
         });
 
         const comparisonData: ComparisonData[] = [];
 
         userResponses.forEach(userResponse => {
           const questionId = userResponse.questionId;
-          const allQuestionResponses = responsesByQuestion.get(questionId) || [];
-          const questionInfo = questionMap.get(questionId);
+          const videoId = userResponse.videoId;
+          const compositeKey = `${videoId}_${questionId}`;
 
-          if (allQuestionResponses.length < 3) return;
+          // Use composite key for lookups
+          const allQuestionResponses = responsesByQuestion.get(compositeKey) || [];
+          const questionInfo = questionMap.get(compositeKey);
+
+          // Show comparison if there's at least 1 other response (2 total = user + 1 peer)
+          if (allQuestionResponses.length < 2) return;
 
           const distribution: Record<string | number, number> = {};
           let totalScore = 0;
           let countNumeric = 0;
+          let optionLabels: Record<string, { letter: string; text: string }> | undefined;
 
-          allQuestionResponses.forEach(r => {
-            const answer = String(r.answer);
-            distribution[answer] = (distribution[answer] || 0) + 1;
+          // For Q2 (behavioral-intent), use selectedOptionId to build distribution with letter labels
+          const isQ2 = questionInfo?.type === 'behavioral-intent';
 
-            const numVal = parseFloat(String(r.answer));
-            if (!isNaN(numVal)) {
-              totalScore += numVal;
-              countNumeric++;
-            }
-          });
+          if (isQ2 && questionInfo?.options) {
+            // Build option ID -> letter label mapping (A, B, C, etc.)
+            optionLabels = {};
+            questionInfo.options.forEach((opt, idx) => {
+              const letter = String.fromCharCode(65 + idx); // A, B, C, ...
+              optionLabels![opt.id] = { letter, text: opt.text };
+            });
+
+            // Build distribution using letter labels
+            allQuestionResponses.forEach(r => {
+              const optionId = r.selectedOptionId;
+              if (optionId && optionLabels![optionId]) {
+                const letter = optionLabels![optionId].letter;
+                distribution[letter] = (distribution[letter] || 0) + 1;
+              }
+            });
+          } else {
+            // For Q1 and Q3, use answer directly
+            allQuestionResponses.forEach(r => {
+              const answer = String(r.answer);
+              distribution[answer] = (distribution[answer] || 0) + 1;
+
+              const numVal = parseFloat(String(r.answer));
+              if (!isNaN(numVal)) {
+                totalScore += numVal;
+                countNumeric++;
+              }
+            });
+          }
 
           const sortedAnswers = Object.entries(distribution).sort((a, b) => b[1] - a[1]);
           const mostCommonAnswer = sortedAnswers[0]?.[0];
-          const userAnswerStr = String(userResponse.answer);
+          
+          // For Q2, convert user's selectedOptionId to letter label
+          let userAnswer: string | number | boolean = userResponse.answer;
+          if (isQ2 && userResponse.selectedOptionId && optionLabels) {
+            const userOptLabel = optionLabels[userResponse.selectedOptionId];
+            if (userOptLabel) {
+              userAnswer = userOptLabel.letter;
+            }
+          }
+          
+          const userAnswerStr = String(userAnswer);
           const isUserInMajority = userAnswerStr === mostCommonAnswer;
 
           comparisonData.push({
             questionId,
             question: questionInfo?.text || userResponse.metadata?.questionText || 'Question',
-            userAnswer: userResponse.answer,
+            userAnswer,
             answerDistribution: distribution,
             totalResponses: allQuestionResponses.length,
             isUserInMajority,
-            videoId: userResponse.videoId || questionInfo?.videoId,
+            videoId: videoId, // Use videoId from user response directly
             type: (questionInfo?.type as any) || (typeof userResponse.answer === 'number' ? 'scale' : 'multiple-choice'),
-            averageScore: countNumeric > 0 ? totalScore / countNumeric : undefined
+            averageScore: countNumeric > 0 ? totalScore / countNumeric : undefined,
+            optionLabels: isQ2 ? optionLabels : undefined
           });
         });
 
@@ -254,10 +278,114 @@ const MobilePeerComparison: React.FC<MobilePeerComparisonProps> = ({
     loadComparisonData();
   }, [moduleId, user]);
 
-  // Render bar chart for non-scale questions
+  // Render Q2 pie chart for behavioral-intent questions
+  const renderQ2PieChart = (comparison: ComparisonData) => {
+    if (!comparison.optionLabels) return null;
+
+    const distribution = comparison.answerDistribution;
+    const userAnswer = String(comparison.userAnswer);
+    const totalResponses = comparison.totalResponses;
+
+    // Build pie chart data
+    const pieData = Object.entries(distribution).map(([letter, count]) => {
+      const percentage = totalResponses > 0 ? Math.round((count / totalResponses) * 100) : 0;
+      const isUser = letter === userAnswer;
+      const optionInfo = Object.values(comparison.optionLabels!).find(opt => opt.letter === letter);
+      
+      return {
+        name: letter,
+        value: count,
+        percentage,
+        isUser,
+        text: optionInfo?.text || '',
+        fill: isUser ? '#00A3FF' : `rgba(255,255,255,${0.2 + (count / totalResponses) * 0.3})`
+      };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+
+    const colors = ['rgba(255,255,255,0.2)', 'rgba(255,255,255,0.3)', 'rgba(255,255,255,0.25)', 'rgba(255,255,255,0.35)'];
+    pieData.forEach((d, idx) => {
+      if (!d.isUser) {
+        d.fill = colors[idx % colors.length];
+      }
+    });
+
+    const userSlice = pieData.find(d => d.isUser);
+
+    return (
+      <div className="space-y-4 mt-3">
+        {/* Pie Chart */}
+        <div className="h-48 relative">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={pieData}
+                cx="50%"
+                cy="50%"
+                labelLine={false}
+                label={false}
+                outerRadius={70}
+                fill="#8884d8"
+                dataKey="value"
+              >
+                {pieData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.fill} stroke={entry.isUser ? '#00A3FF' : 'transparent'} strokeWidth={entry.isUser ? 2 : 0} />
+                ))}
+              </Pie>
+              <Tooltip 
+                content={({ active, payload }) => {
+                  if (active && payload && payload[0]) {
+                    const data = payload[0].payload;
+                    return (
+                      <div className="bg-[#1a1a1a] border border-white/10 rounded-lg px-3 py-2 shadow-lg">
+                        <p className="text-white text-sm font-medium">{data.name}: {data.value}</p>
+                        <p className="text-white/50 text-xs">{data.percentage}%</p>
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+          
+          {/* "--you" label pointing to user's slice */}
+          {userSlice && (
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+              <div className="text-xs text-[#00A3FF] font-medium">--you</div>
+            </div>
+          )}
+        </div>
+
+        {/* Options List */}
+        <div className="space-y-2">
+          {pieData.map((data) => {
+            const optionInfo = Object.values(comparison.optionLabels!).find(opt => opt.letter === data.name);
+            return (
+              <div key={data.name} className="flex items-start gap-2 text-sm">
+                <span className={`font-semibold flex-shrink-0 ${data.isUser ? 'text-[#00A3FF]' : 'text-white/70'}`}>
+                  {data.name}.
+                </span>
+                <span className={`line-clamp-2 flex-1 ${data.isUser ? 'text-white' : 'text-white/50'}`}>
+                  {optionInfo?.text || ''}
+                </span>
+                <span className={`text-xs flex-shrink-0 ${data.isUser ? 'text-[#00A3FF]' : 'text-white/40'}`}>
+                  {data.percentage}%
+                </span>
+              </div>
+            );
+        })}
+      </div>
+    </div>
+    );
+  };
+
+  // Render bar chart for non-scale questions (non-Q2)
   const renderBarChart = (comparison: ComparisonData) => {
     const sortedAnswers = Object.entries(comparison.answerDistribution)
       .sort((a, b) => b[1] - a[1]);
+
+    // Check if this is Q2 with letter labels
+    const isQ2WithLabels = comparison.type === 'behavioral-intent' && comparison.optionLabels;
 
     return (
       <div className="space-y-3 mt-3">
@@ -265,13 +393,24 @@ const MobilePeerComparison: React.FC<MobilePeerComparisonProps> = ({
           const percentage = Math.round((count / comparison.totalResponses) * 100);
           const isUserAnswer = String(answer) === String(comparison.userAnswer);
 
+          // For Q2, find the option text for this letter
+          let displayLabel = answer;
+          if (isQ2WithLabels && comparison.optionLabels) {
+            const optEntry = Object.values(comparison.optionLabels).find(
+              opt => opt.letter === String(answer)
+            );
+            if (optEntry) {
+              displayLabel = `${optEntry.letter}. ${optEntry.text}`;
+            }
+          }
+
           return (
             <div key={idx}>
-              <div className="flex justify-between items-end mb-1 text-sm">
-                <span className={`font-medium ${isUserAnswer ? 'text-[#00A3FF]' : 'text-white/70'}`}>
-                  {answer}
+              <div className="flex justify-between items-end mb-1 text-sm gap-2">
+                <span className={`font-medium line-clamp-3 ${isUserAnswer ? 'text-[#00A3FF]' : 'text-white/70'}`}>
+                  {displayLabel}
                 </span>
-                <span className="text-white/40">{percentage}%</span>
+                <span className="text-white/40 flex-shrink-0">{percentage}%</span>
               </div>
               <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
                 <motion.div
@@ -291,11 +430,11 @@ const MobilePeerComparison: React.FC<MobilePeerComparisonProps> = ({
     );
   };
 
-  // Render scale slider
+  // Render scale slider (Likert 1-7)
   const renderScaleSlider = (comparison: ComparisonData) => {
     const userScore = Number(comparison.userAnswer);
     const teamAvg = comparison.averageScore || 0;
-    const maxScore = 5;
+    const maxScore = 7;
 
     return (
       <div className="mt-4 space-y-4">
@@ -322,6 +461,8 @@ const MobilePeerComparison: React.FC<MobilePeerComparisonProps> = ({
           <span className="text-white/40">3</span>
           <span className="text-white/40">4</span>
           <span className="text-white/40">5</span>
+          <span className="text-white/40">6</span>
+          <span className="text-white/40">7</span>
         </div>
 
         {/* Score comparison */}
@@ -401,55 +542,28 @@ const MobilePeerComparison: React.FC<MobilePeerComparisonProps> = ({
       )}
 
       <div className="p-4 space-y-4">
-        {/* Overall Summary Card - Duolingo Style */}
-        {overallStats && (
+        {/* Summary Card - Mobile: Just Metrics */}
+        {comparisonGroups.length > 0 && comparisonGroups[0].comparisons.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-[#1a1a1a] rounded-3xl p-6 text-center"
+            className="bg-white/5 border border-white/5 rounded-xl p-4"
           >
-            {/* Trophy Icon with Glow */}
-            <div className="flex justify-center mb-4">
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-                className="w-20 h-20 rounded-full bg-gradient-to-b from-[#00A3FF]/30 to-transparent flex items-center justify-center"
-              >
-                <Trophy size={48} className="text-[#00A3FF] drop-shadow-[0_0_20px_rgba(0,163,255,0.5)]" />
-              </motion.div>
+            <div className="flex items-center justify-center gap-6">
+              <div className="text-center flex-1">
+                <p className="text-2xl font-bold text-white">
+                  {comparisonGroups.reduce((sum, g) => sum + g.comparisons.length, 0)}
+                </p>
+                <p className="text-xs text-white/40">Questions</p>
+              </div>
+              <div className="h-12 w-px bg-white/10" />
+              <div className="text-center flex-1">
+                <p className="text-2xl font-bold text-white">
+                  {Math.max(...comparisonGroups.flatMap(g => g.comparisons.map(c => c.totalResponses)))}
+                </p>
+                <p className="text-xs text-white/40">Peer Responses</p>
+              </div>
             </div>
-
-            {/* Percentile */}
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-            >
-              <h2 className="text-4xl font-bold text-white mb-1">Top {100 - overallStats.percentile}%</h2>
-              <p className="text-white/50">in your organization</p>
-            </motion.div>
-
-            {/* Stats Row */}
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
-              className="grid grid-cols-3 gap-2 mt-6 pt-6 border-t border-white/10"
-            >
-              <div className="text-center">
-                <p className="text-xl font-bold text-[#00A3FF]">{overallStats.yourScore.toFixed(1)}</p>
-                <p className="text-xs text-white/40">Your Score</p>
-              </div>
-              <div className="text-center border-x border-white/10">
-                <p className="text-xl font-bold text-white">{overallStats.teamAverage.toFixed(1)}</p>
-                <p className="text-xs text-white/40">Team Avg</p>
-              </div>
-              <div className="text-center">
-                <p className="text-xl font-bold text-white">{overallStats.totalResponses}</p>
-                <p className="text-xs text-white/40">Responses</p>
-              </div>
-            </motion.div>
           </motion.div>
         )}
 
@@ -517,12 +631,14 @@ const MobilePeerComparison: React.FC<MobilePeerComparisonProps> = ({
                   className="bg-[#1a1a1a] rounded-2xl p-4"
                 >
                   {/* Question Text */}
-                  <p className="text-sm font-medium text-white leading-snug">
+                  <p className="text-sm font-medium text-white leading-snug line-clamp-3">
                     "{comparison.question}"
                   </p>
 
-                  {/* Scale Slider or Bar Chart */}
-                  {(comparison.type === 'scale' ||
+                  {/* Visualization */}
+                  {comparison.type === 'behavioral-intent' ? (
+                    renderQ2PieChart(comparison)
+                  ) : (comparison.type === 'scale' ||
                     (typeof comparison.userAnswer === 'number' && comparison.averageScore)) ? (
                     renderScaleSlider(comparison)
                   ) : (
@@ -530,22 +646,11 @@ const MobilePeerComparison: React.FC<MobilePeerComparisonProps> = ({
                   )}
 
                   {/* Footer Stats */}
-                  <div className="flex items-center justify-between pt-4 mt-4 border-t border-white/10">
+                  <div className="flex items-center justify-center pt-4 mt-4 border-t border-white/10">
                     <div className="flex items-center gap-1.5 text-xs text-white/40">
                       <Users size={12} />
-                      <span>{comparison.totalResponses} responses</span>
+                      <span>{comparison.totalResponses} total</span>
                     </div>
-                    {comparison.isUserInMajority ? (
-                      <span className="flex items-center gap-1 text-xs text-green-400">
-                        <CheckCircle size={12} />
-                        In Majority
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-xs text-[#00A3FF]">
-                        <Sparkles size={12} />
-                        Unique View
-                      </span>
-                    )}
                   </div>
                 </motion.div>
               ))}
@@ -553,81 +658,21 @@ const MobilePeerComparison: React.FC<MobilePeerComparisonProps> = ({
           ))}
         </AnimatePresence>
 
-        {/* AI Insights */}
-        {comparisonGroups.length > 0 && (
+        {/* AI Copilot Prompt */}
+        {comparisonGroups.length > 0 && comparisonGroups[0].comparisons.length > 0 && (
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="space-y-3 pt-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="bg-white/5 border border-white/5 rounded-xl p-4 flex items-center gap-4"
           >
-            <div className="flex items-center gap-2 px-1">
-              <Sparkles size={16} className="text-[#00A3FF]" />
-              <h2 className="font-semibold text-white text-sm">AI Insights</h2>
-            </div>
-
-            {/* Strength Insight */}
-            <div className="bg-gradient-to-r from-green-500/10 to-emerald-500/10 rounded-2xl p-4 border border-green-500/20">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-green-500/20 flex items-center justify-center flex-shrink-0">
-                  <TrendingUp size={20} className="text-green-400" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm text-white leading-relaxed">
-                    Your empathy scores are strong. Consider focusing on giving constructive feedback next.
-                  </p>
-                  <button
-                    onClick={() => setIsCopilotOpen(true)}
-                    className="text-xs text-green-400 font-medium mt-2"
-                  >
-                    Learn more →
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Improvement Insight */}
-            <div className="bg-gradient-to-r from-amber-500/10 to-orange-500/10 rounded-2xl p-4 border border-amber-500/20">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center flex-shrink-0">
-                  <Target size={20} className="text-amber-400" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm text-white leading-relaxed">
-                    You tend to score lower on communication questions. Try practicing active listening.
-                  </p>
-                  <button
-                    onClick={() => setIsCopilotOpen(true)}
-                    className="text-xs text-amber-400 font-medium mt-2"
-                  >
-                    Get tips →
-                  </button>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-
-        {/* Quick Questions */}
-        {comparisonGroups.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-            className="bg-[#1a1a1a] rounded-2xl p-4"
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <MessageCircle size={16} className="text-white/40" />
-              <p className="text-sm text-white/50">
-                Need help understanding your results?
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {['Analyze my gaps', 'How can I improve?', 'Key themes'].map((q, i) => (
+            <MessageCircle size={16} className="text-white/30 flex-shrink-0" />
+            <p className="text-sm text-white/50 flex-1">Need help understanding your responses?</p>
+            <div className="flex gap-2">
+              {['Explore themes', 'Understand perspectives'].map((q, i) => (
                 <button
                   key={i}
                   onClick={() => setIsCopilotOpen(true)}
-                  className="px-4 py-2 text-xs font-medium text-white bg-white/5 hover:bg-white/10 border border-white/10 hover:border-[#00A3FF]/30 rounded-full transition-colors"
+                  className="px-3 py-1.5 text-xs text-white/60 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-all"
                 >
                   {q}
                 </button>
@@ -636,22 +681,6 @@ const MobilePeerComparison: React.FC<MobilePeerComparisonProps> = ({
           </motion.div>
         )}
 
-        {/* Continue Button */}
-        {!embedded && comparisonGroups.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 }}
-            className="pt-4"
-          >
-            <button
-              onClick={() => navigate('/employee/learn')}
-              className="w-full py-4 bg-gradient-to-r from-[#00A3FF] to-[#0066CC] text-white font-semibold rounded-2xl"
-            >
-              Continue Learning
-            </button>
-          </motion.div>
-        )}
       </div>
 
       {/* AI Copilot */}

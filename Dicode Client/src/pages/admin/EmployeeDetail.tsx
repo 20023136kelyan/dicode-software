@@ -329,7 +329,7 @@ const EmployeeDetail: React.FC = () => {
   };
 
   const xpProgress = userStats.xpToNextLevel > 0
-    ? (userStats.xpInCurrentLevel / (userStats.xpInCurrentLevel + userStats.xpToNextLevel)) * 100
+    ? Math.min(100, (userStats.xpInCurrentLevel / userStats.xpToNextLevel) * 100)
     : 100;
 
   // Render content based on active tab

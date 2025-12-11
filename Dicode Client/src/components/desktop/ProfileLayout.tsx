@@ -311,6 +311,9 @@ const ProfileLayout: React.FC<ProfileLayoutProps> = ({ children, onSectionClick,
                                                 onClick={() => {
                                                     markAsRead(notification.id);
                                                     setIsNotificationsOpen(false);
+                                                    if (notification.actionUrl) {
+                                                        navigate(notification.actionUrl);
+                                                    }
                                                 }}
                                                 className={`w-full px-6 py-4 text-left hover:bg-white/5 transition-colors border-b border-white/5 ${!notification.read ? 'bg-blue-500/5' : ''
                                                     }`}

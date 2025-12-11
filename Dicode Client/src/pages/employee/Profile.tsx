@@ -272,7 +272,7 @@ const Profile = () => {
 
   // XP progress calculation
   const xpProgress = streakStats.xpToNextLevel > 0
-    ? (streakStats.xpInCurrentLevel / (streakStats.xpInCurrentLevel + streakStats.xpToNextLevel)) * 100
+    ? Math.min(100, (streakStats.xpInCurrentLevel / streakStats.xpToNextLevel) * 100)
     : 100;
 
   // ===== TAB CONTENT RENDERERS =====
@@ -738,7 +738,7 @@ const Profile = () => {
         <div className="p-4 rounded-xl bg-white/5 border border-white/5">
           <div className="flex justify-between text-xs text-white/50 mb-2">
             <span>Level {streakStats.level}</span>
-            <span>{streakStats.xpToNextLevel} XP to Level {streakStats.level + 1}</span>
+            <span>{streakStats.xpInCurrentLevel} / {streakStats.xpToNextLevel} XP to Level {streakStats.level + 1}</span>
           </div>
           <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
             <div className="h-full bg-white rounded-full transition-all" style={{ width: `${xpProgress}%` }} />

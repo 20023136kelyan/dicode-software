@@ -378,7 +378,12 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (
         userId == request.auth.uid ||
         isDiCodeStaff() ||
-        (resource.data.organizationId != null && resource.data.organizationId == getUserOrganization())
+        // Check if userStats document's organizationId matches requester's organization
+        (resource.data != null && resource.data.organizationId != null && resource.data.organizationId == getUserOrganization()) ||
+        // Check if the userId being queried belongs to a user in the same organization
+        // This handles cases where userStats document doesn't exist yet or has mismatched organizationId
+        (exists(/databases/$(database)/documents/users/$(userId)) &&
+         get(/databases/$(database)/documents/users/$(userId)).data.organization == getUserOrganization())
       );
       // Stats are written by Cloud Functions only, EXCEPT lastCelebratedLevel which users can update for themselves
       allow update: if isAuthenticated() && 

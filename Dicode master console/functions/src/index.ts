@@ -2407,6 +2407,7 @@ interface LevelInfo {
   tier: "newcomer" | "learner" | "achiever" | "expert" | "master";
   totalXpRequired: number;
   xpToNextLevel: number;
+  xpInCurrentLevel: number;
 }
 
 /**
@@ -2478,6 +2479,7 @@ function calculateLevelFromXp(totalXp: number): LevelInfo {
     tier,
     totalXpRequired: getXpRequiredForLevel(level),
     xpToNextLevel,
+    xpInCurrentLevel: xpRemaining,
   };
 }
 
@@ -2765,6 +2767,19 @@ export const onEnrollmentStatusChanged = onDocumentUpdated(
         const xpResult = await awardCampaignCompletionXp(userId, organizationId, streakResult.streakLength);
         logger.info(`💎 Campaign XP awarded: ${xpResult.xpEarned} (total: ${xpResult.totalXp}, level: ${xpResult.level})`);
 
+        // 2b. Calculate and store total XP earned for this campaign on the enrollment document
+        // Total = module XP (already awarded) + campaign bonus XP (just awarded)
+        const modulesCompleted = after.completedModules || 0;
+        const streakMultiplier = getStreakMultiplier(streakResult.streakLength);
+        const moduleXpTotal = Math.round(modulesCompleted * XP_VALUES.COMPLETE_MODULE * streakMultiplier);
+        const totalCampaignXp = moduleXpTotal + xpResult.xpEarned;
+
+        // Update the enrollment document with XP earned
+        await event.data?.after.ref.update({
+          xpEarned: totalCampaignXp,
+        });
+        logger.info(`💾 Stored xpEarned=${totalCampaignXp} on enrollment (modules: ${moduleXpTotal}, campaign bonus: ${xpResult.xpEarned})`);
+
         // 3. Update computed userStats collection
         await updateUserStreakStats(userId);
         logger.info(`✅ Updated stats for user ${userId}`);
@@ -2842,6 +2857,9 @@ async function awardModuleCompletionXp(
   const newLevelInfo = calculateLevelFromXp(newTotalXp);
   const leveledUp = newLevelInfo.level > previousLevelInfo.level;
 
+  // Log level calculation details for debugging
+  logger.info(`📊 Level calculation for user ${userId}: totalXp=${newTotalXp}, level=${newLevelInfo.level}, xpInCurrentLevel=${newLevelInfo.xpInCurrentLevel}, xpToNextLevel=${newLevelInfo.xpToNextLevel}, totalXpRequired=${newLevelInfo.totalXpRequired}`);
+
   // Update stats
   await userStatsRef.set(
     {
@@ -2850,7 +2868,7 @@ async function awardModuleCompletionXp(
       levelTitle: newLevelInfo.title,
       levelTier: newLevelInfo.tier,
       xpToNextLevel: newLevelInfo.xpToNextLevel,
-      xpInCurrentLevel: newTotalXp - newLevelInfo.totalXpRequired,
+      xpInCurrentLevel: newLevelInfo.xpInCurrentLevel,
       organizationId,
       updatedAt: FieldValue.serverTimestamp(),
     },
@@ -2896,6 +2914,9 @@ async function awardCampaignCompletionXp(
   const newLevelInfo = calculateLevelFromXp(newTotalXp);
   const leveledUp = newLevelInfo.level > previousLevelInfo.level;
 
+  // Log level calculation details for debugging
+  logger.info(`📊 Campaign level calculation for user ${userId}: totalXp=${newTotalXp}, level=${newLevelInfo.level}, xpInCurrentLevel=${newLevelInfo.xpInCurrentLevel}, xpToNextLevel=${newLevelInfo.xpToNextLevel}, totalXpRequired=${newLevelInfo.totalXpRequired}`);
+
   // Update stats with new XP (will be fully written by updateUserStreakStats)
   await userStatsRef.set(
     {
@@ -2904,7 +2925,7 @@ async function awardCampaignCompletionXp(
       levelTitle: newLevelInfo.title,
       levelTier: newLevelInfo.tier,
       xpToNextLevel: newLevelInfo.xpToNextLevel,
-      xpInCurrentLevel: newTotalXp - newLevelInfo.totalXpRequired,
+      xpInCurrentLevel: newLevelInfo.xpInCurrentLevel,
       organizationId,
       updatedAt: FieldValue.serverTimestamp(),
     },
@@ -3020,6 +3041,9 @@ async function updateUserStreakStats(userId: string): Promise<void> {
   const totalXp = existingData?.totalXp || 0;
   const levelInfo = calculateLevelFromXp(totalXp);
 
+  // Log level calculation details for debugging
+  logger.info(`📊 updateUserStreakStats level calculation for user ${userId}: totalXp=${totalXp}, level=${levelInfo.level}, xpInCurrentLevel=${levelInfo.xpInCurrentLevel}, xpToNextLevel=${levelInfo.xpToNextLevel}, totalXpRequired=${levelInfo.totalXpRequired}`);
+
   // Store user stats (preserving XP fields)
   await userStatsRef.set(
     {
@@ -3039,7 +3063,7 @@ async function updateUserStreakStats(userId: string): Promise<void> {
       levelTitle: levelInfo.title,
       levelTier: levelInfo.tier,
       xpToNextLevel: levelInfo.xpToNextLevel,
-      xpInCurrentLevel: totalXp - levelInfo.totalXpRequired,
+      xpInCurrentLevel: levelInfo.xpInCurrentLevel,
       updatedAt: FieldValue.serverTimestamp(),
     },
     { merge: true }
@@ -3775,12 +3799,16 @@ export const onCampaignResponseCreated = onDocumentCreated(
 
         const calculatedScore = calculateAssessmentScore(questionType, numericAnswer, benchmarkScore);
         scores.push(calculatedScore);
-        scoreDetails.push({
+        // Only include benchmark field when defined (Q1 has benchmark, Q2 doesn't)
+        const detail: { type: string; raw: number; benchmark?: number; score: number } = {
           type: questionType,
           raw: numericAnswer,
-          benchmark: benchmarkScore,
           score: calculatedScore,
-        });
+        };
+        if (benchmarkScore !== undefined) {
+          detail.benchmark = benchmarkScore;
+        }
+        scoreDetails.push(detail);
       }
 
       if (scores.length === 0) {
